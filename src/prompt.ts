@@ -51,8 +51,8 @@ export function buildSystemPrompt(opts: {
     `File paths are relative to the workspace; you cannot access files outside it. ${modeLine}\n\n` +
     `Work step by step: look at the relevant files before changing them, make one tool call at a time, ` +
     `keep changes small and focused, and verify your work when you can. ` +
-    `For any task with more than one step, FIRST call the plan tool ({"action": "set"}) with your step list, ` +
-    `then mark each step done as you finish it — the plan is your map of the task and is kept for you even when older context is dropped. ` +
+    `For any task with more than one step, FIRST call the plan tool ({"action": "set"}) with your step list. ` +
+    `The moment a step is finished, call plan {"action": "done"} BEFORE starting the next one — the plan is your map of the task and is kept for you even when older context is dropped. ` +
     `If a tool returns an error, read it carefully — it tells you how to fix the call. ` +
     `When the task is done, stop and summarize briefly what you did.` +
     (opts.agentsMd

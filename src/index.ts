@@ -274,7 +274,7 @@ async function runHeadless(args: CliArgs): Promise<void> {
   const agentsMd = loadAgentsMd(args.workspace);
   if (agentsMd) ui.status(`· AGENTS.md loaded (${agentsMd.split("\n").length} lines)`);
   const systemPrompt = buildSystemPrompt({ workspace: args.workspace, mode, shellLabel: shell.label, agentsMd });
-  const agent = new Agent(provider, mode, systemPrompt, toolCtx, ctxMgr, bus, ui, false, 200);
+  const agent = new Agent(provider, mode, systemPrompt, toolCtx, ctxMgr, bus, ui, false, 1000);
   process.on("exit", () => taskManager.killAll());
 
   ui.println(sessionLine(chosen, mode));
@@ -351,8 +351,10 @@ async function runInteractive(args: CliArgs): Promise<void> {
   const sysPrompt = (m: Mode) =>
     buildSystemPrompt({ workspace: args.workspace, mode: m, shellLabel: shell.label, agentsMd });
 
+  // The step cap is a runaway-loop backstop, not a work limit — esc/ctrl+c is
+  // the user's real kill switch, so set it far above any legitimate task.
   const tui: SessionUI = isWeb ? new WebUI(args.webPort ?? 7433) : new Tui();
-  const agent = new Agent(provider, mode0, sysPrompt(mode0), toolCtx, ctxMgr, bus, tui, true, 30);
+  const agent = new Agent(provider, mode0, sysPrompt(mode0), toolCtx, ctxMgr, bus, tui, true, 1000);
 
   const persist = () => saveConfig({ lastModel: chosen.id, lastMode: agent.mode, effort });
 

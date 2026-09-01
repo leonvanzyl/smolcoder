@@ -98,6 +98,7 @@ export class Agent {
     let nudges = 0;
     let planNudged = false;
     let toolCallsThisTurn = 0;
+    let sincePlanUpdate = 0;
     try {
       while (steps++ < this.maxSteps) {
         // Context management before every request.
@@ -178,6 +179,17 @@ export class Agent {
           } else {
             output = await this.gateAndExecute(call.name, call.args);
             toolCallsThisTurn++;
+            // Keep the plan honest: small models forget to mark steps done
+            // mid-flow, leaving the checklist stale for minutes. A periodic
+            // one-line reminder riding on a tool result fixes it cheaply.
+            const plan = this.toolCtx.plan;
+            if (call.name === "plan") {
+              sincePlanUpdate = 0;
+            } else if (plan.exists && plan.currentIndex >= 0 && ++sincePlanUpdate >= 4) {
+              sincePlanUpdate = 0;
+              const cur = plan.steps[plan.currentIndex];
+              output += `\n[Reminder: the plan still shows step ${plan.currentIndex + 1} "${cur.text}" as current. If you have finished steps, mark each with plan {"action": "done"} now.]`;
+            }
           }
 
           // Plan changes render as the visual checklist instead of a ✓ line.
