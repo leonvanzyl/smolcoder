@@ -9,7 +9,10 @@ import { resolveInWorkspace, relPath, SandboxError } from "../sandbox";
 import { truncateEnd } from "../util";
 
 const READ_LINE_LIMIT = 250;
-const READ_CHAR_LIMIT = 12000;
+// Must stay under TOOL_RESULT_CAP (10000) so the registry's outer truncateMiddle
+// never silently middle-cuts a read chunk while the trailer claims lines X-Y
+// were shown contiguously.
+const READ_CHAR_LIMIT = 9000;
 const LIST_ENTRY_LIMIT = 200;
 const SEARCH_MATCH_LIMIT = 50;
 const SEARCH_FILE_SIZE_LIMIT = 512 * 1024;
@@ -61,18 +64,37 @@ export function readFile(root: string, args: any): string {
   }
 
   const content = fs.readFileSync(abs, "utf8");
-  const lines = content.split("\n");
+  const lines = content.split(/\r?\n/);
   const total = lines.length;
   const offset = Math.max(1, Number(args.offset) || 1);
+  if (offset > total) {
+    return `The file "${args.path}" has only ${total} line${total === 1 ? "" : "s"}; you have already read all of it.`;
+  }
   const limit = Math.min(Math.max(1, Number(args.limit) || READ_LINE_LIMIT), 1000);
   const slice = lines.slice(offset - 1, offset - 1 + limit);
   let body = slice.join("\n");
+  let end = offset - 1 + slice.length;
   let charCut = false;
   if (body.length > READ_CHAR_LIMIT) {
-    body = body.slice(0, READ_CHAR_LIMIT);
-    charCut = true;
+    const kept = body.slice(0, READ_CHAR_LIMIT).split("\n");
+    if (kept.length > 1) {
+      // Cut on a line boundary so the trailer never claims a partially-shown
+      // line was read.
+      kept.pop();
+      body = kept.join("\n");
+      end = offset - 1 + kept.length;
+      charCut = true;
+    } else {
+      // A single line longer than the limit: there is no line boundary to
+      // advance to, so a line-based "continue" would loop forever. Serve the
+      // head and say so, without a continuation offset.
+      body = body.slice(0, READ_CHAR_LIMIT);
+      return (
+        body +
+        `\n\n[line ${offset} of ${total} is very long; showing its first ${READ_CHAR_LIMIT} characters only.]`
+      );
+    }
   }
-  const end = charCut ? offset - 1 + body.split("\n").length : offset - 1 + slice.length;
   if (offset === 1 && end >= total && !charCut) return body;
   return (
     body +
@@ -159,12 +181,20 @@ export function editFile(root: string, args: any): string {
     return "Error: new_text must be a string (use an empty string to delete the old text).";
   }
 
-  const content = fs.readFileSync(abs, "utf8");
+  const rawContent = fs.readFileSync(abs, "utf8");
+  // Normalize to LF for all matching, re-serialize with the file's dominant EOL.
+  // Otherwise a model that sends "\n"-separated old_text can never exact-match a
+  // CRLF file, and the fallback rebuild leaves the file with mixed line endings.
+  const crlf = rawContent.includes("\r\n");
+  const content = crlf ? rawContent.replace(/\r\n/g, "\n") : rawContent;
+  const oldNorm = oldText.replace(/\r\n/g, "\n");
+  const newNorm = newText.replace(/\r\n/g, "\n");
+  const serialize = (s: string) => (crlf ? s.replace(/\n/g, "\r\n") : s);
 
   // Tier 1: exact match.
-  const occurrences = content.split(oldText).length - 1;
+  const occurrences = content.split(oldNorm).length - 1;
   if (occurrences === 1) {
-    fs.writeFileSync(abs, content.replace(oldText, newText), "utf8");
+    fs.writeFileSync(abs, serialize(content.replace(oldNorm, newNorm)), "utf8");
     return `Edited ${args.path}: replaced 1 occurrence.`;
   }
   if (occurrences > 1) {
@@ -173,16 +203,16 @@ export function editFile(root: string, args: any): string {
 
   // Tier 2: line-trimmed match (forgives leading/trailing whitespace per line).
   const fileLines = content.split("\n");
-  const oldLines = oldText.split("\n");
+  const oldLines = oldNorm.split("\n");
   const matches = findTrimmedMatch(fileLines, oldLines);
   if (matches.length === 1) {
     const start = matches[0];
     const replaced = [
       ...fileLines.slice(0, start),
-      ...newText.split("\n"),
+      ...newNorm.split("\n"),
       ...fileLines.slice(start + oldLines.length),
     ].join("\n");
-    fs.writeFileSync(abs, replaced, "utf8");
+    fs.writeFileSync(abs, serialize(replaced), "utf8");
     return `Edited ${args.path}: replaced 1 occurrence (whitespace differences in old_text were ignored).`;
   }
   if (matches.length > 1) {
@@ -222,6 +252,7 @@ export function listFiles(root: string, args: any): string {
       if (truncated) return;
       if (e.name.startsWith(".") && e.isDirectory()) continue;
       if (IGNORED_DIRS.has(e.name)) continue;
+      if (e.isSymbolicLink()) continue; // never follow links out of the workspace
       const abs = path.join(dir, e.name);
       const rel = relPath(root, abs);
       if (e.isDirectory()) {
@@ -276,6 +307,10 @@ export function searchFiles(root: string, args: any): string {
       if (done) return;
       if (e.name.startsWith(".") && e.isDirectory()) continue;
       if (IGNORED_DIRS.has(e.name)) continue;
+      // A symlink's Dirent.isDirectory() is false, so a file symlink would
+      // otherwise fall straight into readFileSync and leak its target's
+      // contents (e.g. creds -> ~/.ssh/id_rsa) into model context. Skip all.
+      if (e.isSymbolicLink()) continue;
       const abs = path.join(dir, e.name);
       if (e.isDirectory()) {
         walk(abs, depth + 1);
@@ -295,7 +330,7 @@ export function searchFiles(root: string, args: any): string {
       } catch {
         continue;
       }
-      const lines = text.split("\n");
+      const lines = text.split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
         if (re.test(lines[i])) {
           matches.push(`${relPath(root, abs)}:${i + 1}: ${lines[i].trim().slice(0, 200)}`);

@@ -22,6 +22,7 @@ function toWire(messages: Msg[]): any[] {
       return {
         role: "assistant",
         content: m.content ?? "",
+        ...(m.thinking ? { thinking: m.thinking } : {}),
         tool_calls: m.toolCalls.map((tc) => ({
           function: { name: tc.name, arguments: tc.args },
         })),
@@ -85,26 +86,33 @@ export class OllamaProvider implements Provider {
     });
 
     let think = this.thinkParam();
+    const started = { streaming: false };
     try {
-      return await this.request(makeBody(true, think), opts);
+      return await this.request(makeBody(true, think), opts, started);
     } catch (err: any) {
       if (err?.name === "AbortError") throw err;
-      // The model may not support the think param — drop it and remember.
-      if (think !== undefined) {
+      // Never re-request after tokens were already streamed to the UI — that
+      // double-emits. Let agent.ts's chatWithRetry handle mid-stream failures.
+      if (started.streaming) throw err;
+      const msg = String(err?.message ?? "");
+      const paramRejected = /returned 4\d\d/.test(msg) && /think/i.test(msg);
+      // Only treat the think param as unsupported on an actual param rejection;
+      // a transient 5xx/network error must NOT permanently disable reasoning.
+      if (think !== undefined && paramRejected) {
         this.thinkUnsupported = true;
         think = undefined;
-        try {
-          return await this.request(makeBody(true, undefined), opts);
-        } catch (err2: any) {
-          if (err2?.name === "AbortError") throw err2;
-        }
+        return await this.request(makeBody(true, undefined), opts, started);
       }
-      // Older Ollama versions reject stream+tools together; retry non-streaming once.
-      return await this.request(makeBody(false, think), opts);
+      // Older Ollama versions reject stream+tools together; retry non-streaming
+      // once, but only for a pre-stream rejection (not a transient error).
+      if (/returned 4\d\d/.test(msg)) {
+        return await this.request(makeBody(false, think), opts, started);
+      }
+      throw err;
     }
   }
 
-  private async request(body: any, opts: ChatOptions): Promise<ChatResult> {
+  private async request(body: any, opts: ChatOptions, started?: { streaming: boolean }): Promise<ChatResult> {
     const res = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -117,14 +125,17 @@ export class OllamaProvider implements Provider {
     }
 
     let content = "";
+    let thinking = "";
     const toolCalls: ToolCall[] = [];
     let promptTokens: number | undefined;
     let completionTokens: number | undefined;
     let truncated = false;
 
     const handleChunk = (chunk: any) => {
+      if (started) started.streaming = true; // committed — no safe re-request now
       const msg = chunk.message;
       if (msg?.thinking) {
+        thinking += msg.thinking;
         opts.onThinking?.(msg.thinking);
       }
       if (msg?.content) {
@@ -180,6 +191,6 @@ export class OllamaProvider implements Provider {
       }
     }
 
-    return { content, toolCalls, promptTokens, completionTokens, truncated };
+    return { content, toolCalls, thinking, promptTokens, completionTokens, truncated };
   }
 }

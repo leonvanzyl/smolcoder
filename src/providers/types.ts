@@ -15,8 +15,13 @@ export interface Msg {
   toolCalls?: ToolCall[];
   toolCallId?: string;
   toolName?: string;
+  /** Assistant reasoning trace (Ollama passes it back on tool loops). */
+  thinking?: string;
   /** Set when a tool result body was evicted during context management. */
   evicted?: boolean;
+  /** Set on a synthesized compaction-note message so a later compaction can
+   * strip it instead of stacking notes. */
+  compactNote?: boolean;
 }
 
 export interface ToolSpec {
@@ -32,6 +37,8 @@ export interface ToolSpec {
 export interface ChatResult {
   content: string;
   toolCalls: ToolCall[];
+  /** Accumulated reasoning trace, when the backend streamed one. */
+  thinking?: string;
   /** Real token usage reported by the backend — our context fill gauge. */
   promptTokens?: number;
   completionTokens?: number;

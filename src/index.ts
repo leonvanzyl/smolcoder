@@ -122,7 +122,13 @@ ${c.bold("Slash commands:")}
 
 function loadConfig(): Config {
   try {
-    return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+    // Never let yolo be inherited implicitly from a past session — a single
+    // shift+tab into yolo would otherwise silently persist unattended command
+    // execution into every later run, including headless -p in CI. Requires an
+    // explicit flag (-m yolo / --yolo) to enter yolo.
+    if (cfg.lastMode === "yolo") cfg.lastMode = "write";
+    return cfg;
   } catch {
     return {};
   }
@@ -148,6 +154,27 @@ function makeProvider(m: DetectedModel): Provider {
   return m.backend === "ollama"
     ? new OllamaProvider(m.baseUrl, m.id, m.contextWindow, m.numCtx, maxOut)
     : new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut);
+}
+
+/** Node fires 'exit' on normal termination but NOT on a killing signal, so
+ * background tasks (dev servers) survive a closed terminal (SIGHUP) or `kill`
+ * (SIGTERM) unless we handle those explicitly. Runs synchronous cleanup then
+ * re-exits so the 'exit' path is still reached. */
+function installSignalCleanup(cleanup: () => void): void {
+  let done = false;
+  const run = (code: number) => {
+    if (done) return;
+    done = true;
+    try {
+      cleanup();
+    } catch {
+      /* best effort */
+    }
+    process.exit(code);
+  };
+  process.on("SIGTERM", () => run(143));
+  process.on("SIGHUP", () => run(129));
+  process.on("SIGINT", () => run(130));
 }
 
 function autoPickModel(
@@ -276,6 +303,7 @@ async function runHeadless(args: CliArgs): Promise<void> {
   const systemPrompt = buildSystemPrompt({ workspace: args.workspace, mode, shellLabel: shell.label, agentsMd });
   const agent = new Agent(provider, mode, systemPrompt, toolCtx, ctxMgr, bus, ui, false, 1000);
   process.on("exit", () => taskManager.killAll());
+  installSignalCleanup(() => taskManager.killAll());
 
   ui.println(sessionLine(chosen, mode));
   if (chosen.note) ui.warn(`  ${chosen.note}`);
@@ -391,6 +419,14 @@ async function runInteractive(args: CliArgs): Promise<void> {
   };
   tui.onExit = () => void shutdown();
   process.on("exit", () => taskManager.killAll());
+  installSignalCleanup(() => {
+    taskManager.killAll();
+    try {
+      tui.close(); // restore the raw-mode terminal on signal death
+    } catch {
+      /* best effort */
+    }
+  });
 
   bus.on("post_compact", (report: any) => {
     if (report?.action === "evicted")

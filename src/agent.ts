@@ -19,11 +19,27 @@ import { c, fmtDuration } from "./util";
 
 const TRANSIENT_ERROR = /fetch failed|econn|socket|network|timed?.?out|50[0234]/i;
 
+/** Shell metacharacters that let one "allowed program" smuggle in others.
+ * Auto-approval via always-allow only applies to commands without them. */
+const SHELL_META = /[;&|`$<>(){}\n\r\\]/;
+
+/** Exported for tests: does the always-allow set cover this exact command?
+ * First-token match alone is bypassable (`npm -v; evil`) because commands run
+ * under a real shell — so chained/piped/substituted commands always re-prompt. */
+export function isAutoApproved(command: string, allowed: Set<string>): boolean {
+  const trimmed = command.trim();
+  let program = trimmed.split(/\s+/)[0] ?? "";
+  if (process.platform === "win32") program = program.toLowerCase();
+  return allowed.has(program) && !SHELL_META.test(trimmed);
+}
+
 export class Agent {
   messages: Msg[] = [];
   tools: ToolSpec[];
   private alwaysAllowed = new Set<string>();
   private originalRequest = "";
+  private currentRequest = "";
+  private planNudged = false;
   private abort: AbortController | null = null;
 
   constructor(
@@ -55,6 +71,13 @@ export class Agent {
   resetTranscript(): void {
     this.messages = [this.messages[0]];
     this.originalRequest = "";
+    this.currentRequest = "";
+    this.planNudged = false;
+    // Session facts feed the compaction state note — stale ones from a
+    // cleared conversation would assert work the new task never did.
+    this.toolCtx.filesTouched.clear();
+    this.toolCtx.commandsRun.length = 0;
+    this.ctxMgr.resetAnchor();
   }
 
   cancel(): void {
@@ -77,6 +100,7 @@ export class Agent {
       this.provider,
       {
         originalRequest: this.originalRequest,
+        currentRequest: this.currentRequest,
         filesTouched: this.toolCtx.filesTouched,
         commandsRun: this.toolCtx.commandsRun,
         planLine: this.toolCtx.plan.compactLine(),
@@ -88,6 +112,7 @@ export class Agent {
 
   async runTurn(userInput: string): Promise<void> {
     if (!this.originalRequest) this.originalRequest = userInput;
+    this.currentRequest = userInput; // the task compaction must never lose
     this.messages.push({ role: "user", content: userInput });
     this.abort = new AbortController();
     const signal = this.abort.signal;
@@ -96,7 +121,6 @@ export class Agent {
     let completed = false;
     let steps = 0;
     let nudges = 0;
-    let planNudged = false;
     let toolCallsThisTurn = 0;
     let sincePlanUpdate = 0;
     try {
@@ -115,17 +139,20 @@ export class Agent {
         } finally {
           this.ui.stopSpinner();
         }
+        this.messages.push({
+          role: "assistant",
+          content: result.content,
+          toolCalls: result.toolCalls.length ? result.toolCalls : undefined,
+          thinking: result.thinking,
+        });
+        // Anchor AFTER the push: lastPromptTokens+lastCompletionTokens then
+        // cover exactly the first `messages.length` messages — recording
+        // before the push double-counted the reply in every estimate.
         this.ctxMgr.recordUsage(
           result.promptTokens,
           result.completionTokens,
           this.messages.length
         );
-
-        this.messages.push({
-          role: "assistant",
-          content: result.content,
-          toolCalls: result.toolCalls.length ? result.toolCalls : undefined,
-        });
         if (result.content) this.ui.println(); // end the streamed line
 
         if (result.toolCalls.length === 0) {
@@ -135,11 +162,14 @@ export class Agent {
           if (result.truncated && nudges < 3) {
             nudges++;
             this.ui.status("· reply hit the output limit — asking the model to continue");
-            this.messages.push({
-              role: "user",
-              content:
-                "[Your reply was cut off by the output length limit. Continue where you left off. If you were writing a file, send the complete write_file call again — split large files into several smaller writes or separate files.]",
-            });
+            // Reasoning models can burn the ENTIRE budget thinking, arriving
+            // with no visible output at all — "continue where you left off"
+            // would just restart the same doomed think. Target that case.
+            const nudgeText =
+              !result.content.trim()
+                ? "[Your reasoning used the entire output limit and produced no answer. Do not re-derive everything — reply now with your next tool call or a brief answer.]"
+                : "[Your reply was cut off by the output length limit. Continue where you left off. If a file was too large for one write_file call, split the content into separate files — writing the same path again replaces it completely.]";
+            this.messages.push({ role: "user", content: nudgeText });
             continue;
           }
           if (!result.content.trim() && nudges < 2) {
@@ -154,9 +184,12 @@ export class Agent {
           }
           // The model wants to stop but its own plan still has open steps —
           // the classic local-model quit-halfway. One bounded push back.
+          // One nudge PER PLAN STATE, not per turn: an abandoned plan must not
+          // drag every later unrelated question back to stale work. The flag
+          // re-arms only when the plan actually changes (set/done/add).
           const plan = this.toolCtx.plan;
-          if (plan.exists && plan.currentIndex >= 0 && toolCallsThisTurn > 0 && !planNudged) {
-            planNudged = true;
+          if (plan.exists && plan.currentIndex >= 0 && toolCallsThisTurn > 0 && !this.planNudged) {
+            this.planNudged = true;
             this.ui.status("· plan has unfinished steps — nudging the model to continue");
             this.messages.push({
               role: "user",
@@ -176,6 +209,11 @@ export class Agent {
           let output: string;
           if (call.parseError) {
             output = `Error: your tool call arguments could not be parsed (${call.parseError}). Send the arguments as a single JSON object, e.g. {"path": "src/app.js"}.`;
+          } else if (!this.tools.some((t) => t.name === call.name)) {
+            // HARD mode enforcement. The schemas sent to the model are only
+            // advisory — a hallucinated or injected write_file/run_command in
+            // read-only mode must be rejected here, at execution time.
+            output = `Error: the tool "${call.name}" is not available in ${MODE_LABELS[this.mode]} mode. Available tools: ${this.tools.map((t) => t.name).join(", ")}.`;
           } else {
             output = await this.gateAndExecute(call.name, call.args, signal);
             toolCallsThisTurn++;
@@ -185,6 +223,7 @@ export class Agent {
             const plan = this.toolCtx.plan;
             if (call.name === "plan") {
               sincePlanUpdate = 0;
+              if (!output.startsWith("Error")) this.planNudged = false; // plan changed — re-arm
             } else if (plan.exists && plan.currentIndex >= 0 && ++sincePlanUpdate >= 4) {
               sincePlanUpdate = 0;
               const cur = plan.steps[plan.currentIndex];
@@ -265,9 +304,10 @@ export class Agent {
     signal?: AbortSignal
   ): Promise<string> {
     const command = needsApproval(name, args);
-    if (command !== null && this.mode === "write") {
-      const program = command.trim().split(/\s+/)[0] ?? "";
-      if (!this.alwaysAllowed.has(program)) {
+    // Gate everywhere except yolo (defense-in-depth: in ro mode exec tools are
+    // already rejected before this point by the tool-existence check).
+    if (command !== null && this.mode !== "yolo") {
+      if (!isAutoApproved(command, this.alwaysAllowed)) {
         if (!this.interactive) {
           return `Error: running commands needs user approval, and this session is non-interactive. The user must rerun tiny-coder in yolo mode (--mode yolo) to allow commands, or run this themselves: ${command}`;
         }
@@ -275,20 +315,28 @@ export class Agent {
         if (answer === "no") {
           return "The user declined to run this command. Continue without it, or ask the user what to do instead.";
         }
-        if (answer === "always" && program) this.alwaysAllowed.add(program);
+        if (answer === "always") {
+          let program = command.trim().split(/\s+/)[0] ?? "";
+          if (process.platform === "win32") program = program.toLowerCase();
+          if (program) this.alwaysAllowed.add(program);
+        }
       }
     }
     return executeTool(name, args, this.toolCtx, signal);
   }
 
   /**
-   * After a cancel we may have an assistant tool-call message with no tool
-   * results behind it — strict backends reject that shape on the next request.
+   * After a cancel, the most recent assistant tool-call message may have some
+   * calls unanswered — strict backends reject that shape on the next request.
+   * A cancel mid-way through a MULTI-call batch buries that assistant message
+   * behind the already-pushed tool results, so walk back past them.
    */
   private sanitizeAfterCancel(): void {
-    const last = this.messages[this.messages.length - 1];
-    if (last?.role === "assistant" && last.toolCalls?.length) {
-      for (const tc of last.toolCalls) {
+    let i = this.messages.length - 1;
+    while (i >= 0 && this.messages[i].role === "tool") i--;
+    const anchor = this.messages[i];
+    if (anchor?.role === "assistant" && anchor.toolCalls?.length) {
+      for (const tc of anchor.toolCalls) {
         const answered = this.messages.some(
           (m) => m.role === "tool" && m.toolCallId === tc.id
         );

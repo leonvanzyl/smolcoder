@@ -87,39 +87,49 @@ export class LmStudioProvider implements Provider {
     if (this.effort && this.effort !== "off" && !this.effortUnsupported) {
       base.reasoning_effort = this.effort;
     }
+    const started = { streaming: false };
     try {
-      return await this.chain(base, opts);
+      return await this.chain(base, opts, started);
     } catch (err: any) {
       if (err?.name === "AbortError") throw err;
-      // Model/build may reject reasoning_effort — drop it and remember.
-      if (base.reasoning_effort) {
+      if (started.streaming) throw err; // tokens already shown — don't re-emit
+      const msg = String(err?.message ?? "");
+      // Only latch effortUnsupported on an actual param rejection (4xx naming
+      // it), never on a transient 5xx / dropped socket.
+      if (base.reasoning_effort && /returned 4\d\d/.test(msg) && /reasoning|effort/i.test(msg)) {
         this.effortUnsupported = true;
         delete base.reasoning_effort;
-        return await this.chain(base, opts);
+        return await this.chain(base, opts, started);
       }
       throw err;
     }
   }
 
-  private async chain(base: any, opts: ChatOptions): Promise<ChatResult> {
+  private async chain(base: any, opts: ChatOptions, started: { streaming: boolean }): Promise<ChatResult> {
     try {
       return await this.request(
         { ...base, stream: true, stream_options: { include_usage: true } },
-        opts
+        opts,
+        started
       );
     } catch (err: any) {
       if (err?.name === "AbortError") throw err;
-      // Some builds reject stream_options or streaming with tools; degrade gracefully.
+      if (started.streaming) throw err;
+      const msg = String(err?.message ?? "");
+      // Only degrade the request shape on a pre-stream HTTP rejection; a
+      // transient error must propagate to chatWithRetry for backoff.
+      if (!/returned 4\d\d/.test(msg)) throw err;
       try {
-        return await this.request({ ...base, stream: true }, opts);
+        return await this.request({ ...base, stream: true }, opts, started);
       } catch (err2: any) {
-        if (err2?.name === "AbortError") throw err2;
-        return await this.request({ ...base, stream: false }, opts);
+        if (err2?.name === "AbortError" || started.streaming) throw err2;
+        if (!/returned 4\d\d/.test(String(err2?.message ?? ""))) throw err2;
+        return await this.request({ ...base, stream: false }, opts, started);
       }
     }
   }
 
-  private async request(body: any, opts: ChatOptions): Promise<ChatResult> {
+  private async request(body: any, opts: ChatOptions, started?: { streaming: boolean }): Promise<ChatResult> {
     const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -139,6 +149,7 @@ export class LmStudioProvider implements Provider {
         name: tc.function?.name ?? "",
         ...parseArgs(tc.function?.arguments),
       }));
+      if (started) started.streaming = true;
       if (msg.content) opts.onToken?.(msg.content);
       return {
         content: msg.content ?? "",
@@ -156,6 +167,45 @@ export class LmStudioProvider implements Provider {
     let completionTokens: number | undefined;
     let truncated = false;
 
+    const handleLine = (rawLine: string) => {
+      const line = rawLine.trim();
+      if (!line.startsWith("data:")) return;
+      const payload = line.slice(5).trim();
+      if (payload === "[DONE]") return;
+      let chunk: any;
+      try {
+        chunk = JSON.parse(payload);
+      } catch {
+        return;
+      }
+      if (started) started.streaming = true; // committed — no safe re-request now
+      if (chunk.usage) {
+        promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
+        completionTokens = chunk.usage.completion_tokens ?? completionTokens;
+      }
+      if (chunk.choices?.[0]?.finish_reason === "length") truncated = true;
+      const delta = chunk.choices?.[0]?.delta;
+      if (!delta) return;
+      const reasoning = delta.reasoning_content ?? delta.reasoning;
+      if (typeof reasoning === "string" && reasoning) {
+        opts.onThinking?.(reasoning);
+      }
+      if (delta.content) {
+        content += delta.content;
+        opts.onToken?.(delta.content);
+      }
+      if (Array.isArray(delta.tool_calls)) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index ?? 0;
+          const p = partials.get(idx) ?? { id: "", name: "", args: "" };
+          if (tc.id) p.id = tc.id;
+          if (tc.function?.name) p.name += tc.function.name;
+          if (tc.function?.arguments) p.args += tc.function.arguments;
+          partials.set(idx, p);
+        }
+      }
+    };
+
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -165,44 +215,14 @@ export class LmStudioProvider implements Provider {
       buffer += decoder.decode(value, { stream: true });
       let nl: number;
       while ((nl = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, nl).trim();
+        const line = buffer.slice(0, nl);
         buffer = buffer.slice(nl + 1);
-        if (!line.startsWith("data:")) continue;
-        const payload = line.slice(5).trim();
-        if (payload === "[DONE]") continue;
-        let chunk: any;
-        try {
-          chunk = JSON.parse(payload);
-        } catch {
-          continue;
-        }
-        if (chunk.usage) {
-          promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
-          completionTokens = chunk.usage.completion_tokens ?? completionTokens;
-        }
-        if (chunk.choices?.[0]?.finish_reason === "length") truncated = true;
-        const delta = chunk.choices?.[0]?.delta;
-        if (!delta) continue;
-        const reasoning = delta.reasoning_content ?? delta.reasoning;
-        if (typeof reasoning === "string" && reasoning) {
-          opts.onThinking?.(reasoning);
-        }
-        if (delta.content) {
-          content += delta.content;
-          opts.onToken?.(delta.content);
-        }
-        if (Array.isArray(delta.tool_calls)) {
-          for (const tc of delta.tool_calls) {
-            const idx = tc.index ?? 0;
-            const p = partials.get(idx) ?? { id: "", name: "", args: "" };
-            if (tc.id) p.id = tc.id;
-            if (tc.function?.name) p.name += tc.function.name;
-            if (tc.function?.arguments) p.args += tc.function.arguments;
-            partials.set(idx, p);
-          }
-        }
+        handleLine(line);
       }
     }
+    // Flush a final line with no trailing newline (may carry usage /
+    // finish_reason:"length" — losing it silently drops the anchor / truncation).
+    if (buffer.trim()) handleLine(buffer);
 
     const toolCalls: ToolCall[] = [...partials.entries()]
       .sort((a, b) => a[0] - b[0])

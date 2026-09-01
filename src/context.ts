@@ -1,7 +1,7 @@
 // Context budget management — the part local models actually live or die by.
 //
 // Fill gauge: every backend reports real prompt token usage per response; we
-// anchor on that and only estimate the delta of new messages (chars/4). No
+// anchor on that and only estimate the delta of new messages (chars-based). No
 // homegrown tokenizer, works for any GGUF.
 //
 // Tiered compaction, cheap lever first:
@@ -11,6 +11,15 @@
 //   harness assembles the factual part deterministically (files touched,
 //   commands run) because small models are unreliable summarizers; the model
 //   only contributes a short "where we are" narrative.
+//
+// Guard rails learned the hard way:
+//   - compaction notes are FLAGGED so a later compaction strips them instead
+//     of stacking note-on-note (which made compaction stop shrinking anything)
+//   - the note always carries the CURRENT turn's request, not only the
+//     session's first one
+//   - when the irreducible floor (system prompt + tools + protected tail)
+//     alone exceeds the threshold, we stop trying instead of thrashing a
+//     futile summarizer call before every request
 
 import { Msg, Provider, ToolSpec } from "./providers/types";
 import { estimateTokens, truncateEnd } from "./util";
@@ -20,15 +29,24 @@ const EVICT_KEEP_RECENT = 6; // never evict tool results in the last N messages
 const EVICT_STUB = "[old output removed to save space — run the tool again if you need it]";
 
 export interface CompactionReport {
-  action: "none" | "evicted" | "compacted";
+  action: "none" | "evicted" | "compacted" | "floor";
   before: number;
   after: number;
+}
+
+interface CompactState {
+  originalRequest: string;
+  currentRequest?: string;
+  filesTouched: Set<string>;
+  commandsRun: string[];
+  planLine?: string | null;
 }
 
 export class ContextManager {
   private lastPromptTokens = 0;
   private lastCompletionTokens = 0;
   private anchorIndex = 0; // messages.length at the time usage was reported
+  private floorWarned = false;
 
   constructor(
     private window: number,
@@ -39,10 +57,11 @@ export class ContextManager {
   setWindow(window: number, reserve?: number): void {
     this.window = window;
     if (reserve !== undefined) this.reserve = reserve;
-    this.lastPromptTokens = 0;
-    this.anchorIndex = 0;
+    this.resetAnchor();
   }
 
+  /** Invariant: lastPromptTokens + lastCompletionTokens cover exactly the
+   * first `anchorIndex` messages of the transcript at record time. */
   recordUsage(promptTokens: number | undefined, completionTokens: number | undefined, messageCount: number): void {
     if (typeof promptTokens === "number" && promptTokens > 0) {
       this.lastPromptTokens = promptTokens;
@@ -51,10 +70,19 @@ export class ContextManager {
     }
   }
 
+  /** Drop the usage anchor (transcript replaced/cleared behind it). */
+  resetAnchor(): void {
+    this.lastPromptTokens = 0;
+    this.lastCompletionTokens = 0;
+    this.anchorIndex = 0;
+    this.floorWarned = false;
+  }
+
   estimateMessages(messages: Msg[]): number {
     let total = 0;
     for (const m of messages) {
       total += estimateTokens(m.content ?? "") + MSG_OVERHEAD_TOKENS;
+      if (m.thinking) total += estimateTokens(m.thinking);
       if (m.toolCalls) {
         for (const tc of m.toolCalls) {
           total += estimateTokens(tc.name + JSON.stringify(tc.args)) + MSG_OVERHEAD_TOKENS;
@@ -89,7 +117,13 @@ export class ContextManager {
   }
 
   needsAttention(messages: Msg[], tools: ToolSpec[]): boolean {
-    return this.estimatePrompt(messages, tools) > 0.8 * this.usableWindow();
+    if (this.estimatePrompt(messages, tools) <= 0.8 * this.usableWindow()) {
+      this.floorWarned = false; // healthy again — re-arm the floor warning
+      return false;
+    }
+    // Once we've established the transcript cannot shrink further, stop
+    // triggering a futile compaction before every request.
+    return !this.floorWarned;
   }
 
   /**
@@ -100,12 +134,7 @@ export class ContextManager {
     messages: Msg[],
     tools: ToolSpec[],
     provider: Provider,
-    state: {
-      originalRequest: string;
-      filesTouched: Set<string>;
-      commandsRun: string[];
-      planLine?: string | null;
-    }
+    state: CompactState
   ): Promise<{ messages: Msg[]; report: CompactionReport }> {
     const before = this.estimatePrompt(messages, tools);
     if (before <= 0.8 * this.usableWindow()) {
@@ -135,20 +164,26 @@ export class ContextManager {
     this.anchorIndex = 0;
     this.lastPromptTokens = 0;
     after = this.estimatePrompt(compacted, tools);
+    if (after > 0.8 * this.usableWindow()) {
+      // Irreducible floor: the window simply cannot hold what must stay
+      // (system prompt + AGENTS.md + tool schemas + the working tail).
+      // Continue anyway, but stop re-compacting on every request.
+      this.floorWarned = true;
+      return { messages: compacted, report: { action: "floor", before, after } };
+    }
     return { messages: compacted, report: { action: "compacted", before, after } };
   }
 
   private async compact(
-    messages: Msg[],
+    allMessages: Msg[],
     provider: Provider,
-    state: {
-      originalRequest: string;
-      filesTouched: Set<string>;
-      commandsRun: string[];
-      planLine?: string | null;
-    }
+    state: CompactState
   ): Promise<Msg[]> {
-    const system = messages[0];
+    const system = allMessages[0];
+    // Strip prior compaction notes — their content is regenerated fresh below.
+    // Without this, notes accrete (each new note keeps the old one in its
+    // tail) and compaction stops shrinking the transcript at all.
+    const messages = [system, ...allMessages.slice(1).filter((m) => !m.compactNote)];
 
     // Deterministic part of the state note — the harness knows these facts.
     // The plan goes first: it is the model's map of the task.
@@ -161,48 +196,77 @@ export class ContextManager {
       facts.push(`Commands run so far: ${state.commandsRun.slice(-15).join("; ")}`);
     }
 
-    // Short model-written narrative. If the model call fails, facts alone carry it.
+    // Short model-written narrative. Skipped entirely on very small windows —
+    // the summarize call itself must fit, and on Ollama an oversized prompt is
+    // silently front-truncated (losing the instructions), so facts-only is the
+    // safe degradation. If the call fails, facts alone carry the note.
     let narrative = "";
-    try {
-      const transcript = messages
-        .slice(1)
-        .map((m) => {
-          const tools = m.toolCalls?.map((t) => `${t.name}(${JSON.stringify(t.args).slice(0, 120)})`).join(", ");
-          return `${m.role.toUpperCase()}: ${truncateEnd(m.content ?? "", 400)}${tools ? ` [called: ${tools}]` : ""}`;
-        })
-        .join("\n");
-      const res = await provider.chat(
-        [
-          {
-            role: "system",
-            content: "You summarize coding sessions. Reply with only the summary, no preamble.",
-          },
-          {
-            role: "user",
-            content: `Summarize the current state of this coding session in under 120 words: what is the task, what has been done, what is the very next step?\n\n${truncateEnd(transcript, 24000)}`,
-          },
-        ],
-        []
-      );
-      narrative = res.content.trim();
-    } catch {
-      narrative = "";
+    const digestBudgetChars = Math.min(24000, Math.max(0, (this.usableWindow() - 700) * 3));
+    if (digestBudgetChars >= 3000) {
+      try {
+        const transcript = messages
+          .slice(1)
+          .map((m) => {
+            const tools = m.toolCalls?.map((t) => `${t.name}(${JSON.stringify(t.args).slice(0, 120)})`).join(", ");
+            return `${m.role.toUpperCase()}: ${truncateEnd(m.content ?? "", 400)}${tools ? ` [called: ${tools}]` : ""}`;
+          })
+          .join("\n");
+        const res = await provider.chat(
+          [
+            {
+              role: "system",
+              content: "You summarize coding sessions. Reply with only the summary, no preamble.",
+            },
+            {
+              role: "user",
+              content: `Summarize the current state of this coding session in under 120 words: what is the task, what has been done, what is the very next step?\n\n${truncateEnd(transcript, digestBudgetChars)}`,
+            },
+          ],
+          []
+        );
+        narrative = res.content.trim();
+      } catch {
+        narrative = "";
+      }
     }
 
-    // Keep a clean tail: cut at the most recent plain user message so we never
-    // strand a tool result without its assistant tool-call (strict backends reject that).
+    // Keep a clean tail. Preferred cut: the most recent plain user message.
+    // Mid-turn there often is none nearby — then keep the last COMPLETE
+    // assistant-toolcall + tool-results group instead of dropping everything,
+    // so the model retains the material it just fetched for its next action.
     let keepFrom = messages.length;
     for (let i = messages.length - 1; i >= Math.max(1, messages.length - 8); i--) {
-      if (messages[i].role === "user") keepFrom = i;
+      if (messages[i].role === "user" && !messages[i].compactNote) keepFrom = i;
+    }
+    if (keepFrom === messages.length) {
+      for (let i = messages.length - 1; i >= 1; i--) {
+        const m = messages[i];
+        if (m.role === "assistant" && m.toolCalls?.length) {
+          const allAnswered = m.toolCalls.every((tc) =>
+            messages.slice(i + 1).some((t) => t.role === "tool" && t.toolCallId === tc.id)
+          );
+          if (allAnswered) keepFrom = i;
+          break;
+        }
+        if (m.role === "assistant") {
+          keepFrom = i;
+          break;
+        }
+      }
     }
     const tail = keepFrom < messages.length ? messages.slice(keepFrom) : [];
 
+    const requestLines =
+      state.currentRequest && state.currentRequest !== state.originalRequest
+        ? `Original request: ${truncateEnd(state.originalRequest, 600)}\nCurrent request (what you are working on NOW): ${truncateEnd(state.currentRequest, 1000)}\n`
+        : `Original request: ${truncateEnd(state.originalRequest, 1000)}\n`;
+
     const note =
       `[The conversation so far was compacted to save context.]\n` +
-      `Original request: ${truncateEnd(state.originalRequest, 1000)}\n` +
+      requestLines +
       (facts.length ? facts.join("\n") + "\n" : "") +
       (narrative ? `Progress summary: ${narrative}` : "");
 
-    return [system, { role: "user", content: note }, ...tail];
+    return [system, { role: "user", content: note, compactNote: true }, ...tail];
   }
 }

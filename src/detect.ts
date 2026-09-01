@@ -30,9 +30,14 @@ export interface DetectedModel {
 
 function ollamaBaseUrl(): string {
   const env = process.env.OLLAMA_HOST;
-  if (!env) return "http://127.0.0.1:11434";
-  if (env.startsWith("http://") || env.startsWith("https://")) return env.replace(/\/$/, "");
-  return `http://${env.replace(/\/$/, "")}`;
+  let base: string;
+  if (!env) base = "http://127.0.0.1:11434";
+  else if (env.startsWith("http://") || env.startsWith("https://")) base = env.replace(/\/$/, "");
+  else base = `http://${env.replace(/\/$/, "")}`;
+  // OLLAMA_HOST=0.0.0.0 is the documented way to expose the SERVER on the LAN,
+  // but as a CLIENT connect address 0.0.0.0/:: fails on Windows (WSAEADDRNOTAVAIL)
+  // and would make detection silently return no models. Rewrite to loopback.
+  return base.replace(/^(https?:\/\/)(0\.0\.0\.0|\[::\]|::)(?=[:/]|$)/, "$1127.0.0.1");
 }
 
 const DEFAULT_OLLAMA_CTX_CAP = 32768; // avoid surprise VRAM blowups on huge-window models
@@ -150,9 +155,10 @@ export async function resolveContextWindow(
       180_000
     );
     const ps = await tryFetchJson(`${model.baseUrl}/api/ps`, undefined, 3000);
-    const entry =
-      ps?.models?.find((m: any) => m.name === model.id || m.model === model.id) ??
-      ps?.models?.[0];
+    // Match the CHOSEN model only — never fall back to models[0]. If our
+    // preload failed (e.g. too big for VRAM) but a different model is still
+    // resident, models[0] would anchor the budget to the wrong window.
+    const entry = ps?.models?.find((m: any) => m.name === model.id || m.model === model.id);
     if (typeof entry?.context_length === "number" && entry.context_length > 0) {
       return {
         ...model,
