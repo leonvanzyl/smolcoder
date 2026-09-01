@@ -39,6 +39,8 @@ export const PAGE_HTML = `<!doctype html>
   #busy { color: var(--dim); display: none; }
   #busy.on { display: block; }
   #busy .spin { display: inline-block; color: var(--accent); animation: pulse 1s infinite; }
+  #stopbtn { margin-left: 12px; background: #1e2428; color: var(--red); border: 1px solid #2c343a; padding: 2px 12px; cursor: pointer; font: inherit; font-size: 12px; border-radius: 3px; }
+  #stopbtn:hover { border-color: var(--red); }
   @keyframes pulse { 50% { opacity: .3; } }
   .ask { background: var(--box); border-left: 3px solid var(--yellow); padding: 10px 12px; margin: 10px 0; }
   .ask .cmd { font-weight: 700; }
@@ -71,7 +73,7 @@ export const PAGE_HTML = `<!doctype html>
    ██║   ██║██║ ╚████║   ██║
    ╚═╝   ╚═╝╚═╝  ╚═══╝   ╚═╝   <span class="coder">coder — web</span></div>
   <div id="log"></div>
-  <div id="busy"><span class="spin">⠋</span> <span id="busylabel">thinking…</span> <span id="busysecs"></span></div>
+  <div id="busy"><span class="spin">⠋</span> <span id="busylabel">thinking…</span> <span id="busysecs"></span><button id="stopbtn" title="interrupt the agent (esc)">■ stop</button></div>
 </div>
 <div id="bottom"><div class="inner">
   <div id="menu"></div>
@@ -243,6 +245,8 @@ input.addEventListener("keydown", (e) => {
   else if (e.key === "ArrowDown" && items.length) { e.preventDefault(); menuIdx = (menuIdx + 1) % items.length; renderMenu(); }
   else if (e.key === "Escape") { if (input.value) { input.value = ""; renderMenu(); } else post("/cancel"); }
 });
+
+document.getElementById("stopbtn").onclick = () => post("/cancel");
 
 const es = new EventSource("/events?k=" + k);
 es.onopen = () => { log.innerHTML = ""; };

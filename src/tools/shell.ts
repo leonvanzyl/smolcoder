@@ -74,7 +74,7 @@ export function killTree(pid: number): void {
 const OUTPUT_CAP = 8000;
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-export function runCommand(command: string, cwd: string): Promise<string> {
+export function runCommand(command: string, cwd: string, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve) => {
     const shell = pickShell();
     let output = "";
@@ -95,9 +95,24 @@ export function runCommand(command: string, cwd: string): Promise<string> {
     proc.stdout.on("data", append);
     proc.stderr.on("data", append);
 
+    // User interrupt (esc / ctrl+c / web stop button): kill the whole tree now.
+    const onAbort = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timer);
+      killTree(proc.pid!);
+      resolve(
+        (output.trim() ? truncateMiddle(output, OUTPUT_CAP) + "\n" : "") +
+          "[command cancelled by the user before it finished]"
+      );
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const cleanup = () => signal?.removeEventListener("abort", onAbort);
+
     const timer = setTimeout(() => {
       if (finished) return;
       finished = true;
+      cleanup();
       killTree(proc.pid!);
       resolve(
         truncateMiddle(output, OUTPUT_CAP) +
@@ -109,6 +124,7 @@ export function runCommand(command: string, cwd: string): Promise<string> {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
+      cleanup();
       resolve(`Error: could not start command: ${err.message}`);
     });
 
@@ -116,9 +132,12 @@ export function runCommand(command: string, cwd: string): Promise<string> {
       if (finished) return;
       finished = true;
       clearTimeout(timer);
+      cleanup();
       const secs = ((Date.now() - started) / 1000).toFixed(1);
       const body = output.trim() ? truncateMiddle(output, OUTPUT_CAP) : "(no output)";
       resolve(`${body}\n[exit code ${code ?? "?"} in ${secs}s]`);
     });
+
+    if (signal?.aborted) onAbort();
   });
 }

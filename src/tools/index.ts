@@ -154,7 +154,8 @@ export interface ToolContext {
 export async function executeTool(
   name: string,
   args: Record<string, any>,
-  ctx: ToolContext
+  ctx: ToolContext,
+  signal?: AbortSignal
 ): Promise<string> {
   try {
     let result: string;
@@ -192,7 +193,7 @@ export async function executeTool(
           return 'Error: command is required. Example: {"command": "npm test"}';
         }
         ctx.commandsRun.push(args.command);
-        result = await runCommand(args.command, ctx.workspace);
+        result = await runCommand(args.command, ctx.workspace, signal);
         break;
       case "task": {
         const action = args.action;

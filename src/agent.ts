@@ -177,7 +177,7 @@ export class Agent {
           if (call.parseError) {
             output = `Error: your tool call arguments could not be parsed (${call.parseError}). Send the arguments as a single JSON object, e.g. {"path": "src/app.js"}.`;
           } else {
-            output = await this.gateAndExecute(call.name, call.args);
+            output = await this.gateAndExecute(call.name, call.args, signal);
             toolCallsThisTurn++;
             // Keep the plan honest: small models forget to mark steps done
             // mid-flow, leaving the checklist stale for minutes. A periodic
@@ -209,6 +209,9 @@ export class Agent {
             toolName: call.name,
           });
           await this.bus.emit("post_tool", { name: call.name, args: call.args });
+          // A cancel during tool execution ends the turn now, with the
+          // (cancelled) result already recorded so the transcript stays valid.
+          if (signal.aborted) throw abortError();
         }
       }
       this.ui.warn(
@@ -256,7 +259,11 @@ export class Agent {
     throw lastErr;
   }
 
-  private async gateAndExecute(name: string, args: Record<string, any>): Promise<string> {
+  private async gateAndExecute(
+    name: string,
+    args: Record<string, any>,
+    signal?: AbortSignal
+  ): Promise<string> {
     const command = needsApproval(name, args);
     if (command !== null && this.mode === "write") {
       const program = command.trim().split(/\s+/)[0] ?? "";
@@ -271,7 +278,7 @@ export class Agent {
         if (answer === "always" && program) this.alwaysAllowed.add(program);
       }
     }
-    return executeTool(name, args, this.toolCtx);
+    return executeTool(name, args, this.toolCtx, signal);
   }
 
   /**
