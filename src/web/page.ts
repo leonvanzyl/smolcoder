@@ -24,7 +24,23 @@ export const PAGE_HTML = `<!doctype html>
   #log { margin-top: 16px; }
   .user { border-left: 3px solid var(--accent); background: var(--box); padding: 8px 12px; margin: 18px 0 10px; font-weight: 600; white-space: pre-wrap; }
   .thought { color: var(--gray); white-space: nowrap; overflow: hidden; margin-top: 4px; }
-  .md { white-space: pre-wrap; }
+  .md { white-space: normal; }
+  .md p { margin: 6px 0; }
+  .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 14px 0 6px; line-height: 1.3; color: #eef3f5; }
+  .md h1 { font-size: 1.3em; } .md h2 { font-size: 1.17em; } .md h3 { font-size: 1.06em; }
+  .md h4, .md h5, .md h6 { font-size: 1em; }
+  .md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+  .md li { margin: 2px 0; }
+  .md strong { color: #eef3f5; }
+  .md code { background: #1b2124; padding: 1px 5px; border-radius: 3px; color: var(--yellow); }
+  .md pre { background: #11161a; border: 1px solid #232a2f; border-radius: 4px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+  .md pre code { background: none; padding: 0; color: var(--fg); }
+  .md table { border-collapse: collapse; margin: 8px 0; display: block; overflow-x: auto; max-width: 100%; }
+  .md th, .md td { border: 1px solid #232a2f; padding: 4px 10px; text-align: left; }
+  .md th { background: #171d20; color: #eef3f5; }
+  .md blockquote { border-left: 3px solid #2c343a; margin: 8px 0; padding-left: 12px; color: var(--dim); }
+  .md hr { border: 0; border-top: 1px solid #232a2f; margin: 12px 0; }
+  .md a { color: var(--accent); }
   .tool { color: var(--dim); margin-top: 4px; }
   .tool .name { color: var(--accent); font-weight: 600; }
   .result { color: var(--dim); padding-left: 16px; }
@@ -106,6 +122,91 @@ function endThought() {
 }
 
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
+
+// ---- markdown ----------------------------------------------------------
+// Model output is untrusted: escape everything first, then build tags
+// ourselves. Nothing from the model is ever inserted as raw HTML.
+function esc(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function inlineMd(s) {
+  const codes = [];
+  s = s.replace(/\`([^\`]+)\`/g, (m, c) => { codes.push(c); return "\\u0000" + (codes.length - 1) + "\\u0000"; });
+  s = s.replace(/\\*\\*\\*([^*]+)\\*\\*\\*/g, "<strong><em>$1</em></strong>");
+  s = s.replace(/\\*\\*([^*]+)\\*\\*/g, "<strong>$1</strong>");
+  s = s.replace(/(^|[^*])\\*([^*\\n]+)\\*/g, "$1<em>$2</em>");
+  s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+  s = s.replace(/\\[([^\\]]+)\\]\\((https?:\\/\\/[^\\s)"]+)\\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s = s.replace(/\\u0000(\\d+)\\u0000/g, (m, i) => "<code>" + codes[i] + "</code>");
+  return s;
+}
+function renderMarkdown(src) {
+  const lines = esc(src).split("\\n");
+  let out = "", i = 0, listType = null;
+  const closeList = () => { if (listType) { out += "</" + listType + ">"; listType = null; } };
+  const cells = (row) => row.trim().replace(/^\\||\\|$/g, "").split("|").map((c) => c.trim());
+  while (i < lines.length) {
+    const line = lines[i];
+    const fence = /^\\s*\`\`\`(\\w*)\\s*$/.exec(line);
+    if (fence) {
+      closeList();
+      const body = []; i++;
+      while (i < lines.length && !/^\\s*\`\`\`/.test(lines[i])) { body.push(lines[i]); i++; }
+      i++;
+      out += "<pre><code>" + body.join("\\n") + "</code></pre>";
+      continue;
+    }
+    if (/^\\s*\\|/.test(line) && i + 1 < lines.length && /^\\s*\\|?[\\s:|-]+\\|[\\s:|-]*$/.test(lines[i + 1])) {
+      closeList();
+      const head = cells(line); i += 2;
+      const rows = [];
+      while (i < lines.length && /^\\s*\\|/.test(lines[i])) { rows.push(cells(lines[i])); i++; }
+      out += "<table><thead><tr>" + head.map((h) => "<th>" + inlineMd(h) + "</th>").join("") + "</tr></thead><tbody>";
+      for (const r of rows) out += "<tr>" + r.map((c) => "<td>" + inlineMd(c) + "</td>").join("") + "</tr>";
+      out += "</tbody></table>";
+      continue;
+    }
+    const h = /^(#{1,6})\\s+(.*)$/.exec(line);
+    if (h) { closeList(); out += "<h" + h[1].length + ">" + inlineMd(h[2]) + "</h" + h[1].length + ">"; i++; continue; }
+    if (/^\\s*([-*_])\\s*\\1\\s*\\1[\\s\\-*_]*$/.test(line)) { closeList(); out += "<hr>"; i++; continue; }
+    // NB: lines are already escaped, so the blockquote marker is "&gt;".
+    if (/^\\s*&gt;\\s?/.test(line)) {
+      closeList();
+      const body = [];
+      while (i < lines.length && /^\\s*&gt;\\s?/.test(lines[i])) { body.push(lines[i].replace(/^\\s*&gt;\\s?/, "")); i++; }
+      out += "<blockquote>" + inlineMd(body.join(" ")) + "</blockquote>";
+      continue;
+    }
+    const ul = /^\\s*[-*+]\\s+(.*)$/.exec(line);
+    const ol = /^\\s*\\d+[.)]\\s+(.*)$/.exec(line);
+    if (ul || ol) {
+      const want = ul ? "ul" : "ol";
+      if (listType !== want) { closeList(); out += "<" + want + ">"; listType = want; }
+      out += "<li>" + inlineMd((ul || ol)[1]) + "</li>";
+      i++; continue;
+    }
+    if (!line.trim()) { closeList(); i++; continue; }
+    closeList();
+    const para = [line]; i++;
+    while (i < lines.length && lines[i].trim() &&
+           !/^(\\s*#{1,6}\\s|\\s*\`\`\`|\\s*>\\s?|\\s*[-*+]\\s|\\s*\\d+[.)]\\s|\\s*\\|)/.test(lines[i])) { para.push(lines[i]); i++; }
+    out += "<p>" + inlineMd(para.join(" ")) + "</p>";
+  }
+  closeList();
+  return out;
+}
+// Streaming: accumulate raw markdown on the element, re-render on a short
+// timer. NOT requestAnimationFrame — rAF never fires in background tabs, so a
+// response streamed while the tab is hidden would never render.
+function scheduleMd(target) {
+  if (target._pending) return;
+  target._pending = true;
+  setTimeout(() => {
+    target._pending = false;
+    target.innerHTML = renderMarkdown(target._raw || "");
+    window.scrollTo(0, document.body.scrollHeight);
+  }, 60);
+}
 function add(e) { log.appendChild(e); window.scrollTo(0, document.body.scrollHeight); return e; }
 function post(path, body) { return fetch(path + "?k=" + k, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body || {}) }); }
 
@@ -170,8 +271,8 @@ function handle(m) {
     case "user": endThought(); curText = null; add(el("div", "user", m.s)); break;
     case "token":
       endThought();
-      if (!curText) { curText = add(el("div", "md")); }
-      curText.textContent += m.s; window.scrollTo(0, document.body.scrollHeight); break;
+      if (!curText) { curText = add(el("div", "md")); curText._raw = ""; }
+      curText._raw += m.s; scheduleMd(curText); break;
     case "thinking":
       if (!curThought) { curThought = add(el("div", "thought")); thoughtStart = Date.now(); thoughtBuf = ""; curText = null; }
       thoughtBuf += m.s;
