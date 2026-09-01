@@ -1,6 +1,6 @@
 {
   "name": "tiny-coder",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A tiny, zero-config CLI coding agent for local models (Ollama & LM Studio). It just works.",
   "keywords": ["cli", "coding-agent", "ollama", "lm-studio", "local-llm", "ai"],
   "license": "MIT",
