@@ -1,0 +1,27 @@
+{
+  "name": "tiny-coder",
+  "version": "0.2.0",
+  "description": "A tiny, zero-config CLI coding agent for local models (Ollama & LM Studio). It just works.",
+  "keywords": ["cli", "coding-agent", "ollama", "lm-studio", "local-llm", "ai"],
+  "license": "MIT",
+  "bin": {
+    "tiny-coder": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w",
+    "prepublishOnly": "tsc"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}
