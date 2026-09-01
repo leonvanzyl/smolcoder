@@ -72,6 +72,24 @@ tiny-coder -p "fix the failing test"   # one-shot, non-interactive
 
 In a session: `/mode`, `/model`, `/context`, `/compact`, `/tasks`, `/logs <id>`, `/stop <id>`, `/clear`, `/help`, `/exit`. `Ctrl+C` cancels a running turn.
 
+## Backend notes: Ollama vs LM Studio
+
+Measured head-to-head with identical qwen3.8-27B Q4 weights:
+
+- **Ollama is the smoother agentic backend**, not because of a different engine
+  (both run llama.cpp) but because it gives the harness more control: per-request
+  context sizing, a real thinking off-switch (`think: false`), native tool-call
+  parsing (~0.5s to a completed call vs ~2s), and ~2× faster generation with
+  default settings (~180 vs ~80 tok/s on the same GPU).
+- **`/effort off` now works on both.** Ollama disables thinking natively. LM Studio's
+  `reasoning_effort` cannot disable thinking, so for qwen-family models tiny-coder
+  appends the `/no_think` soft switch to the latest user message (measured: 9.8s → 1.0s
+  for the same request).
+- **LM Studio tips**: load the model with a bigger context (`lms load <model>
+  --context-length 32768` or more — tiny-coder budgets to whatever is loaded), and
+  consider `--parallel 1` (default 4 slots costs ~20% generation speed when you only
+  run one session). Prompt caching works well on both backends.
+
 ## Requirements
 
 - Node.js 18+

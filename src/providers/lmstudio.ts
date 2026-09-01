@@ -64,9 +64,23 @@ export class LmStudioProvider implements Provider {
   }
 
   async chat(messages: Msg[], tools: ToolSpec[], opts: ChatOptions = {}): Promise<ChatResult> {
+    // effort "off": LM Studio's OpenAI layer has no reliable way to disable
+    // thinking, but qwen-family models honor a per-turn /no_think soft switch
+    // in the latest USER message (measured: 9.8s -> 1.0s on the same request).
+    // Applied at wire time only — the internal transcript stays clean.
+    let wireMessages = messages;
+    if (this.effort === "off" && /qwen/i.test(this.modelId)) {
+      wireMessages = messages.map((m) => ({ ...m }));
+      for (let i = wireMessages.length - 1; i >= 0; i--) {
+        if (wireMessages[i].role === "user") {
+          wireMessages[i].content = wireMessages[i].content + " /no_think";
+          break;
+        }
+      }
+    }
     const base: any = {
       model: this.modelId,
-      messages: toWire(messages),
+      messages: toWire(wireMessages),
       tools: tools.length ? toWireTools(tools) : undefined,
       max_tokens: this.maxOutputTokens,
     };
