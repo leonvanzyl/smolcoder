@@ -118,6 +118,20 @@ export class TaskManager {
       .map((t) => `${t.id}: ${t.command}`);
   }
 
+  /** http://localhost-style URLs printed by running tasks — what a dev server
+   * announces on start — so the web UI can offer them in its browser panel. */
+  recentUrls(): string[] {
+    const out = new Set<string>();
+    const re = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\])(?::\d+)?(?:\/[^\s"'<>)\]]*)?/g;
+    for (const t of this.tasks.values()) {
+      if (t.status !== "running") continue;
+      for (const line of t.lines) {
+        for (const m of line.matchAll(re)) out.add(m[0].replace("0.0.0.0", "localhost").replace(/\/$/, ""));
+      }
+    }
+    return [...out].slice(0, 8);
+  }
+
   killAll(): void {
     for (const t of this.tasks.values()) {
       if (t.status === "running") {

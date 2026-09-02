@@ -6,6 +6,11 @@
 - [x] **Plan tool** — harness-held checklist (set/done/add/show), TUI + web rendering,
   compaction re-injection, quit-halfway nudge. Proven in real runs on both backends.
 - [x] **Web UI** (`--web`) — TUI twin over SSE, localhost + URL token.
+- [x] **Web UI v2: workspace hub** — `smol --web` from anywhere; a collapsible sidebar of workspaces
+  and their sessions (status dots, new/close/delete/rename, folder picker), many sessions running side
+  by side, transcripts saved under `~/.smolcoder/sessions/` and resumable after a restart, a second
+  `smol --web` joins the running hub. Right panel with browser tabs (dev-server URLs suggested) and
+  streaming terminal tabs (persistent shell, no PTY).
 - [x] **Markdown rendering in the web page.**
 - [x] **Reasoning effort that means what it says on LM Studio** — reads the model's supported
   levels and default from `/api/v1/models`, sends `none` for off, snaps other levels to what the

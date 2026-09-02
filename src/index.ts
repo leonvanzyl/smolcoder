@@ -4,33 +4,45 @@
 // Interactive: an opencode-style inline TUI. No upfront questions — the last
 // (or first) detected model is picked automatically; switch with /models,
 // cycle modes with shift+tab, set reasoning effort with /effort.
+// Web: smol --web serves a browser UI with a workspace sidebar — many
+// projects and sessions side by side, started from anywhere.
 // Headless: smol -p "prompt" for people and automations.
 
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { Agent } from "./agent";
+import { loadConfig } from "./config";
 import { ContextManager } from "./context";
-import { detectAll, DetectedModel, resolveContextWindow } from "./detect";
 import { EventBus } from "./events";
 import { Plan } from "./plan";
 import { buildSystemPrompt, loadAgentsMd } from "./prompt";
-import { LmStudioProvider } from "./providers/lmstudio";
-import { OllamaProvider } from "./providers/ollama";
-import { Effort, Provider } from "./providers/types";
-import { Mode, MODE_LABELS, ToolContext } from "./tools/index";
+import { Effort } from "./providers/types";
+import {
+  effortAdvice,
+  makeProvider,
+  noBackendsMessage,
+  prepareModel,
+  reportCompactions,
+  Session,
+  SessionPrefs,
+  sessionLine,
+} from "./session";
+import { Mode, ToolContext } from "./tools/index";
 import { pickShell } from "./tools/shell";
 import { TaskManager } from "./tools/tasks";
 import { Tui } from "./tui/tui";
-import { SessionUI, UI } from "./ui";
-import { WebUI } from "./web/webui";
+import { UI } from "./ui";
 import { c } from "./util";
+import { askHubToOpen, pingHub, readHubRecord, WebHub } from "./web/hub";
 
 const VERSION = require("../package.json").version as string;
-const CONFIG_PATH = path.join(os.homedir(), ".smolcoder.json");
+const DEFAULT_WEB_PORT = 7433;
 
 interface CliArgs {
   workspace: string;
+  /** A folder was given on the command line (vs. defaulting to the cwd). */
+  workspaceGiven?: boolean;
   mode?: Mode;
   model?: string;
   ctx?: number;
@@ -40,12 +52,6 @@ interface CliArgs {
   webPort?: number;
   help?: boolean;
   version?: boolean;
-}
-
-interface Config {
-  lastModel?: string;
-  lastMode?: Mode;
-  effort?: Effort | null;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -79,8 +85,10 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--web") {
       args.web = true;
       if (argv[i + 1] && /^\d+$/.test(argv[i + 1])) args.webPort = Number(argv[++i]);
-    } else if (!a.startsWith("-")) args.workspace = path.resolve(a);
-    else {
+    } else if (!a.startsWith("-")) {
+      args.workspace = path.resolve(a);
+      args.workspaceGiven = true;
+    } else {
       console.error(`Unknown option "${a}". Try smol --help.`);
       process.exit(1);
     }
@@ -103,7 +111,10 @@ ${c.bold("Options:")}
   --model <name>               pick a model by (partial) name
   --ctx <tokens>               force a context window (Ollama: sends num_ctx)
   --effort <level>             reasoning effort: off, low, medium, high, default
-  --web [port]                 serve the session as a local web UI (default port 7433)
+  --web [port]                 browser UI (default port ${DEFAULT_WEB_PORT}): a sidebar of your
+                               workspaces and sessions, an embedded browser and
+                               terminal panel. Run it from anywhere; a second
+                               smol --web adds its folder to the running UI.
   -p, --print "<prompt>"       headless: run a single prompt and exit
   -h, --help                   this help
   -v, --version                version
@@ -121,68 +132,6 @@ ${c.bold("Slash commands:")}
   /context    context usage        /clear        reset conversation
   /compact    compact now          /exit         quit
 `;
-
-function loadConfig(): Config {
-  try {
-    const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
-    // Never let bypass be inherited implicitly from a past session — a single
-    // shift+tab into it would otherwise silently persist unattended, unchecked
-    // command execution into every later run, including headless -p in CI.
-    // Requires an explicit flag (-m bypass / --bypass) each time. Old configs
-    // saved "write"/"yolo" under the previous mode names.
-    if (cfg.lastMode === "write") cfg.lastMode = "edit";
-    if (cfg.lastMode === "yolo" || cfg.lastMode === "bypass") cfg.lastMode = "edit";
-    return cfg;
-  } catch {
-    return {};
-  }
-}
-
-function saveConfig(cfg: Config): void {
-  try {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
-  } catch {
-    /* non-fatal */
-  }
-}
-
-/** Output budget scales with the window: big windows can afford whole-file
- * writes (a single write_file's JSON must fit in the output), tiny windows
- * must stay conservative. */
-function outputBudget(window: number): number {
-  return Math.max(1024, Math.min(16384, Math.floor(window / 4)));
-}
-
-function makeProvider(m: DetectedModel): Provider {
-  const maxOut = outputBudget(m.contextWindow);
-  return m.backend === "ollama"
-    ? new OllamaProvider(m.baseUrl, m.id, m.contextWindow, m.numCtx, maxOut)
-    : new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, m.reasoning);
-}
-
-/** One-line advice when the effective reasoning setting will be slow: LM
- * Studio applies the model's own default level when none is chosen, and for
- * current qwen builds that default is the maximum. */
-function effortAdvice(m: DetectedModel, effort: Effort | null): string | null {
-  if (m.backend !== "lmstudio" || !m.reasoning?.default) return null;
-  const d = m.reasoning.default;
-  if (effort === null && /^(high|xhigh)$/.test(d)) {
-    return `this model thinks at "${d}" by default on LM Studio — expect long pauses before each tool call. /effort off (or --effort off) is many times faster; /effort low or medium keeps some reasoning.`;
-  }
-  return null;
-}
-
-/** Tell the user what context management just did (both UIs; headless logs
- * it to stderr so a long run's log shows when and how hard compaction hit). */
-function reportCompactions(bus: EventBus, ui: { status: (s: string) => void; warn: (s: string) => void }): void {
-  bus.on("post_compact", (report: any) => {
-    const delta = `${report?.before} → ${report?.after} tokens est.`;
-    if (report?.action === "evicted") ui.status(`· freed context by dropping old tool output (${delta})`);
-    else if (report?.action === "compacted") ui.status(`· compacted the conversation into hand-over notes (${delta})`);
-    else if (report?.action === "floor")
-      ui.warn(`· context is at its floor: system prompt + tools + the working tail no longer fit comfortably (${delta}). Consider a bigger context window.`);
-  });
-}
 
 /** Node fires 'exit' on normal termination but NOT on a killing signal, so
  * background tasks (dev servers) survive a closed terminal (SIGHUP) or `kill`
@@ -204,41 +153,6 @@ function installSignalCleanup(cleanup: () => void): void {
   process.on("SIGHUP", () => run(129));
   process.on("SIGINT", () => run(130));
 }
-
-function autoPickModel(
-  models: DetectedModel[],
-  wanted: string | undefined,
-  remembered: string | undefined
-): DetectedModel {
-  if (wanted) {
-    const hit =
-      models.find((m) => m.id === wanted) ??
-      models.find((m) => m.id.toLowerCase().includes(wanted.toLowerCase()));
-    if (hit) return hit;
-  }
-  return (
-    models.find((m) => m.id === remembered) ??
-    models.find((m) => m.backend === "ollama") ??
-    models.find((m) => m.loaded) ??
-    models[0]
-  );
-}
-
-function noBackendsMessage(): string {
-  return (
-    c.red("No local model backend found.") +
-    `\n\nsmolcoder looks for:\n` +
-    `  · ${c.bold("Ollama")} at http://127.0.0.1:11434 ${c.dim("(or $OLLAMA_HOST)")} — install: https://ollama.com, then: ollama pull qwen3\n` +
-    `  · ${c.bold("LM Studio")} at http://127.0.0.1:1234 — start its local server (Developer tab → Start Server)\n\n` +
-    `Start one of them and run smol again. No configuration needed.`
-  );
-}
-
-function sessionLine(m: DetectedModel, mode: Mode): string {
-  return `${c.green("●")} ${m.backend} · ${c.bold(m.id)} · ctx ${m.contextWindow.toLocaleString()} · ${MODE_LABELS[mode]} mode`;
-}
-
-const MODE_ORDER: Mode[] = ["ro", "edit", "bypass"];
 
 const LOGO_ROWS = [
   "███████╗ ███╗   ███╗  ██████╗  ██╗     ",
@@ -263,15 +177,8 @@ function printLogo(): void {
   }
 }
 
-function fmtTokens(n: number): string {
-  return n < 1000 ? String(n) : (n / 1000).toFixed(1) + "k";
-}
-
-function modeColored(mode: Mode): string {
-  const label = MODE_LABELS[mode];
-  if (mode === "bypass") return c.red(c.bold(label));
-  if (mode === "ro") return c.magenta(c.bold(label));
-  return c.cyan(c.bold(label));
+function prefsOf(args: CliArgs): SessionPrefs {
+  return { mode: args.mode, model: args.model, ctx: args.ctx, effort: args.effort };
 }
 
 // ---------------------------------------------------------------------------
@@ -291,11 +198,9 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  if (args.print !== undefined) {
-    await runHeadless(args);
-  } else {
-    await runInteractive(args);
-  }
+  if (args.print !== undefined) await runHeadless(args);
+  else if (args.web) await runWeb(args);
+  else await runInteractive(args);
 }
 
 // ---- headless (-p) ---------------------------------------------------------
@@ -303,15 +208,13 @@ async function main(): Promise<void> {
 async function runHeadless(args: CliArgs): Promise<void> {
   const ui = new UI();
   const bus = new EventBus();
-  const models = await detectAll();
-  if (models.length === 0) {
+  const cfg = loadConfig();
+  const chosen = await prepareModel(prefsOf(args), cfg);
+  if (!chosen) {
     ui.println(noBackendsMessage());
     ui.close();
     process.exit(1);
   }
-  const cfg = loadConfig();
-  let chosen = autoPickModel(models, args.model, cfg.lastModel);
-  chosen = await resolveContextWindow(chosen, args.ctx);
   const mode = args.mode ?? cfg.lastMode ?? "edit";
 
   const shell = pickShell();
@@ -371,110 +274,32 @@ async function runHeadless(args: CliArgs): Promise<void> {
 
 // ---- interactive TUI -------------------------------------------------------
 
-const SLASH_COMMANDS = [
-  { name: "models", desc: "Switch model" },
-  { name: "mode", desc: "Set mode (ro / edit / bypass)" },
-  { name: "effort", desc: "Set reasoning effort" },
-  { name: "plan", desc: "Show the agent's plan" },
-  { name: "context", desc: "Show context usage" },
-  { name: "compact", desc: "Compact the conversation now" },
-  { name: "tasks", desc: "List background tasks" },
-  { name: "logs", desc: "Show task output — /logs t1" },
-  { name: "stop", desc: "Stop a background task — /stop t1" },
-  { name: "clear", desc: "Reset the conversation" },
-  { name: "help", desc: "Show help" },
-  { name: "exit", desc: "Quit smolcoder" },
-];
-
 async function runInteractive(args: CliArgs): Promise<void> {
-  const isWeb = !!args.web;
-  if (!isWeb && (!process.stdout.isTTY || !process.stdin.isTTY)) {
+  if (!process.stdout.isTTY || !process.stdin.isTTY) {
     console.error(
       'Interactive mode needs a terminal. For headless use, run: smol -p "your prompt" — or serve a browser UI with --web'
     );
     process.exit(1);
   }
 
-  if (isWeb) console.log(`${c.bold("smol")}${c.dim(c.bold("coder"))} ${c.dim("v" + VERSION + " · web")}`);
-  else printLogo();
+  printLogo();
+  const cfg = loadConfig();
   process.stdout.write(c.dim("· looking for Ollama and LM Studio…"));
-  const models = await detectAll();
+  const chosen = await prepareModel(prefsOf(args), cfg, (label) => {
+    process.stdout.write("\r\x1b[2K" + c.dim(`· ${label}…`));
+  });
   process.stdout.write("\r\x1b[2K");
-  if (models.length === 0) {
+  if (!chosen) {
     console.log(noBackendsMessage());
     process.exit(1);
   }
 
-  const cfg = loadConfig();
-  let chosen = autoPickModel(models, args.model, cfg.lastModel);
-  process.stdout.write(c.dim(`· loading ${chosen.id}…`));
-  chosen = await resolveContextWindow(chosen, args.ctx);
-  process.stdout.write("\r\x1b[2K");
-
-  const mode0 = args.mode ?? cfg.lastMode ?? "edit";
-  let effort: Effort | null = args.effort !== undefined ? args.effort : (cfg.effort ?? null);
-
-  const shell = pickShell();
-  const bus = new EventBus();
-  const provider = makeProvider(chosen);
-  provider.setEffort(effort);
-  const taskManager = new TaskManager(args.workspace);
-  const toolCtx: ToolContext = {
-    workspace: args.workspace,
-    taskManager,
-    plan: new Plan(),
-    filesTouched: new Set(),
-    commandsRun: [],
-  };
-  const ctxMgr = new ContextManager(chosen.contextWindow, provider.maxOutputTokens);
-  const agentsMd = loadAgentsMd(args.workspace);
-  const sysPrompt = (m: Mode) =>
-    buildSystemPrompt({ workspace: args.workspace, mode: m, shellLabel: shell.label, agentsMd });
-
-  // The step cap is a runaway-loop backstop, not a work limit — esc/ctrl+c is
-  // the user's real kill switch, so set it far above any legitimate task.
-  const tui: SessionUI = isWeb ? new WebUI(args.webPort ?? 7433) : new Tui();
-  const agent = new Agent(provider, mode0, sysPrompt(mode0), toolCtx, ctxMgr, bus, tui, true, 1000);
-
-  const persist = () => saveConfig({ lastModel: chosen.id, lastMode: agent.mode, effort });
-
-  tui.slashCommands = SLASH_COMMANDS;
-  tui.hintLeft = args.workspace.replace(os.homedir(), "~");
-  tui.getStatus = () => {
-    const tasks = taskManager.runningSummary().length;
-    return (
-      `${modeColored(agent.mode)} ${c.dim("·")} ${chosen.id} ${c.dim(chosen.backend)}` +
-      (effort || agent.provider.effortLabel()
-        ? ` ${c.dim("·")} ${c.yellow(agent.provider.effortLabel() ?? effort ?? "")}`
-        : "") +
-      ` ${c.dim("·")} ${c.dim(`${fmtTokens(agent.contextTokens())} (${agent.contextPercent()}%)`)}` +
-      (toolCtx.plan.exists
-        ? ` ${c.dim("·")} ${
-            toolCtx.plan.currentIndex < 0
-              ? c.green(`plan ${toolCtx.plan.doneCount}/${toolCtx.plan.steps.length}`)
-              : c.cyan(`plan ${toolCtx.plan.doneCount}/${toolCtx.plan.steps.length}`)
-          }`
-        : "") +
-      (tasks ? ` ${c.dim("·")} ${c.green(`${tasks} task${tasks > 1 ? "s" : ""}`)}` : "")
-    );
-  };
-  tui.onModeCycle = () => {
-    const next = MODE_ORDER[(MODE_ORDER.indexOf(agent.mode) + 1) % MODE_ORDER.length];
-    agent.setMode(next, sysPrompt(next));
-    persist();
-  };
-  tui.onCancel = () => agent.cancel();
-
-  const shutdown = async () => {
-    await bus.emit("session_end");
-    taskManager.killAll();
-    tui.close();
-    process.exit(0);
-  };
-  tui.onExit = () => void shutdown();
-  process.on("exit", () => taskManager.killAll());
+  const tui = new Tui();
+  const session = new Session(tui, { workspace: args.workspace, chosen, prefs: prefsOf(args), cfg, help: HELP });
+  session.onExit = () => process.exit(0);
+  process.on("exit", () => session.taskManager.killAll());
   installSignalCleanup(() => {
-    taskManager.killAll();
+    session.taskManager.killAll();
     try {
       tui.close(); // restore the raw-mode terminal on signal death
     } catch {
@@ -482,202 +307,60 @@ async function runInteractive(args: CliArgs): Promise<void> {
     }
   });
 
-  reportCompactions(bus, tui);
-
-  if (tui instanceof WebUI) {
-    tui.getState = () => ({
-      mode: agent.mode,
-      model: chosen.id,
-      backend: chosen.backend,
-      effort: agent.provider.effortLabel() ?? effort,
-      ctxTokens: agent.contextTokens(),
-      ctxPct: agent.contextPercent(),
-      plan: toolCtx.plan.exists
-        ? { steps: toolCtx.plan.steps, current: toolCtx.plan.currentIndex }
-        : null,
-      tasks: taskManager.runningSummary().length,
-      workspace: args.workspace,
-      commands: SLASH_COMMANDS,
-    });
-  }
-
   tui.start();
-  tui.println(sessionLine(chosen, agent.mode));
-  if (chosen.note) tui.warn(`  ${chosen.note}`);
-  tui.status(`  workspace ${args.workspace} · shell ${shell.label}`);
-  if (agentsMd) tui.status(`  AGENTS.md loaded (${agentsMd.split("\n").length} lines)`);
-  {
-    const advice = effortAdvice(chosen, effort);
-    if (advice) tui.warn(`  ${advice}`);
-  }
-  if (!isWeb) tui.println("");
-  persist();
-  await bus.emit("session_start");
+  session.announce();
+  tui.println("");
+  await session.run();
+}
 
-  const switchModel = async (filter?: string): Promise<void> => {
-    const fresh = await detectAll();
-    if (!fresh.length) {
-      tui.error("No backends reachable right now.");
+// ---- web hub (--web) -------------------------------------------------------
+
+/** The home folder or a drive root is not a project: launching there opens
+ * the hub with the sidebar and lets the user pick a workspace. */
+function isHomeOrRoot(p: string): boolean {
+  const norm = (s: string) => (process.platform === "win32" ? s.toLowerCase() : s);
+  const r = path.resolve(p);
+  return norm(r) === norm(os.homedir()) || path.dirname(r) === r;
+}
+
+async function runWeb(args: CliArgs): Promise<void> {
+  console.log(`${c.bold("smol")}${c.dim(c.bold("coder"))} ${c.dim("v" + VERSION + " · web")}`);
+  const port = args.webPort ?? DEFAULT_WEB_PORT;
+  const workspace = args.workspace;
+  const autoStart = !!args.workspaceGiven || !isHomeOrRoot(workspace);
+
+  // A hub is already running: hand it this folder instead of starting another.
+  const rec = readHubRecord();
+  if (rec && (args.webPort === undefined || rec.port === port) && (await pingHub(rec))) {
+    const r = await askHubToOpen(rec, workspace, autoStart);
+    if (r) {
+      const url = `http://127.0.0.1:${rec.port}/?k=${rec.token}${r.id ? "#" + r.id : ""}`;
+      console.log(
+        `\n  ${autoStart ? "started a session for" : "added"} ${workspace} in the running web UI:\n  ${url}\n`
+      );
       return;
     }
-    const options = fresh.map((m) => ({
-      label: m.id,
-      hint:
-        m.backend === "ollama"
-          ? "ollama"
-          : `lm studio${m.loaded ? ` · ctx ${m.contextWindow.toLocaleString()}` : " · not loaded"}`,
-      current: m.id === chosen.id && m.backend === chosen.backend,
-    }));
-    const idx = await tui.select("Select model", options);
-    if (idx === null) return;
-    tui.startSpinner(`loading ${fresh[idx].id}`);
-    const next = await resolveContextWindow(fresh[idx], args.ctx);
-    tui.stopSpinner();
-    chosen = next;
-    const p = makeProvider(next);
-    p.setEffort(effort);
-    agent.setProvider(p);
-    ctxMgr.setWindow(next.contextWindow, p.maxOutputTokens);
-    persist();
-    tui.println(sessionLine(next, agent.mode));
-    if (next.note) tui.warn(`  ${next.note}`);
-    {
-      const advice = effortAdvice(next, effort);
-      if (advice) tui.warn(`  ${advice}`);
-    }
-    void filter;
-  };
-
-  const setMode = async (arg?: string): Promise<void> => {
-    let next: Mode | undefined =
-      arg === "ro"
-        ? "ro"
-        : arg === "edit" || arg === "write"
-          ? "edit"
-          : arg === "bypass" || arg === "yolo"
-            ? "bypass"
-            : undefined;
-    if (!next) {
-      const idx = await tui.select("Select mode", [
-        { label: "read-only", hint: "read and search files only", current: agent.mode === "ro" },
-        {
-          label: "edit",
-          hint: "edit files; run commands inside the workspace, ask y/n for anything outside it",
-          current: agent.mode === "edit",
-        },
-        {
-          label: "bypass permissions",
-          hint: "full access, never asks for approval",
-          current: agent.mode === "bypass",
-        },
-      ]);
-      if (idx === null) return;
-      next = MODE_ORDER[idx];
-    }
-    agent.setMode(next, sysPrompt(next));
-    persist();
-  };
-
-  const setEffort = async (arg?: string): Promise<void> => {
-    const levels: (Effort | "default")[] = ["default", "off", "low", "medium", "high"];
-    let next: Effort | null | undefined;
-    if (arg && (levels as string[]).includes(arg)) {
-      next = arg === "default" ? null : (arg as Effort);
-    } else {
-      const idx = await tui.select("Reasoning effort", [
-        {
-          label: "default",
-          hint: chosen.reasoning?.default ? `the model's own default (${chosen.reasoning.default})` : "leave it to the model",
-          current: effort === null,
-        },
-        { label: "off", hint: "no thinking — fastest, best for long tool loops", current: effort === "off" },
-        { label: "low", hint: "brief reasoning", current: effort === "low" },
-        { label: "medium", hint: "", current: effort === "medium" },
-        { label: "high", hint: "most thorough — slow on local models", current: effort === "high" },
-      ]);
-      if (idx === null) return;
-      next = idx === 0 ? null : (levels[idx] as Effort);
-    }
-    effort = next;
-    agent.provider.setEffort(effort);
-    persist();
-    const label = agent.provider.effortLabel();
-    tui.status(`· effort ${label ?? effort ?? "default"}`);
-    const advice = effortAdvice(chosen, effort);
-    if (advice) tui.warn(`  ${advice}`);
-  };
-
-  for (;;) {
-    const input = await tui.readInput();
-
-    if (input.startsWith("/")) {
-      const [cmd, ...rest] = input.slice(1).split(/\s+/);
-      const arg = rest[0];
-      switch (cmd) {
-        case "exit":
-        case "quit":
-        case "q":
-          await shutdown();
-          return;
-        case "help":
-          tui.println(HELP);
-          break;
-        case "models":
-        case "model":
-          await switchModel(arg);
-          break;
-        case "mode":
-          await setMode(arg);
-          break;
-        case "effort":
-          await setEffort(arg);
-          break;
-        case "plan":
-          if (toolCtx.plan.exists) tui.planUpdated(toolCtx.plan);
-          else tui.status("· no plan yet — the agent creates one when it starts a multi-step task");
-          break;
-        case "tasks":
-          tui.println(taskManager.list());
-          break;
-        case "logs":
-          tui.println(taskManager.logs(arg ?? "", Number(rest[1]) || 50));
-          break;
-        case "stop":
-          tui.println(taskManager.stop(arg ?? ""));
-          break;
-        case "compact":
-          tui.startSpinner("compacting");
-          await agent.compactNow();
-          tui.stopSpinner();
-          tui.status(`· compacted — ctx now ${agent.contextPercent()}%`);
-          break;
-        case "context":
-          tui.status(
-            `· ctx ${agent.contextPercent()}% of ${chosen.contextWindow.toLocaleString()} tokens · ${agent.messages.length} messages`
-          );
-          break;
-        case "clear":
-          agent.resetTranscript();
-          toolCtx.plan.reset();
-          tui.status("· conversation cleared");
-          break;
-        default:
-          tui.warn(`Unknown command /${cmd} — try /help`);
-      }
-      continue;
-    }
-
-    try {
-      await agent.runTurn(input);
-    } catch (err: any) {
-      tui.error(`\n${err?.message ?? err}`);
-      if (String(err?.message ?? "").toLowerCase().includes("does not support tools")) {
-        tui.warn(
-          "This model does not support tool calling. Pick a tool-capable model with /models (e.g. qwen3, llama3.1, mistral-nemo)."
-        );
-      }
-    }
   }
+
+  const hub = new WebHub({ port, prefs: prefsOf(args), help: HELP, version: VERSION });
+  try {
+    await hub.start();
+  } catch (err: any) {
+    if (err?.code === "EADDRINUSE") {
+      console.error(`\nPort ${port} is already in use. Pick another with: smol --web ${port + 1}`);
+      process.exit(1);
+    }
+    throw err;
+  }
+  process.on("exit", () => hub.shutdownSync());
+  installSignalCleanup(() => hub.shutdownSync());
+
+  if (autoStart) hub.openSession(workspace);
+  console.log(
+    `\n  smolcoder web UI:  ${hub.url()}\n  ${
+      autoStart ? `workspace ${workspace}` : "pick a workspace in the sidebar"
+    } · ctrl+c stops the server\n`
+  );
 }
 
 main().catch((err) => {

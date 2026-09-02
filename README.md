@@ -91,11 +91,22 @@ smol --model qwen3              # pick a model by partial name
 smol --effort off               # no thinking: the fastest setting for long tool loops
 smol --mode bypass              # never ask for approval
 smol --ctx 16384                # cap the context window
-smol --web                      # also serve the session as a local web page
+smol --web                      # browser UI with a workspace sidebar (see below)
 smol -p "fix the failing test"  # headless: run one prompt, print the transcript, exit
 ```
 
 Headless mode is for scripts and automation. It suppresses reasoning noise and the exit code tells you whether the run succeeded.
+
+## The web UI
+
+`smol --web` serves a local browser UI and prints a private URL (it carries a random key, and the server only listens on localhost). You can run it from anywhere, including your home folder: the page has a sidebar of your workspaces, and every workspace keeps its own list of sessions.
+
+- **Many projects, many sessions.** Open a folder from the sidebar, start as many sessions as you like, and switch between them while they work. A dot next to each session shows whether it is busy, idle, or waiting for you to approve a command. Sessions you are not looking at keep streaming in the background.
+- **Sessions survive restarts.** Transcripts are saved under `~/.smolcoder/sessions/`, so past sessions stay in the sidebar and can be resumed with a click, model and all. Close a session to stop it, delete it to forget it.
+- **One server for everything.** Running `smol --web` from a second folder adds that folder to the already-running UI instead of starting another server.
+- **A browser panel.** The globe icon opens a resizable panel on the right with browser tabs. Dev servers the agent starts show up as suggestions, so previewing the app it is building is one click.
+- **A terminal panel.** The terminal icon (or ctrl+`) opens a shell in the current workspace, right next to the chat. It streams output without a TTY, which means interactive programs such as `vim` will not work there, but `npm test`, `git status` and friends do. The terminal, browser tabs and chat all live in the same panel, in tabs.
+- `ctrl+b` hides and shows the sidebar.
 
 ## Tips
 

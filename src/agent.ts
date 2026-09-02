@@ -38,8 +38,8 @@ export class Agent {
   messages: Msg[] = [];
   tools: ToolSpec[];
   private alwaysAllowed = new Set<string>();
-  private originalRequest = "";
-  private currentRequest = "";
+  originalRequest = "";
+  currentRequest = "";
   private planNudged = false;
   private abort: AbortController | null = null;
   /** Speed/size figures for the last completed turn (for the turn-end label
@@ -81,6 +81,16 @@ export class Agent {
     // cleared conversation would assert work the new task never did.
     this.toolCtx.filesTouched.clear();
     this.toolCtx.commandsRun.length = 0;
+    this.ctxMgr.resetAnchor();
+  }
+
+  /** Resume a saved session: the transcript (without its system message) and
+   * the two requests the compaction note is built around. */
+  restoreTranscript(messages: Msg[], originalRequest: string, currentRequest: string): void {
+    this.messages = [this.messages[0], ...messages];
+    this.originalRequest = originalRequest;
+    this.currentRequest = currentRequest;
+    this.planNudged = false;
     this.ctxMgr.resetAnchor();
   }
 
