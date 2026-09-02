@@ -153,7 +153,31 @@ function makeProvider(m: DetectedModel): Provider {
   const maxOut = outputBudget(m.contextWindow);
   return m.backend === "ollama"
     ? new OllamaProvider(m.baseUrl, m.id, m.contextWindow, m.numCtx, maxOut)
-    : new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut);
+    : new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, m.reasoning);
+}
+
+/** One-line advice when the effective reasoning setting will be slow: LM
+ * Studio applies the model's own default level when none is chosen, and for
+ * current qwen builds that default is the maximum. */
+function effortAdvice(m: DetectedModel, effort: Effort | null): string | null {
+  if (m.backend !== "lmstudio" || !m.reasoning?.default) return null;
+  const d = m.reasoning.default;
+  if (effort === null && /^(high|xhigh)$/.test(d)) {
+    return `this model thinks at "${d}" by default on LM Studio — expect long pauses before each tool call. /effort off (or --effort off) is many times faster; /effort low or medium keeps some reasoning.`;
+  }
+  return null;
+}
+
+/** Tell the user what context management just did (both UIs; headless logs
+ * it to stderr so a long run's log shows when and how hard compaction hit). */
+function reportCompactions(bus: EventBus, ui: { status: (s: string) => void; warn: (s: string) => void }): void {
+  bus.on("post_compact", (report: any) => {
+    const delta = `${report?.before} → ${report?.after} tokens est.`;
+    if (report?.action === "evicted") ui.status(`· freed context by dropping old tool output (${delta})`);
+    else if (report?.action === "compacted") ui.status(`· compacted the conversation into hand-over notes (${delta})`);
+    else if (report?.action === "floor")
+      ui.warn(`· context is at its floor: system prompt + tools + the working tail no longer fit comfortably (${delta}). Consider a bigger context window.`);
+  });
 }
 
 /** Node fires 'exit' on normal termination but NOT on a killing signal, so
@@ -302,16 +326,40 @@ async function runHeadless(args: CliArgs): Promise<void> {
   if (agentsMd) ui.status(`· AGENTS.md loaded (${agentsMd.split("\n").length} lines)`);
   const systemPrompt = buildSystemPrompt({ workspace: args.workspace, mode, shellLabel: shell.label, agentsMd });
   const agent = new Agent(provider, mode, systemPrompt, toolCtx, ctxMgr, bus, ui, false, 1000);
+  reportCompactions(bus, ui);
   process.on("exit", () => taskManager.killAll());
   installSignalCleanup(() => taskManager.killAll());
 
   ui.println(sessionLine(chosen, mode));
   if (chosen.note) ui.warn(`  ${chosen.note}`);
+  const effortSetting = args.effort !== undefined ? args.effort : (cfg.effort ?? null);
+  ui.status(`  effort ${provider.effortLabel() ?? effortSetting ?? "default"}`);
+  const advice = effortAdvice(chosen, effortSetting);
+  if (advice) ui.warn(`  ${advice}`);
   try {
     await agent.runTurn(args.print!);
   } catch (err: any) {
     ui.error(`\n${err?.message ?? err}`);
     process.exitCode = 1;
+  }
+  const st = agent.lastTurnStats;
+  if (st) {
+    // Machine-readable summary for scripts/benchmarks comparing backends.
+    process.stderr.write(
+      `[stats] ${JSON.stringify({
+        backend: chosen.backend,
+        model: chosen.id,
+        durationMs: st.durationMs,
+        modelCalls: st.modelCalls,
+        toolCalls: st.toolCalls,
+        generatedTokens: st.generatedTokens,
+        thinkingTokensEst: Math.round(st.thinkingChars / 4),
+        genTokPerSec: st.genSeconds > 0 ? Math.round(st.generatedTokens / st.genSeconds) : null,
+        promptTokensLast: st.promptTokensLast,
+        contextWindow: chosen.contextWindow,
+        planDone: toolCtx.plan.exists ? `${toolCtx.plan.doneCount}/${toolCtx.plan.steps.length}` : null,
+      })}\n`
+    );
   }
   taskManager.killAll();
   ui.close();
@@ -392,7 +440,9 @@ async function runInteractive(args: CliArgs): Promise<void> {
     const tasks = taskManager.runningSummary().length;
     return (
       `${modeColored(agent.mode)} ${c.dim("·")} ${chosen.id} ${c.dim(chosen.backend)}` +
-      (effort ? ` ${c.dim("·")} ${c.yellow(effort)}` : "") +
+      (effort || agent.provider.effortLabel()
+        ? ` ${c.dim("·")} ${c.yellow(agent.provider.effortLabel() ?? effort ?? "")}`
+        : "") +
       ` ${c.dim("·")} ${c.dim(`${fmtTokens(agent.contextTokens())} (${agent.contextPercent()}%)`)}` +
       (toolCtx.plan.exists
         ? ` ${c.dim("·")} ${
@@ -428,19 +478,14 @@ async function runInteractive(args: CliArgs): Promise<void> {
     }
   });
 
-  bus.on("post_compact", (report: any) => {
-    if (report?.action === "evicted")
-      tui.status(`· freed context by dropping old tool output (${report.before} → ${report.after} tokens est.)`);
-    if (report?.action === "compacted")
-      tui.status(`· compacted conversation (${report.before} → ${report.after} tokens est.)`);
-  });
+  reportCompactions(bus, tui);
 
   if (tui instanceof WebUI) {
     tui.getState = () => ({
       mode: agent.mode,
       model: chosen.id,
       backend: chosen.backend,
-      effort,
+      effort: agent.provider.effortLabel() ?? effort,
       ctxTokens: agent.contextTokens(),
       ctxPct: agent.contextPercent(),
       plan: toolCtx.plan.exists
@@ -457,6 +502,10 @@ async function runInteractive(args: CliArgs): Promise<void> {
   if (chosen.note) tui.warn(`  ${chosen.note}`);
   tui.status(`  workspace ${args.workspace} · shell ${shell.label}`);
   if (agentsMd) tui.status(`  AGENTS.md loaded (${agentsMd.split("\n").length} lines)`);
+  {
+    const advice = effortAdvice(chosen, effort);
+    if (advice) tui.warn(`  ${advice}`);
+  }
   if (!isWeb) tui.println("");
   persist();
   await bus.emit("session_start");
@@ -488,6 +537,10 @@ async function runInteractive(args: CliArgs): Promise<void> {
     persist();
     tui.println(sessionLine(next, agent.mode));
     if (next.note) tui.warn(`  ${next.note}`);
+    {
+      const advice = effortAdvice(next, effort);
+      if (advice) tui.warn(`  ${advice}`);
+    }
     void filter;
   };
 
@@ -514,11 +567,15 @@ async function runInteractive(args: CliArgs): Promise<void> {
       next = arg === "default" ? null : (arg as Effort);
     } else {
       const idx = await tui.select("Reasoning effort", [
-        { label: "default", hint: "leave it to the model", current: effort === null },
-        { label: "off", hint: "no thinking — fastest", current: effort === "off" },
-        { label: "low", hint: "", current: effort === "low" },
+        {
+          label: "default",
+          hint: chosen.reasoning?.default ? `the model's own default (${chosen.reasoning.default})` : "leave it to the model",
+          current: effort === null,
+        },
+        { label: "off", hint: "no thinking — fastest, best for long tool loops", current: effort === "off" },
+        { label: "low", hint: "brief reasoning", current: effort === "low" },
         { label: "medium", hint: "", current: effort === "medium" },
-        { label: "high", hint: "most thorough", current: effort === "high" },
+        { label: "high", hint: "most thorough — slow on local models", current: effort === "high" },
       ]);
       if (idx === null) return;
       next = idx === 0 ? null : (levels[idx] as Effort);
@@ -526,6 +583,10 @@ async function runInteractive(args: CliArgs): Promise<void> {
     effort = next;
     agent.provider.setEffort(effort);
     persist();
+    const label = agent.provider.effortLabel();
+    tui.status(`· effort ${label ?? effort ?? "default"}`);
+    const advice = effortAdvice(chosen, effort);
+    if (advice) tui.warn(`  ${advice}`);
   };
 
   for (;;) {

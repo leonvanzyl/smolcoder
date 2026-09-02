@@ -7,9 +7,10 @@
 import { Plan } from "../plan";
 import { ToolSpec } from "../providers/types";
 import { editFile, listFiles, readFile, searchFiles, writeFile } from "./fs-tools";
+import { syntaxCheck } from "./check";
 import { runCommand } from "./shell";
 import { TaskManager } from "./tasks";
-import { SandboxError } from "../sandbox";
+import { resolveInWorkspace, SandboxError } from "../sandbox";
 import { truncateMiddle } from "../util";
 
 export type Mode = "ro" | "write" | "yolo";
@@ -182,11 +183,17 @@ export async function executeTool(
       }
       case "write_file":
         result = writeFile(ctx.workspace, args);
-        if (!result.startsWith("Error")) ctx.filesTouched.add(String(args.path));
+        if (!result.startsWith("Error")) {
+          ctx.filesTouched.add(String(args.path));
+          result += afterWrite(ctx.workspace, String(args.path));
+        }
         break;
       case "edit_file":
         result = editFile(ctx.workspace, args);
-        if (!result.startsWith("Error")) ctx.filesTouched.add(String(args.path));
+        if (!result.startsWith("Error")) {
+          ctx.filesTouched.add(String(args.path));
+          result += afterWrite(ctx.workspace, String(args.path));
+        }
         break;
       case "run_command":
         if (typeof args.command !== "string" || !args.command.trim()) {
@@ -221,6 +228,20 @@ export async function executeTool(
   } catch (err: any) {
     if (err instanceof SandboxError) return `Error: ${err.message}`;
     return `Error: ${err?.message ?? String(err)}`;
+  }
+}
+
+/** Post-write hook: parse what was just written and coach on the first
+ * syntax error. A one-line warning riding on the success message is the
+ * cheapest possible feedback loop for a local model. */
+function afterWrite(workspace: string, relPath: string): string {
+  try {
+    const abs = resolveInWorkspace(workspace, relPath);
+    const warning = syntaxCheck(abs, relPath);
+    return warning ? `
+Warning: ${warning} Fix this before moving on (use edit_file).` : "";
+  } catch {
+    return "";
   }
 }
 

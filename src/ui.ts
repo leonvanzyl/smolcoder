@@ -216,6 +216,10 @@ export class UI implements AgentUI {
 
 export function summarizeArgs(name: string, args: Record<string, any>): string {
   try {
+    // Unparseable (usually cut-off) arguments: show what arrived, not "undefined".
+    if (args && typeof args.__raw === "string") {
+      return `(arguments could not be parsed: ${args.__raw.replace(/\s+/g, " ")}…)`;
+    }
     switch (name) {
       case "read_file":
         return String(args.path ?? "") + (args.offset ? ` from line ${args.offset}` : "");

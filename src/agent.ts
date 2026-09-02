@@ -41,6 +41,9 @@ export class Agent {
   private currentRequest = "";
   private planNudged = false;
   private abort: AbortController | null = null;
+  /** Speed/size figures for the last completed turn (for the turn-end label
+   * and headless stats). */
+  lastTurnStats: TurnStats | null = null;
 
   constructor(
     public provider: Provider,
@@ -123,6 +126,16 @@ export class Agent {
     let nudges = 0;
     let toolCallsThisTurn = 0;
     let sincePlanUpdate = 0;
+    const stats: TurnStats = {
+      modelCalls: 0,
+      toolCalls: 0,
+      generatedTokens: 0,
+      genSeconds: 0,
+      thinkingChars: 0,
+      promptTokensLast: 0,
+      durationMs: 0,
+    };
+    this.lastTurnStats = stats;
     try {
       while (steps++ < this.maxSteps) {
         // Context management before every request.
@@ -153,6 +166,13 @@ export class Agent {
           result.completionTokens,
           this.messages.length
         );
+        stats.modelCalls++;
+        if (result.generatedTokens) {
+          stats.generatedTokens += result.generatedTokens;
+          if (result.genTokPerSec) stats.genSeconds += result.generatedTokens / result.genTokPerSec;
+        }
+        if (result.promptTokens) stats.promptTokensLast = result.promptTokens;
+        if (result.thinking) stats.thinkingChars += result.thinking.length;
         if (result.content) this.ui.println(); // end the streamed line
 
         if (result.toolCalls.length === 0) {
@@ -165,10 +185,17 @@ export class Agent {
             // Reasoning models can burn the ENTIRE budget thinking, arriving
             // with no visible output at all — "continue where you left off"
             // would just restart the same doomed think. Target that case.
-            const nudgeText =
-              !result.content.trim()
-                ? "[Your reasoning used the entire output limit and produced no answer. Do not re-derive everything — reply now with your next tool call or a brief answer.]"
-                : "[Your reply was cut off by the output length limit. Continue where you left off. If a file was too large for one write_file call, split the content into separate files — writing the same path again replaces it completely.]";
+            // With thinking off, an empty truncated reply is almost always a
+            // tool call whose arguments (a whole file) overflowed the cap — it
+            // was never parsed, so nothing was saved and "continue" cannot
+            // work. Name the cap and coach the split explicitly.
+            const noContent = !result.content.trim();
+            const burnedByThinking = noContent && !!result.thinking?.trim();
+            const nudgeText = burnedByThinking
+              ? `[Your reasoning used the entire output limit (${this.provider.maxOutputTokens} tokens) and produced no answer. Do not re-derive everything — reply now with your next tool call or a brief answer.]`
+              : noContent
+                ? `[${this.truncatedCallHint()}]`
+                : `[Your reply was cut off by the output length limit of ${this.provider.maxOutputTokens} tokens. Continue where you left off. If a file was too large for one write_file call, split the content into separate files — writing the same path again replaces it completely.]`;
             this.messages.push({ role: "user", content: nudgeText });
             continue;
           }
@@ -204,11 +231,18 @@ export class Agent {
 
         for (const call of result.toolCalls) {
           if (signal.aborted) throw abortError();
-          this.ui.toolCall(call.name, call.args);
+          this.ui.toolCall(
+            call.name,
+            call.parseError ? { __raw: (call.rawArgs ?? "").slice(0, 80) } : call.args
+          );
 
           let output: string;
           if (call.parseError) {
-            output = `Error: your tool call arguments could not be parsed (${call.parseError}). Send the arguments as a single JSON object, e.g. {"path": "src/app.js"}.`;
+            // LM Studio streams the partial arguments of a cut-off call, so
+            // the overflow surfaces here as unparseable JSON.
+            output = result.truncated
+              ? `Error: ${this.truncatedCallHint()}`
+              : `Error: your tool call arguments could not be parsed (${call.parseError}). Send the arguments as a single JSON object, e.g. {"path": "src/app.js"}.`;
           } else if (!this.tools.some((t) => t.name === call.name)) {
             // HARD mode enforcement. The schemas sent to the model are only
             // advisory — a hallucinated or injected write_file/run_command in
@@ -217,6 +251,12 @@ export class Agent {
           } else {
             output = await this.gateAndExecute(call.name, call.args, signal);
             toolCallsThisTurn++;
+            stats.toolCalls++;
+            // Tier-0 context hygiene: a full overwrite makes every earlier
+            // read of that file wrong. Stub them out right away.
+            if (call.name === "write_file" && !output.startsWith("Error") && typeof call.args?.path === "string") {
+              this.ctxMgr.evictStaleReads(this.messages, call.args.path);
+            }
             // Keep the plan honest: small models forget to mark steps done
             // mid-flow, leaving the checklist stale for minutes. A periodic
             // one-line reminder riding on a tool result fixes it cheaply.
@@ -267,12 +307,26 @@ export class Agent {
       throw err;
     } finally {
       this.abort = null;
+      stats.durationMs = Date.now() - t0;
       if (completed) {
         this.ui.turnEnd(
-          `${MODE_LABELS[this.mode]} · ${this.provider.modelId} · ${fmtDuration(Date.now() - t0)}`
+          `${MODE_LABELS[this.mode]} · ${this.provider.modelId} · ${fmtDuration(stats.durationMs)}${describeStats(stats)}`
         );
       }
     }
+  }
+
+  /** Coaching for a tool call that overflowed the output cap. Exported via
+   * the class for tests. */
+  truncatedCallHint(): string {
+    const cap = this.provider.maxOutputTokens;
+    const part = Math.max(300, Math.floor(cap * 0.5));
+    return (
+      `Your tool call was cut off by the output limit of ${cap} tokens, so it was NOT executed and nothing was saved. ` +
+      `Send smaller calls: write the file in parts of at most ~${part} tokens — write_file with the first part, ` +
+      `then edit_file to append each next part (old_text = the last line you wrote, new_text = that line followed by the next part) — ` +
+      `or split the code across several smaller files.`
+    );
   }
 
   /** One model call, with bounded retries on transient backend failures
@@ -360,6 +414,33 @@ export class Agent {
       `ctx ${pct}% of ${this.provider.contextWindow.toLocaleString()} · ${this.provider.label} · ${this.mode}${taskPart}`
     );
   }
+}
+
+export interface TurnStats {
+  modelCalls: number;
+  toolCalls: number;
+  /** All tokens the model produced this turn, reasoning included. */
+  generatedTokens: number;
+  /** Seconds spent generating (from backend timings or stream wall-clock). */
+  genSeconds: number;
+  /** Characters of reasoning streamed this turn (~4 chars per token). */
+  thinkingChars: number;
+  /** Prompt size of the last request — where the context sits now. */
+  promptTokensLast: number;
+  durationMs: number;
+}
+
+/** " · 12 tools · 4.1k tok @ 118 tok/s" — the speed readout local-model users
+ * actually want to compare backends with. */
+export function describeStats(s: TurnStats): string {
+  const parts: string[] = [];
+  if (s.toolCalls) parts.push(`${s.toolCalls} tool${s.toolCalls === 1 ? "" : "s"}`);
+  if (s.generatedTokens) {
+    const k = s.generatedTokens >= 1000 ? `${(s.generatedTokens / 1000).toFixed(1)}k` : String(s.generatedTokens);
+    const rate = s.genSeconds > 0 ? ` @ ${Math.round(s.generatedTokens / s.genSeconds)} tok/s` : "";
+    parts.push(`${k} tok${rate}`);
+  }
+  return parts.length ? " · " + parts.join(" · ") : "";
 }
 
 function abortError(): Error {

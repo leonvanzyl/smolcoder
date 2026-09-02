@@ -1,11 +1,22 @@
 // LM Studio adapter — standard OpenAI-compatible /v1/chat/completions with SSE
 // streaming. The context window is whatever LM Studio loaded the model with;
 // we detect it and budget within it (we cannot change it per request).
+//
+// Reasoning is the part that decides whether LM Studio feels fast or slow.
+// LM Studio's API accepts reasoning_effort none|minimal|low|medium|high|xhigh,
+// but each MODEL only supports a subset (read from /api/v1/models). A value
+// the model does not support is silently replaced by the model's DEFAULT —
+// which for current qwen3.x builds is "xhigh", the maximum. That is how a
+// harness asking for "high" ends up with 8,000-token thinking bursts per tool
+// call. So: "off" is sent as "none" (measured: fully disables thinking), and
+// every other level is snapped to the nearest level the model really has.
 
 import {
   ChatOptions,
   ChatResult,
   Effort,
+  EFFORT_RANK,
+  estimateReplayTokens,
   MAX_OUTPUT_TOKENS,
   Msg,
   nextCallId,
@@ -14,6 +25,13 @@ import {
   ToolCall,
   ToolSpec,
 } from "./types";
+
+export interface ReasoningInfo {
+  /** Levels the loaded model supports, as reported by LM Studio. */
+  allowed: string[];
+  /** The level LM Studio applies when the request names none / an invalid one. */
+  default?: string;
+}
 
 function toWire(messages: Msg[]): any[] {
   return messages.map((m) => {
@@ -42,6 +60,33 @@ function toWireTools(tools: ToolSpec[]): any[] {
   }));
 }
 
+/** Exported for tests. Map a tiny-coder effort onto LM Studio's wire value,
+ * respecting what the model supports. Returns undefined for "leave it to the
+ * backend". */
+export function mapEffort(effort: Effort | null, info: ReasoningInfo | undefined): string | undefined {
+  if (effort === null) return undefined;
+  if (effort === "off") return "none";
+  const wireLevels = ["low", "medium", "high", "xhigh"];
+  if (!info || info.allowed.length === 0) return effort;
+  // Model-supported levels that the API also accepts (the model list uses
+  // "off"/"on" too; those are not valid wire values).
+  const candidates = wireLevels.filter((l) => info.allowed.includes(l));
+  if (candidates.length === 0) return effort;
+  if (candidates.includes(effort)) return effort;
+  const want = EFFORT_RANK[effort];
+  let best = candidates[0];
+  let bestDist = Infinity;
+  for (const cnd of candidates) {
+    const d = Math.abs(EFFORT_RANK[cnd] - want);
+    // Ties go to the LOWER level: on a local model the cheaper step wins.
+    if (d < bestDist || (d === bestDist && EFFORT_RANK[cnd] < EFFORT_RANK[best])) {
+      best = cnd;
+      bestDist = d;
+    }
+  }
+  return best;
+}
+
 export class LmStudioProvider implements Provider {
   readonly label: string;
   readonly maxOutputTokens: number;
@@ -52,7 +97,8 @@ export class LmStudioProvider implements Provider {
     private baseUrl: string,
     public readonly modelId: string,
     public readonly contextWindow: number,
-    maxOutputTokens = MAX_OUTPUT_TOKENS
+    maxOutputTokens = MAX_OUTPUT_TOKENS,
+    private reasoning?: ReasoningInfo
   ) {
     this.label = `lmstudio · ${modelId}`;
     this.maxOutputTokens = maxOutputTokens;
@@ -63,13 +109,31 @@ export class LmStudioProvider implements Provider {
     this.effortUnsupported = false;
   }
 
+  effortLabel(): string | null {
+    if (this.effortUnsupported) return this.effort ? `${this.effort} (ignored by this server)` : null;
+    if (this.effort === null) {
+      return this.reasoning?.default ? `default → ${this.reasoning.default}` : null;
+    }
+    const wire = mapEffort(this.effort, this.reasoning);
+    if (wire && wire !== this.effort && wire !== "none") return `${this.effort} → ${wire}`;
+    return null;
+  }
+
   async chat(messages: Msg[], tools: ToolSpec[], opts: ChatOptions = {}): Promise<ChatResult> {
-    // effort "off": LM Studio's OpenAI layer has no reliable way to disable
-    // thinking, but qwen-family models honor a per-turn /no_think soft switch
-    // in the latest USER message (measured: 9.8s -> 1.0s on the same request).
-    // Applied at wire time only — the internal transcript stays clean.
+    const effort = opts.effortOverride ?? this.effort;
     let wireMessages = messages;
-    if (this.effort === "off" && /qwen/i.test(this.modelId)) {
+    const base: any = {
+      model: this.modelId,
+      messages: toWire(wireMessages),
+      tools: tools.length ? toWireTools(tools) : undefined,
+      max_tokens: opts.maxTokens ?? this.maxOutputTokens,
+    };
+    const wireEffort = mapEffort(effort, this.reasoning);
+    if (wireEffort && !this.effortUnsupported) {
+      base.reasoning_effort = wireEffort;
+    } else if (effort === "off" && /qwen/i.test(this.modelId)) {
+      // Older LM Studio builds without reasoning_effort: fall back to the
+      // qwen per-turn /no_think soft switch (older qwen3 models honor it).
       wireMessages = messages.map((m) => ({ ...m }));
       for (let i = wireMessages.length - 1; i >= 0; i--) {
         if (wireMessages[i].role === "user") {
@@ -77,15 +141,7 @@ export class LmStudioProvider implements Provider {
           break;
         }
       }
-    }
-    const base: any = {
-      model: this.modelId,
-      messages: toWire(wireMessages),
-      tools: tools.length ? toWireTools(tools) : undefined,
-      max_tokens: this.maxOutputTokens,
-    };
-    if (this.effort && this.effort !== "off" && !this.effortUnsupported) {
-      base.reasoning_effort = this.effort;
+      base.messages = toWire(wireMessages);
     }
     const started = { streaming: false };
     try {
@@ -119,6 +175,9 @@ export class LmStudioProvider implements Provider {
       // Only degrade the request shape on a pre-stream HTTP rejection; a
       // transient error must propagate to chatWithRetry for backoff.
       if (!/returned 4\d\d/.test(msg)) throw err;
+      // A reasoning_effort rejection must reach chat()'s handler, not be
+      // masked by the stream-shape fallback ladder.
+      if (/reasoning|effort/i.test(msg)) throw err;
       try {
         return await this.request({ ...base, stream: true }, opts, started);
       } catch (err2: any) {
@@ -130,6 +189,7 @@ export class LmStudioProvider implements Provider {
   }
 
   private async request(body: any, opts: ChatOptions, started?: { streaming: boolean }): Promise<ChatResult> {
+    const t0 = Date.now();
     const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -151,21 +211,28 @@ export class LmStudioProvider implements Provider {
       }));
       if (started) started.streaming = true;
       if (msg.content) opts.onToken?.(msg.content);
+      const content = msg.content ?? "";
+      const total = Date.now() - t0;
       return {
-        content: msg.content ?? "",
+        content,
         toolCalls,
         promptTokens: data.usage?.prompt_tokens,
-        completionTokens: data.usage?.completion_tokens,
+        completionTokens: estimateReplayTokens(content, toolCalls),
+        generatedTokens: data.usage?.completion_tokens,
+        genTokPerSec: data.usage?.completion_tokens ? data.usage.completion_tokens / (total / 1000) : undefined,
         truncated: data.choices?.[0]?.finish_reason === "length",
       };
     }
 
     // SSE stream.
     let content = "";
+    let thinking = "";
     const partials = new Map<number, { id: string; name: string; args: string }>();
     let promptTokens: number | undefined;
     let completionTokens: number | undefined;
     let truncated = false;
+    let firstTokAt = 0;
+    let lastTokAt = 0;
 
     const handleLine = (rawLine: string) => {
       const line = rawLine.trim();
@@ -187,14 +254,19 @@ export class LmStudioProvider implements Provider {
       const delta = chunk.choices?.[0]?.delta;
       if (!delta) return;
       const reasoning = delta.reasoning_content ?? delta.reasoning;
+      let sawToken = false;
       if (typeof reasoning === "string" && reasoning) {
+        thinking += reasoning;
         opts.onThinking?.(reasoning);
+        sawToken = true;
       }
       if (delta.content) {
         content += delta.content;
         opts.onToken?.(delta.content);
+        sawToken = true;
       }
       if (Array.isArray(delta.tool_calls)) {
+        sawToken = true;
         for (const tc of delta.tool_calls) {
           const idx = tc.index ?? 0;
           const p = partials.get(idx) ?? { id: "", name: "", args: "" };
@@ -203,6 +275,11 @@ export class LmStudioProvider implements Provider {
           if (tc.function?.arguments) p.args += tc.function.arguments;
           partials.set(idx, p);
         }
+      }
+      if (sawToken) {
+        const now = Date.now();
+        if (!firstTokAt) firstTokAt = now;
+        lastTokAt = now;
       }
     };
 
@@ -232,6 +309,19 @@ export class LmStudioProvider implements Provider {
         ...parseArgs(p.args),
       }));
 
-    return { content, toolCalls, promptTokens, completionTokens, truncated };
+    const genMs = lastTokAt > firstTokAt ? lastTokAt - firstTokAt : 0;
+    return {
+      content,
+      toolCalls,
+      thinking: thinking || undefined,
+      promptTokens,
+      // LM Studio does not replay reasoning into the next prompt, so only the
+      // visible reply and tool-call JSON count toward the next request.
+      completionTokens: estimateReplayTokens(content, toolCalls),
+      generatedTokens: completionTokens,
+      genTokPerSec: completionTokens && genMs > 0 ? completionTokens / (genMs / 1000) : undefined,
+      ttftMs: firstTokAt ? firstTokAt - t0 : undefined,
+      truncated,
+    };
   }
 }

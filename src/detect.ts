@@ -6,8 +6,11 @@
 //     model's true maximum from /api/show and set num_ctx explicitly, because
 //     Ollama's defaults vary by version and silently truncate the prompt.
 //   - LM Studio: the window is fixed when the model is loaded in LM Studio's
-//     UI. We READ loaded_context_length from /api/v0/models and adapt to it.
+//     UI. We READ it from /api/v1/models (or the older /api/v0) and adapt.
+//     The same endpoint tells us which reasoning levels the model supports
+//     and which one it defaults to — that default is often the MAXIMUM.
 
+import { ReasoningInfo } from "./providers/lmstudio";
 import { tryFetchJson } from "./util";
 
 export type BackendKind = "ollama" | "lmstudio";
@@ -25,6 +28,8 @@ export interface DetectedModel {
   maxContext?: number;
   /** LM Studio only: whether the model is currently loaded. */
   loaded?: boolean;
+  /** LM Studio only: reasoning levels the model supports and its default. */
+  reasoning?: ReasoningInfo;
   note?: string;
 }
 
@@ -42,6 +47,7 @@ function ollamaBaseUrl(): string {
 
 const DEFAULT_OLLAMA_CTX_CAP = 32768; // avoid surprise VRAM blowups on huge-window models
 const LMSTUDIO_JIT_GUESS = 4096; // LM Studio's usual default when a model is JIT-loaded
+const LMSTUDIO_BASE = "http://127.0.0.1:1234";
 
 export async function detectOllamaModels(): Promise<DetectedModel[]> {
   const base = ollamaBaseUrl();
@@ -55,8 +61,45 @@ export async function detectOllamaModels(): Promise<DetectedModel[]> {
   }));
 }
 
+const NOT_LOADED_NOTE =
+  "not loaded yet — LM Studio will load it on first use, likely at a small default context. For longer sessions, load it in LM Studio with a bigger context first.";
+
+/** Exported for tests: parse LM Studio's /api/v1/models listing. */
+export function parseLmStudioV1(data: any): DetectedModel[] | null {
+  if (!data || !Array.isArray(data.models)) return null;
+  return data.models
+    .filter((m: any) => m.type === "llm" || m.type === "vlm" || m.type === undefined)
+    .map((m: any) => {
+      const inst = Array.isArray(m.loaded_instances) ? m.loaded_instances[0] : undefined;
+      const loaded = !!inst;
+      const max = typeof m.max_context_length === "number" ? m.max_context_length : undefined;
+      const loadedCtx =
+        typeof inst?.config?.context_length === "number" ? inst.config.context_length : undefined;
+      const r = m.capabilities?.reasoning;
+      const reasoning: ReasoningInfo | undefined =
+        r && Array.isArray(r.allowed_options)
+          ? { allowed: r.allowed_options.map(String), default: r.default ? String(r.default) : undefined }
+          : undefined;
+      return {
+        id: String(inst?.id ?? m.key),
+        backend: "lmstudio" as const,
+        baseUrl: LMSTUDIO_BASE,
+        contextWindow: loaded && loadedCtx ? loadedCtx : Math.min(max ?? LMSTUDIO_JIT_GUESS, LMSTUDIO_JIT_GUESS),
+        maxContext: max,
+        loaded,
+        reasoning,
+        note: loaded && loadedCtx ? undefined : NOT_LOADED_NOTE,
+      };
+    });
+}
+
 export async function detectLmStudioModels(): Promise<DetectedModel[]> {
-  const base = "http://127.0.0.1:1234";
+  const base = LMSTUDIO_BASE;
+  // Newest listing first: it carries the loaded context, and the reasoning
+  // levels the model supports (needed to make effort mean what it says).
+  const v1 = parseLmStudioV1(await tryFetchJson(`${base}/api/v1/models`));
+  if (v1) return v1;
+
   const data = await tryFetchJson(`${base}/api/v0/models`);
   if (data && Array.isArray(data.data)) {
     return data.data
@@ -72,8 +115,7 @@ export async function detectLmStudioModels(): Promise<DetectedModel[]> {
           contextWindow = loadedCtx;
         } else {
           contextWindow = Math.min(max ?? LMSTUDIO_JIT_GUESS, LMSTUDIO_JIT_GUESS);
-          note =
-            "not loaded yet — LM Studio will load it on first use, likely at a small default context. For longer sessions, load it in LM Studio with a bigger context first.";
+          note = NOT_LOADED_NOTE;
         }
         return {
           id: m.id as string,
@@ -87,9 +129,9 @@ export async function detectLmStudioModels(): Promise<DetectedModel[]> {
       });
   }
   // Older LM Studio builds: fall back to the OpenAI-compat listing (no context info).
-  const v1 = await tryFetchJson(`${base}/v1/models`);
-  if (v1 && Array.isArray(v1.data)) {
-    return v1.data
+  const v1compat = await tryFetchJson(`${base}/v1/models`);
+  if (v1compat && Array.isArray(v1compat.data)) {
+    return v1compat.data
       .filter((m: any) => !String(m.id).includes("embed"))
       .map((m: any) => ({
         id: m.id as string,

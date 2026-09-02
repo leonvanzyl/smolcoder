@@ -1,0 +1,11 @@
+Build a playable Minecraft-style voxel game in this folder (it is empty). Requirements:
+
+- Plain HTML + JavaScript, no build step, no npm. Load three.js from a CDN.
+- Files: index.html, style.css, game.js (keep game.js under ~600 lines; split into more files if needed).
+- A procedurally generated terrain of blocks (grass, dirt, stone, at least 24x24 wide, a few blocks tall, with some hills), rendered efficiently (one mesh per block type, or instanced/merged geometry — do not create thousands of separate meshes with separate draw calls).
+- First-person controls: click the page to lock the pointer, WASD to move, mouse to look, space to jump, gravity and collision with the ground so the player walks on top of the terrain.
+- Left click removes the block you are looking at; right click places a block next to it. A crosshair in the middle of the screen.
+- A simple sky color, directional light, and a short HUD line explaining the controls.
+- It must work when served from a static file server, so use a script tag for three.js from https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js via an import map, or a UMD build if you prefer, and load game.js as a module.
+
+When you are done, check every file for syntax errors, then start a static server as a background task (for example: python -m http.server 8123 or npx serve -l 8123) and confirm it serves index.html. Finish with a short summary of what you built and how to play.
