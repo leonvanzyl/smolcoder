@@ -14,7 +14,7 @@ Works on Windows, macOS, and Linux. Zero runtime dependencies.
 tiny-coder opens straight into a session — the last model you used (or the first one detected) is picked automatically. Everything is changed in-session:
 
 - **`/` slash commands** with an autocomplete menu: `/models` (switch model, type to filter), `/mode`, `/effort`, `/tasks`, `/compact`, …
-- **shift+tab** cycles read-only → write → yolo
+- **shift+tab** cycles read-only → edit → bypass permissions
 - **esc** cancels a running turn; **ctrl+c ×2** quits
 - The status line under the input shows mode · model · effort · context fill · running background tasks, live.
 - `/effort` maps to Ollama's `think` parameter and LM Studio's `reasoning_effort`. `off` disables thinking on qwen3-class models — a real speedup. Models that don't support it fall back silently.
@@ -35,10 +35,10 @@ Most coding harnesses treat local models as an afterthought: you configure endpo
 | Mode | Files | Commands |
 |------|-------|----------|
 | `ro` (read-only) | read/search only | none |
-| `write` (default) | read/write/edit | each command asks y/n (or **a**lways-allow that program for the session) |
-| `yolo` | read/write/edit | no approval prompts |
+| `edit` (default) | read/write/edit | runs freely inside the workspace (`npm install`, tests, scripts); a command that reaches outside it asks y/n (or **a**lways-allow that program for the session) |
+| `bypass` (bypass permissions) | read/write/edit | never asks for approval |
 
-The mode decides which tools *exist* — in read-only mode the model is never even told a write tool exists. File tools are sandboxed to the workspace folder (symlink escapes included). Commands run with the workspace as their working directory.
+The mode decides which tools *exist* — in read-only mode the model is never even told a write tool exists. File tools are sandboxed to the workspace folder (symlink escapes included). Commands run with the workspace as their working directory, and in edit mode the command text is scanned before it runs: absolute paths outside the workspace, `/tmp`, `~`, temp-dir variables, `..` climbing past the root, and global package installs all trigger the approval prompt (with the reason shown). This is a best-effort text scan, not an OS sandbox — a command can still reach outside through, say, a script it runs — so use read-only mode for untrusted work and bypass only when you want no prompts at all.
 
 ## The plan — a compass for small models
 
@@ -64,7 +64,7 @@ If the workspace contains an `AGENTS.md`, its contents are injected right after 
 ```bash
 tiny-coder                        # current folder, remembers your last model & mode
 tiny-coder path/to/project        # a specific workspace
-tiny-coder --mode yolo            # no approval prompts
+tiny-coder --mode bypass          # bypass permissions: no approval prompts
 tiny-coder --model qwen3          # pick a model by (partial) name
 tiny-coder --ctx 16384            # cap the context window (Ollama: sets num_ctx)
 tiny-coder -p "fix the failing test"   # one-shot, non-interactive
@@ -120,7 +120,7 @@ harness sends and from load settings:
 
 ## End-to-end: the same Minecraft build on both backends
 
-One headless run each (`tiny-coder -p "<prompt>" --mode yolo --effort off`), same
+One headless run each (`tiny-coder -p "<prompt>" --mode bypass --effort off`), same
 model weights, same prompt (procedural voxel terrain, first-person controls, block
 place/remove, three.js from a CDN, then serve it). Nobody typed "continue".
 

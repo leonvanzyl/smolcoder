@@ -57,13 +57,14 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === "--mode" || a === "-m") {
       const v = argv[++i];
       if (v === "ro" || v === "read-only" || v === "readonly") args.mode = "ro";
-      else if (v === "write" || v === "w") args.mode = "write";
-      else if (v === "yolo" || v === "y") args.mode = "yolo";
+      else if (v === "edit" || v === "e" || v === "write" || v === "w") args.mode = "edit";
+      else if (v === "bypass" || v === "bypass-permissions" || v === "b" || v === "yolo" || v === "y")
+        args.mode = "bypass";
       else {
-        console.error(`Unknown mode "${v}". Use ro, write, or yolo.`);
+        console.error(`Unknown mode "${v}". Use ro, edit, or bypass.`);
         process.exit(1);
       }
-    } else if (a === "--yolo") args.mode = "yolo";
+    } else if (a === "--bypass" || a === "--bypass-permissions" || a === "--yolo") args.mode = "bypass";
     else if (a === "--model") args.model = argv[++i];
     else if (a === "--ctx") args.ctx = Number(argv[++i]) || undefined;
     else if (a === "--effort") {
@@ -96,8 +97,9 @@ ${c.bold("Usage:")}
   tiny-coder [workspace] [options]
 
 ${c.bold("Options:")}
-  -m, --mode <ro|write|yolo>   ro: read files only. write: read/write files,
-                               commands need a y/n approval. yolo: no approvals.
+  -m, --mode <ro|edit|bypass>  ro: read files only. edit: read/write files and run
+                               commands inside the workspace; anything reaching
+                               outside it asks y/n. bypass: no approvals at all.
   --model <name>               pick a model by (partial) name
   --ctx <tokens>               force a context window (Ollama: sends num_ctx)
   --effort <level>             reasoning effort: off, low, medium, high, default
@@ -107,7 +109,7 @@ ${c.bold("Options:")}
   -v, --version                version
 
 ${c.bold("Keys:")}
-  shift+tab   cycle mode (read-only → write → yolo)
+  shift+tab   cycle mode (read-only → edit → bypass permissions)
   /           slash commands (autocomplete menu)
   esc         cancel a running turn · clear the input
   ctrl+c ×2   quit
@@ -123,11 +125,13 @@ ${c.bold("Slash commands:")}
 function loadConfig(): Config {
   try {
     const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
-    // Never let yolo be inherited implicitly from a past session — a single
-    // shift+tab into yolo would otherwise silently persist unattended command
-    // execution into every later run, including headless -p in CI. Requires an
-    // explicit flag (-m yolo / --yolo) to enter yolo.
-    if (cfg.lastMode === "yolo") cfg.lastMode = "write";
+    // Never let bypass be inherited implicitly from a past session — a single
+    // shift+tab into it would otherwise silently persist unattended, unchecked
+    // command execution into every later run, including headless -p in CI.
+    // Requires an explicit flag (-m bypass / --bypass) each time. Old configs
+    // saved "write"/"yolo" under the previous mode names.
+    if (cfg.lastMode === "write") cfg.lastMode = "edit";
+    if (cfg.lastMode === "yolo" || cfg.lastMode === "bypass") cfg.lastMode = "edit";
     return cfg;
   } catch {
     return {};
@@ -234,7 +238,7 @@ function sessionLine(m: DetectedModel, mode: Mode): string {
   return `${c.green("●")} ${m.backend} · ${c.bold(m.id)} · ctx ${m.contextWindow.toLocaleString()} · ${MODE_LABELS[mode]} mode`;
 }
 
-const MODE_ORDER: Mode[] = ["ro", "write", "yolo"];
+const MODE_ORDER: Mode[] = ["ro", "edit", "bypass"];
 
 const LOGO_ROWS = [
   "████████╗ ██╗ ███╗   ██╗ ██╗   ██╗",
@@ -265,7 +269,7 @@ function fmtTokens(n: number): string {
 
 function modeColored(mode: Mode): string {
   const label = MODE_LABELS[mode];
-  if (mode === "yolo") return c.red(c.bold(label));
+  if (mode === "bypass") return c.red(c.bold(label));
   if (mode === "ro") return c.magenta(c.bold(label));
   return c.cyan(c.bold(label));
 }
@@ -308,7 +312,7 @@ async function runHeadless(args: CliArgs): Promise<void> {
   const cfg = loadConfig();
   let chosen = autoPickModel(models, args.model, cfg.lastModel);
   chosen = await resolveContextWindow(chosen, args.ctx);
-  const mode = args.mode ?? cfg.lastMode ?? "write";
+  const mode = args.mode ?? cfg.lastMode ?? "edit";
 
   const shell = pickShell();
   const provider = makeProvider(chosen);
@@ -369,7 +373,7 @@ async function runHeadless(args: CliArgs): Promise<void> {
 
 const SLASH_COMMANDS = [
   { name: "models", desc: "Switch model" },
-  { name: "mode", desc: "Set mode (ro / write / yolo)" },
+  { name: "mode", desc: "Set mode (ro / edit / bypass)" },
   { name: "effort", desc: "Set reasoning effort" },
   { name: "plan", desc: "Show the agent's plan" },
   { name: "context", desc: "Show context usage" },
@@ -407,7 +411,7 @@ async function runInteractive(args: CliArgs): Promise<void> {
   chosen = await resolveContextWindow(chosen, args.ctx);
   process.stdout.write("\r\x1b[2K");
 
-  const mode0 = args.mode ?? cfg.lastMode ?? "write";
+  const mode0 = args.mode ?? cfg.lastMode ?? "edit";
   let effort: Effort | null = args.effort !== undefined ? args.effort : (cfg.effort ?? null);
 
   const shell = pickShell();
@@ -546,12 +550,26 @@ async function runInteractive(args: CliArgs): Promise<void> {
 
   const setMode = async (arg?: string): Promise<void> => {
     let next: Mode | undefined =
-      arg === "ro" ? "ro" : arg === "write" ? "write" : arg === "yolo" ? "yolo" : undefined;
+      arg === "ro"
+        ? "ro"
+        : arg === "edit" || arg === "write"
+          ? "edit"
+          : arg === "bypass" || arg === "yolo"
+            ? "bypass"
+            : undefined;
     if (!next) {
       const idx = await tui.select("Select mode", [
         { label: "read-only", hint: "read and search files only", current: agent.mode === "ro" },
-        { label: "write", hint: "edit files; commands ask y/n", current: agent.mode === "write" },
-        { label: "yolo", hint: "full access, no approvals", current: agent.mode === "yolo" },
+        {
+          label: "edit",
+          hint: "edit files; run commands inside the workspace, ask y/n for anything outside it",
+          current: agent.mode === "edit",
+        },
+        {
+          label: "bypass permissions",
+          hint: "full access, never asks for approval",
+          current: agent.mode === "bypass",
+        },
       ]);
       if (idx === null) return;
       next = MODE_ORDER[idx];

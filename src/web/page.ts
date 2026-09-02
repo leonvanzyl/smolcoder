@@ -62,6 +62,7 @@ export const PAGE_HTML = `<!doctype html>
   .ask button:hover, .ask .opt:hover { border-color: var(--accent); }
   .ask .opt.current { border-color: var(--green); }
   .ask .opt .hint { color: var(--dim); font-size: 12px; margin-left: 8px; }
+  .ask > .hint { color: var(--dim); font-size: 12px; margin-top: 2px; }
   #bottom { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); padding: 8px 16px 14px; }
   #bottom .inner { max-width: 920px; margin: 0 auto; position: relative; }
   #menu { position: absolute; bottom: 100%; left: 0; right: 0; background: var(--box); border: 1px solid #232a2f; display: none; }
@@ -78,7 +79,7 @@ export const PAGE_HTML = `<!doctype html>
   #actionbtn.stop:hover { border-color: var(--red); color: var(--red); }
   #status { margin-top: 6px; font-size: 12.5px; color: var(--dim); }
   #status .mode { font-weight: 700; }
-  #status .mode.write { color: var(--accent); } #status .mode.yolo { color: var(--red); } #status .mode.ro { color: var(--magenta); }
+  #status .mode.edit { color: var(--accent); } #status .mode.bypass { color: var(--red); } #status .mode.ro { color: var(--magenta); }
   #status .eff { color: var(--yellow); } #status .plan-chip { color: var(--accent); } #status .plan-chip.done { color: var(--green); }
   #hint { font-size: 12px; color: var(--gray); margin-top: 4px; }
 </style>
@@ -235,7 +236,7 @@ function renderState(s) {
   state = Object.assign(state, s);
   const st = document.getElementById("status");
   st.innerHTML = "";
-  const mode = el("span", "mode " + s.mode, s.mode === "ro" ? "read-only" : s.mode);
+  const mode = el("span", "mode " + s.mode, s.mode === "ro" ? "read-only" : s.mode === "bypass" ? "bypass permissions" : s.mode);
   st.appendChild(mode);
   st.appendChild(document.createTextNode(" · " + s.model + " (" + s.backend + ")"));
   if (s.effort) { st.appendChild(document.createTextNode(" · ")); st.appendChild(el("span", "eff", s.effort)); }
@@ -294,6 +295,7 @@ function handle(m) {
       endThought(); curText = null;
       const box = el("div", "ask");
       box.appendChild(el("div", "", "run?")); box.appendChild(el("div", "cmd", m.command));
+      if (m.reason) box.appendChild(el("div", "hint", m.reason));
       ["yes", "no", "always"].forEach(a => {
         const b = el("button", "", a === "always" ? "always allow this program" : a);
         b.onclick = () => { post("/confirm", { id: m.id, answer: a }); box.remove(); add(el("div", "line-status", a + " — " + m.command)); };

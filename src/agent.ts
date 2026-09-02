@@ -11,11 +11,12 @@ import {
   executeTool,
   Mode,
   MODE_LABELS,
-  needsApproval,
+  commandOf,
   ToolContext,
 } from "./tools/index";
 import { AgentUI } from "./ui";
 import { c, fmtDuration } from "./util";
+import { commandEscapesWorkspace } from "./sandbox";
 
 const TRANSIENT_ERROR = /fetch failed|econn|socket|network|timed?.?out|50[0234]/i;
 
@@ -357,15 +358,18 @@ export class Agent {
     args: Record<string, any>,
     signal?: AbortSignal
   ): Promise<string> {
-    const command = needsApproval(name, args);
-    // Gate everywhere except yolo (defense-in-depth: in ro mode exec tools are
-    // already rejected before this point by the tool-existence check).
-    if (command !== null && this.mode !== "yolo") {
-      if (!isAutoApproved(command, this.alwaysAllowed)) {
+    const command = commandOf(name, args);
+    // Gate everywhere except bypass (defense-in-depth: in ro mode exec tools are
+    // already rejected before this point by the tool-existence check). Edit
+    // mode runs commands that stay inside the workspace without asking and
+    // only prompts for ones that reach outside it.
+    if (command !== null && this.mode !== "bypass") {
+      const reason = commandEscapesWorkspace(command, this.toolCtx.workspace);
+      if (reason !== null && !isAutoApproved(command, this.alwaysAllowed)) {
         if (!this.interactive) {
-          return `Error: running commands needs user approval, and this session is non-interactive. The user must rerun tiny-coder in yolo mode (--mode yolo) to allow commands, or run this themselves: ${command}`;
+          return `Error: this command ${reason}, which needs user approval, and this session is non-interactive. Keep every path inside the workspace (relative paths, a scratch folder in the workspace instead of /tmp), or the user can rerun tiny-coder with --mode bypass, or run this themselves: ${command}`;
         }
-        const answer = await this.ui.confirmCommand(command);
+        const answer = await this.ui.confirmCommand(command, reason);
         if (answer === "no") {
           return "The user declined to run this command. Continue without it, or ask the user what to do instead.";
         }

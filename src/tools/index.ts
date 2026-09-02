@@ -13,12 +13,12 @@ import { TaskManager } from "./tasks";
 import { resolveInWorkspace, SandboxError } from "../sandbox";
 import { truncateMiddle } from "../util";
 
-export type Mode = "ro" | "write" | "yolo";
+export type Mode = "ro" | "edit" | "bypass";
 
 export const MODE_LABELS: Record<Mode, string> = {
   ro: "read-only",
-  write: "write",
-  yolo: "yolo",
+  edit: "edit",
+  bypass: "bypass permissions",
 };
 
 const TOOL_RESULT_CAP = 10000; // chars — final safety net over per-tool caps
@@ -245,8 +245,9 @@ Warning: ${warning} Fix this before moving on (use edit_file).` : "";
   }
 }
 
-/** Does this call need approval in write mode? (yolo: never; ro: tool doesn't exist) */
-export function needsApproval(name: string, args: Record<string, any>): string | null {
+/** The command a call would run, if it is an exec call (edit mode may gate it;
+ * bypass never asks; in ro mode the tool does not exist). */
+export function commandOf(name: string, args: Record<string, any>): string | null {
   if (name === "run_command") return String(args.command ?? "");
   if (name === "task" && args.action === "start") return String(args.command ?? "");
   return null;

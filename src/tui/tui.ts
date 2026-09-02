@@ -85,7 +85,11 @@ export class Tui implements SessionUI {
     index: number;
     resolve: (i: number | null) => void;
   } | null = null;
-  private confirmState: { command: string; resolve: (r: "yes" | "no" | "always") => void } | null =
+  private confirmState: {
+    command: string;
+    reason?: string;
+    resolve: (r: "yes" | "no" | "always") => void;
+  } | null =
     null;
   private spinnerTimer: NodeJS.Timeout | null = null;
   private spinnerActive = false;
@@ -133,12 +137,12 @@ export class Tui implements SessionUI {
     });
   }
 
-  confirmCommand(command: string): Promise<"yes" | "no" | "always"> {
+  confirmCommand(command: string, reason?: string): Promise<"yes" | "no" | "always"> {
     this.stopSpinner();
     this.hideFrame();
     this.state = "confirm";
     return new Promise((resolve) => {
-      this.confirmState = { command, resolve };
+      this.confirmState = { command, reason, resolve };
       this.redraw();
     });
   }
@@ -447,6 +451,7 @@ export class Tui implements SessionUI {
       if (filtered.length > 10) lines.push(c.dim(`   … ${filtered.length - 10} more (type to filter)`));
     } else if (this.state === "confirm" && this.confirmState) {
       lines.push(BAR + c.yellow("run? ") + c.bold(this.confirmState.command.slice(0, this.width() - 8)));
+      if (this.confirmState.reason) lines.push("  " + c.dim(this.confirmState.reason));
       const program = this.confirmState.command.trim().split(/\s+/)[0];
       lines.push(
         "  " + c.dim(`[y]es · [n]o · [a]lways allow '${program}' this session`)

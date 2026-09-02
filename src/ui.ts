@@ -19,7 +19,8 @@ export interface AgentUI {
   error(s: string): void;
   startSpinner(label: string): void;
   stopSpinner(): void;
-  confirmCommand(command: string): Promise<"yes" | "no" | "always">;
+  /** Ask the user to approve a command; `reason` says why it was not auto-run. */
+  confirmCommand(command: string, reason?: string): Promise<"yes" | "no" | "always">;
   /** Called when a user turn finishes normally, with a short summary label. */
   turnEnd(label: string): void;
   /** Called whenever the agent changes its plan — render the checklist. */
@@ -93,10 +94,12 @@ export class UI implements AgentUI {
   }
 
   /** y / n / a(lways allow this program for the session) */
-  async confirmCommand(command: string): Promise<"yes" | "no" | "always"> {
+  async confirmCommand(command: string, reason?: string): Promise<"yes" | "no" | "always"> {
     this.stopSpinner();
     const answer = await this.ask(
-      `${c.yellow("run?")} ${c.bold(command)}\n  ${c.dim("[y]es / [n]o / [a]lways allow this program this session:")} `
+      `${c.yellow("run?")} ${c.bold(command)}\n` +
+        (reason ? `  ${c.dim(reason)}\n` : "") +
+        `  ${c.dim("[y]es / [n]o / [a]lways allow this program this session:")} `
     );
     const ch = answer.trim().toLowerCase();
     if (ch === "a" || ch === "always") return "always";

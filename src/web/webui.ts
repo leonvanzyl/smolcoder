@@ -177,9 +177,9 @@ export class WebUI implements SessionUI {
     );
   }
 
-  confirmCommand(command: string): Promise<"yes" | "no" | "always"> {
+  confirmCommand(command: string, reason?: string): Promise<"yes" | "no" | "always"> {
     const id = ++this.askId;
-    this.broadcast({ t: "confirm", id, command });
+    this.broadcast({ t: "confirm", id, command, reason });
     return new Promise((resolve) =>
       this.pending.set(id, (a) => resolve(a === "always" ? "always" : a === "yes" ? "yes" : "no"))
     );

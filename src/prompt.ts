@@ -41,9 +41,9 @@ export function buildSystemPrompt(opts: {
   const modeLine =
     opts.mode === "ro"
       ? "You are in read-only mode: you can read and search files but not change anything."
-      : opts.mode === "write"
-        ? "You can read, write and edit files freely; commands you run may ask the user for approval first."
-        : "You have full access to files and commands.";
+      : opts.mode === "edit"
+        ? "You can read, write and edit files freely and run commands (install packages, run tests, scripts) without asking, as long as everything stays inside the workspace. A command that touches paths outside it (absolute paths, /tmp, ~, ..) asks the user for approval first — so keep scratch files inside the workspace, e.g. in a .scratch/ folder."
+        : "You have full access to files and commands; nothing asks the user for approval.";
 
   return (
     `You are tiny-coder, a coding agent working in the workspace ${opts.workspace} on ${os}. ` +

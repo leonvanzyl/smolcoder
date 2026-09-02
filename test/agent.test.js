@@ -38,10 +38,10 @@ function scriptedProvider(replies) {
   };
 }
 
-function makeAgent(provider, ui) {
+function makeAgent(provider, ui, mode = "bypass", interactive = false) {
   const ws = fs.mkdtempSync(path.join(os.tmpdir(), "tc-agent-"));
   const toolCtx = { workspace: ws, taskManager: new TaskManager(ws), plan: new Plan(), filesTouched: new Set(), commandsRun: [] };
-  return new Agent(provider, "yolo", "sys", toolCtx, new ContextManager(8000, 2000), new EventBus(), ui, false, 20);
+  return new Agent(provider, mode, "sys", toolCtx, new ContextManager(8000, 2000), new EventBus(), ui, interactive, 20);
 }
 
 test("a cut-off tool call (empty, truncated, no thinking) is coached to split the file", async () => {
@@ -97,4 +97,62 @@ test("turn stats accumulate tokens, speed and tool calls", async () => {
   // 200 tok @ 100/s = 2 s, 50 tok @ 50/s = 1 s → 250 tok over 3 s ≈ 83 tok/s
   assert.equal(Math.round(st.generatedTokens / st.genSeconds), 83);
   assert.match(ui.lines.find((l) => l.startsWith("END ")), /1 tool · 250 tok @ 83 tok\/s/);
+});
+
+test("edit mode: an in-workspace command runs without asking", async () => {
+  const provider = scriptedProvider([
+    { content: "", toolCalls: [{ id: "c1", name: "run_command", args: { command: "echo hello-from-tree" } }] },
+    { content: "done", toolCalls: [] },
+  ]);
+  const ui = fakeUi();
+  let asked = 0;
+  ui.confirmCommand = async () => { asked++; return "no"; };
+  const agent = makeAgent(provider, ui, "edit", true);
+  await agent.runTurn("go");
+  assert.equal(asked, 0);
+  const toolMsg = provider.seen[1].find((m) => m.role === "tool");
+  assert.match(toolMsg.content, /hello-from-tree/);
+});
+
+test("edit mode: a command reaching outside the workspace asks, with the reason", async () => {
+  const provider = scriptedProvider([
+    { content: "", toolCalls: [{ id: "c1", name: "run_command", args: { command: "node /tmp/probe.mjs && node /tmp/other.mjs" } }] },
+    { content: "done", toolCalls: [] },
+  ]);
+  const ui = fakeUi();
+  const asks = [];
+  ui.confirmCommand = async (command, reason) => { asks.push({ command, reason }); return "no"; };
+  const agent = makeAgent(provider, ui, "edit", true);
+  await agent.runTurn("go");
+  assert.equal(asks.length, 1);
+  assert.match(asks[0].reason, /outside the workspace \(\/tmp\/probe\.mjs\)/);
+  const toolMsg = provider.seen[1].find((m) => m.role === "tool");
+  assert.match(toolMsg.content, /declined/);
+});
+
+test("edit mode, headless: an outside command is refused with coaching instead of hanging", async () => {
+  const provider = scriptedProvider([
+    { content: "", toolCalls: [{ id: "c1", name: "run_command", args: { command: "cat ~/.npmrc" } }] },
+    { content: "done", toolCalls: [] },
+  ]);
+  const ui = fakeUi();
+  ui.confirmCommand = async () => { throw new Error("must not prompt when non-interactive"); };
+  const agent = makeAgent(provider, ui, "edit", false);
+  await agent.runTurn("go");
+  const toolMsg = provider.seen[1].find((m) => m.role === "tool");
+  assert.match(toolMsg.content, /^Error: this command uses the home directory/);
+  assert.match(toolMsg.content, /--mode bypass/);
+});
+
+test("bypass mode never asks", async () => {
+  const provider = scriptedProvider([
+    { content: "", toolCalls: [{ id: "c1", name: "run_command", args: { command: "echo ~/nothing-is-read" } }] },
+    { content: "done", toolCalls: [] },
+  ]);
+  const ui = fakeUi();
+  ui.confirmCommand = async () => { throw new Error("bypass must not prompt"); };
+  const agent = makeAgent(provider, ui, "bypass", true);
+  await agent.runTurn("go");
+  const toolMsg = provider.seen[1].find((m) => m.role === "tool");
+  assert.match(toolMsg.content, /nothing-is-read/);
 });
