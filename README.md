@@ -194,4 +194,4 @@ and a parse check cannot catch runtime errors.) Two things made the runs work at
 
 ## License
 
-MIT
+[MIT](LICENSE)
