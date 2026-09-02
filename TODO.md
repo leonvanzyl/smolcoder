@@ -11,6 +11,8 @@
   by side, transcripts saved under `~/.smolcoder/sessions/` and resumable after a restart, a second
   `smol --web` joins the running hub. Right panel with browser tabs (dev-server URLs suggested) and
   streaming terminal tabs (persistent shell, no PTY).
+- [x] **Model-written session titles** in the web sidebar — one call with thinking off after the first
+  turn replaces the verbatim first message; manual renames are never overwritten.
 - [x] **Markdown rendering in the web page.**
 - [x] **Reasoning effort that means what it says on LM Studio** — reads the model's supported
   levels and default from `/api/v1/models`, sends `none` for off, snaps other levels to what the

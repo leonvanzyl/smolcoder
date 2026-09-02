@@ -12,6 +12,7 @@ const { SessionChannel } = require("../dist/web/channel");
 const { SessionStore, WorkspaceStore, workspaceKey } = require("../dist/web/store");
 const { Terminal, stripControl, toOsPath } = require("../dist/web/terminal");
 const { WebHub, browseDir, readHubRecord } = require("../dist/web/hub");
+const { cleanTitle, suggestTitle } = require("../dist/session");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, ms = 4000, label = "condition") {
@@ -210,6 +211,8 @@ function fakeFactory(log) {
       announce() { ui.status("· fake session ready"); },
       restore(s) { session.restored = s; },
       snapshot: () => ({ messages: [{ role: "user", content: "x" }], plan: [], filesTouched: [], commandsRun: [], originalRequest: "x", currentRequest: "x", mode: "edit", effort: null, model: "fake-model", backend: "ollama" }),
+      // The "model" takes a moment to name the session, like a real one.
+      async suggestTitle() { await sleep(300); return "Hello Session"; },
       async run() {
         for (;;) {
           const input = await ui.readInput();
@@ -218,6 +221,7 @@ function fakeFactory(log) {
           ui.token("echo: " + input);
           ui.stopSpinner();
           ui.turnEnd("done");
+          if (session.onTurnDone) session.onTurnDone();
         }
       },
     };
@@ -314,7 +318,8 @@ test("hub: sessions start, echo, save, close, resume, delete; workspaces add and
     assert.equal(calls[0].prefs.effort, "off");
     await until(() => hub.snapshot().workspaces[0].sessions[0].status === "idle", 2000, "idle session");
     await request(hub, "POST", "/msg" + k, { sid: id, text: "hello there" });
-    await until(() => hub.snapshot().workspaces[0].sessions[0].title === "hello there", 2000, "title");
+    await until(() => hub.snapshot().workspaces[0].sessions[0].title === "hello there", 2000, "verbatim title");
+    await until(() => hub.snapshot().workspaces[0].sessions[0].title === "Hello Session", 2000, "model-written title");
     const events = await readEvents(hub, (e) => e.t === "state" && e.sid === id);
     assert.equal(events[0].t, "hub");
     assert.ok(events.some((e) => e.t === "user" && e.sid === id && e.s === "hello there"), "replay includes the user message");
@@ -331,7 +336,7 @@ test("hub: sessions start, echo, save, close, resume, delete; workspaces add and
     // saved to disk after the debounce
     const metaFile = path.join(dataDir, "sessions", id + ".meta.json");
     await until(() => fs.existsSync(metaFile) && fs.existsSync(path.join(dataDir, "sessions", id + ".json")), 4000, "save");
-    assert.equal(JSON.parse(fs.readFileSync(metaFile, "utf8")).title, "hello there");
+    assert.equal(JSON.parse(fs.readFileSync(metaFile, "utf8")).title, "Hello Session");
 
     // close: it stays listed as a stored session
     await request(hub, "POST", "/sessions/close" + k, { id });
@@ -358,6 +363,56 @@ test("hub: sessions start, echo, save, close, resume, delete; workspaces add and
     await request(hub, "POST", "/workspaces/remove" + k, { path: ws });
     assert.equal(hub.snapshot().workspaces.length, 0);
     assert.match((await request(hub, "POST", "/sessions/resume" + k, { id: "zzz" })).body, /unknown session/);
+  } finally {
+    hub.close();
+  }
+});
+
+// ---- titles ----------------------------------------------------------------------
+
+test("titles: cleanTitle normalizes what a model writes", () => {
+  assert.equal(cleanTitle('"Fix login bug".\n'), "Fix login bug");
+  assert.equal(cleanTitle("Title: Add dark mode toggle"), "Add dark mode toggle");
+  assert.equal(cleanTitle("<think>hmm, what to call it</think>\nRefactor session loop"), "Refactor session loop");
+  assert.equal(cleanTitle("  **Snake game in canvas**  "), "Snake game in canvas");
+  assert.equal(cleanTitle(""), null);
+  assert.equal(cleanTitle("<not a title>"), null);
+  const long = cleanTitle("word ".repeat(30));
+  assert.ok(long.length <= 60 && !/\s$/.test(long), "long titles are cut at a word boundary");
+});
+
+test("titles: suggestTitle asks with thinking off and a small cap, and falls back to null", async () => {
+  const calls = [];
+  const provider = { async chat(messages, tools, opts) { calls.push({ messages, opts }); return { content: " 'Sidebar Session Titles' ", toolCalls: [] }; } };
+  const msgs = [
+    { role: "system", content: "s" },
+    { role: "user", content: "add titles to the sidebar" },
+    { role: "assistant", content: "Done: titles added." },
+  ];
+  assert.equal(await suggestTitle(msgs, provider), "Sidebar Session Titles");
+  assert.equal(calls[0].opts.effortOverride, "off");
+  assert.ok(calls[0].opts.maxTokens <= 40);
+  assert.match(calls[0].messages[1].content, /add titles to the sidebar/);
+  assert.match(calls[0].messages[1].content, /Done: titles added/);
+  assert.equal(await suggestTitle([{ role: "system", content: "s" }], provider), null, "no user message, no call");
+  assert.equal(calls.length, 1);
+  const failing = { async chat() { throw new Error("backend down"); } };
+  assert.equal(await suggestTitle(msgs, failing), null);
+});
+
+test("hub: a manual rename is never overwritten by the model-written title", async () => {
+  const dataDir = tmpdir("smol-hub4-");
+  const hub = new WebHub({ port: 0, prefs: {}, help: "help", version: "9.9.9", dataDir, factory: fakeFactory([]), quiet: true });
+  await hub.start();
+  const k = "?k=" + hub.authToken;
+  try {
+    const { id } = JSON.parse((await request(hub, "POST", "/sessions/new" + k, { workspace: dataDir })).body);
+    await until(() => hub.snapshot().workspaces[0].sessions[0].status === "idle", 2000, "idle");
+    await request(hub, "POST", "/msg" + k, { sid: id, text: "first message" });
+    await until(() => hub.snapshot().workspaces[0].sessions[0].title === "first message", 2000, "verbatim title");
+    await request(hub, "POST", "/sessions/rename" + k, { id, title: "My Name" });
+    await sleep(600); // past the fake model's naming delay
+    assert.equal(hub.snapshot().workspaces[0].sessions[0].title, "My Name");
   } finally {
     hub.close();
   }

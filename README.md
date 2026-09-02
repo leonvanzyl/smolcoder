@@ -103,6 +103,7 @@ Headless mode is for scripts and automation. It suppresses reasoning noise and t
 
 - **Many projects, many sessions.** Open a folder from the sidebar, start as many sessions as you like, and switch between them while they work. A dot next to each session shows whether it is busy, idle, or waiting for you to approve a command. Sessions you are not looking at keep streaming in the background.
 - **Sessions survive restarts.** Transcripts are saved under `~/.smolcoder/sessions/`, so past sessions stay in the sidebar and can be resumed with a click, model and all. Close a session to stop it, delete it to forget it.
+- **Named for you.** After the first exchange the model writes a short title for the session, one quick call with thinking off. Double-click a session in the sidebar to rename it; your name sticks.
 - **One server for everything.** Running `smol --web` from a second folder adds that folder to the already-running UI instead of starting another server.
 - **A browser panel.** The globe icon opens a resizable panel on the right with browser tabs. Dev servers the agent starts show up as suggestions, so previewing the app it is building is one click.
 - **A terminal panel.** The terminal icon (or ctrl+`) opens a shell in the current workspace, right next to the chat. It streams output without a TTY, which means interactive programs such as `vim` will not work there, but `npm test`, `git status` and friends do. The terminal, browser tabs and chat all live in the same panel, in tabs.

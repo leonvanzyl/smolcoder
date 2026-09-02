@@ -18,7 +18,7 @@ import { Mode, MODE_LABELS, ToolContext } from "./tools/index";
 import { pickShell } from "./tools/shell";
 import { TaskManager } from "./tools/tasks";
 import { SessionUI, SlashCommand } from "./ui";
-import { c } from "./util";
+import { c, truncateEnd } from "./util";
 
 /** Per-session preferences from the command line. `effort: null` means an
  * explicit "default"; undefined means "whatever the config remembers". */
@@ -145,6 +145,58 @@ export async function prepareModel(
   return resolveContextWindow(chosen, prefs.ctx);
 }
 
+// ---- session titles ---------------------------------------------------------
+
+/** Ask the model for a short session name from the first exchange. One cheap
+ * call with thinking off and a tiny output cap; null when the reply is not
+ * usable, in which case the caller keeps its fallback (the first message). */
+export async function suggestTitle(messages: Msg[], provider: Provider): Promise<string | null> {
+  const first = messages.find((m) => m.role === "user" && !m.compactNote);
+  if (!first) return null;
+  const reply = [...messages].reverse().find((m) => m.role === "assistant" && m.content.trim());
+  try {
+    const res = await provider.chat(
+      [
+        {
+          role: "system",
+          content:
+            "You name coding sessions. Reply with only the title: three to six words, plain text, no quotes, no trailing period.",
+        },
+        {
+          role: "user",
+          content:
+            `First request:\n${truncateEnd(first.content, 600)}\n\n` +
+            (reply ? `Reply excerpt:\n${truncateEnd(reply.content, 400)}\n\n` : "") +
+            "Title:",
+        },
+      ],
+      [],
+      { effortOverride: "off", maxTokens: 30 }
+    );
+    return cleanTitle(res.content);
+  } catch {
+    return null;
+  }
+}
+
+/** Exported for tests: normalize a model-written title. */
+export function cleanTitle(raw: string): string | null {
+  let t = String(raw ?? "").replace(/<think>[\s\S]*?(<\/think>|$)/gi, "");
+  t = t.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+  t = t
+    .replace(/^(title|session( name)?)\s*:\s*/i, "")
+    .replace(/^["'`“”*#\s]+|["'`“”*.\s]+$/g, "")
+    .replace(/\s+/g, " ");
+  if (t.length < 3 || /[<>{}]/.test(t)) return null;
+  if (t.length > 60) {
+    t = t.slice(0, 60);
+    const cut = t.lastIndexOf(" ");
+    if (cut > 20) t = t.slice(0, cut);
+    t = t.replace(/[\s,;:.-]+$/, "");
+  }
+  return t || null;
+}
+
 // ---- the session -----------------------------------------------------------
 
 /** Everything needed to bring a session back after a restart. */
@@ -182,6 +234,9 @@ export class Session {
   readonly shell = pickShell();
   /** Host hook: fired once when the session has shut down (/exit, ctrl+c). */
   onExit: (() => void) | null = null;
+  /** Host hook: fired after each completed user turn (the web hub names the
+   * session after the first one). */
+  onTurnDone: (() => void) | null = null;
 
   private readonly agentsMd: string | null;
   private readonly prefs: SessionPrefs;
@@ -304,6 +359,11 @@ export class Session {
     };
   }
 
+  /** A model-written name for this session, or null to keep the fallback. */
+  suggestTitle(): Promise<string | null> {
+    return suggestTitle(this.agent.messages, this.agent.provider);
+  }
+
   /** Bring a saved transcript back (the system message is rebuilt for the
    * current mode/workspace; approvals are deliberately not restored). */
   restore(s: SessionSnapshot): void {
@@ -381,6 +441,7 @@ export class Session {
 
       try {
         await agent.runTurn(input);
+        this.onTurnDone?.();
       } catch (err: any) {
         ui.error(`\n${err?.message ?? err}`);
         if (String(err?.message ?? "").toLowerCase().includes("does not support tools")) {

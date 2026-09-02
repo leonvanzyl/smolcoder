@@ -52,6 +52,10 @@ interface Live {
   dirty: boolean;
   /** Set when the user deleted the session: never write it back. */
   discard: boolean;
+  /** Model-written title attempts so far (bounded). */
+  titleTries: number;
+  /** The user renamed it by hand: never overwrite that. */
+  titleByUser: boolean;
 }
 
 // ---- the running-hub record -----------------------------------------------
@@ -350,6 +354,8 @@ export class WebHub {
     if (live) {
       live.channel.title = title;
       live.meta.title = title;
+      live.titleByUser = true;
+      live.channel.pushState();
       this.scheduleSave(live);
     }
     const meta = this.metas.get(id);
@@ -401,9 +407,26 @@ export class WebHub {
       saving: false,
       dirty: false,
       discard: false,
+      // A saved session already has a name; only fresh ones get one written.
+      titleTries: meta.title ? 99 : 0,
+      titleByUser: false,
     };
     this.live.set(id, live);
     return live;
+  }
+
+  /** After the first turn: replace the verbatim first-message title with a
+   * short model-written one. Bounded retries, never over a manual rename. */
+  private async autoTitle(live: Live): Promise<void> {
+    if (!live.session || live.titleByUser || live.titleTries >= 2) return;
+    live.titleTries++;
+    const title = await live.session.suggestTitle();
+    if (!title || live.titleByUser || live.channel.closed || this.live.get(live.id) !== live) return;
+    live.channel.title = title;
+    live.meta.title = title;
+    live.channel.pushState();
+    this.changed();
+    this.scheduleSave(live);
   }
 
   private async spawn(live: Live, restore: SessionSnapshot | null): Promise<void> {
@@ -426,6 +449,7 @@ export class WebHub {
       }
       live.session = session;
       session.onExit = () => this.sessionEnded(live.id);
+      session.onTurnDone = () => void this.autoTitle(live);
       live.channel.getState = () => session.state();
       if (restore) session.restore(restore);
       live.meta.model = session.chosen.id;
