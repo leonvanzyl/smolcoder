@@ -86,12 +86,12 @@ export const PAGE_HTML = `<!doctype html>
 </head>
 <body>
 <div id="wrap">
-  <div id="logo">████████╗██╗███╗   ██╗██╗   ██╗
-╚══██╔══╝██║████╗  ██║╚██╗ ██╔╝
-   ██║   ██║██╔██╗ ██║ ╚████╔╝
-   ██║   ██║██║╚██╗██║  ╚██╔╝
-   ██║   ██║██║ ╚████║   ██║
-   ╚═╝   ╚═╝╚═╝  ╚═══╝   ╚═╝   <span class="coder">coder — web</span></div>
+  <div id="logo">███████╗ ███╗   ███╗  ██████╗  ██╗     
+██╔════╝ ████╗ ████║ ██╔═══██╗ ██║     
+███████╗ ██╔████╔██║ ██║   ██║ ██║     
+╚════██║ ██║╚██╔╝██║ ██║   ██║ ██║     
+███████║ ██║ ╚═╝ ██║ ╚██████╔╝ ███████╗
+╚══════╝ ╚═╝     ╚═╝  ╚═════╝  ╚══════╝   <span class="coder">coder — web</span></div>
   <div id="log"></div>
   <div id="busy"><span class="spin">⠋</span> <span id="busylabel">thinking…</span> <span id="busysecs"></span></div>
 </div>
