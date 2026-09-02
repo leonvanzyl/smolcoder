@@ -1,6 +1,6 @@
 # smolcoder
 
-A tiny, zero-config CLI coding agent for **local models**. Ollama and LM Studio only — and because it supports only those, it can make them first-class: no base URLs, no API keys, no config files, no setup questions. Start it and code.
+A smol, zero-config CLI coding agent for **local models**. Ollama and LM Studio only — and because it supports only those, it can make them first-class: no base URLs, no API keys, no config files, no setup questions. Start it and code.
 
 ```bash
 npm install -g smolcoder

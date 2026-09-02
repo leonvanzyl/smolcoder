@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// smolcoder — a tiny, zero-config CLI coding agent for local models.
+// smolcoder — a smol, zero-config CLI coding agent for local models.
 //
 // Interactive: an opencode-style inline TUI. No upfront questions — the last
 // (or first) detected model is picked automatically; switch with /models,
@@ -89,7 +89,7 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 const HELP = `
-${c.bold("smolcoder")} v${VERSION} — a tiny, zero-config coding agent for local models.
+${c.bold("smolcoder")} v${VERSION} — a smol, zero-config coding agent for local models.
 
 Detects Ollama and LM Studio automatically. No configuration.
 
@@ -259,7 +259,7 @@ function printLogo(): void {
     });
     console.log();
   } else {
-    console.log(`${c.bold("tiny")}${c.dim(c.bold("coder"))} ${c.dim("v" + VERSION)}`);
+    console.log(`${c.bold("smol")}${c.dim(c.bold("coder"))} ${c.dim("v" + VERSION)}`);
   }
 }
 
@@ -395,7 +395,7 @@ async function runInteractive(args: CliArgs): Promise<void> {
     process.exit(1);
   }
 
-  if (isWeb) console.log(`${c.bold("tiny")}${c.dim(c.bold("coder"))} ${c.dim("v" + VERSION + " · web")}`);
+  if (isWeb) console.log(`${c.bold("smol")}${c.dim(c.bold("coder"))} ${c.dim("v" + VERSION + " · web")}`);
   else printLogo();
   process.stdout.write(c.dim("· looking for Ollama and LM Studio…"));
   const models = await detectAll();

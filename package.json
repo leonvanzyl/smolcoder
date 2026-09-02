@@ -1,6 +1,6 @@
 {
   "name": "smolcoder",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "A smol, zero-config CLI coding agent for local models (Ollama & LM Studio). It just works.",
   "keywords": [
     "cli",
