@@ -6,7 +6,7 @@ export const PAGE_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>tinycoder</title>
+<title>smolcoder</title>
 <style>
   :root {
     --bg: #0b0d0e; --fg: #d6dbde; --dim: #6b7480; --gray: #4a525c;

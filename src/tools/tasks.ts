@@ -2,7 +2,7 @@
 // separate tools — one schema costs fewer context tokens, and small models
 // handle enum dispatch on a single tool fine. Each task keeps a ring buffer of
 // recent output so the agent (and the user, via /tasks and /logs) has
-// visibility. All tasks are killed when tiny-coder exits.
+// visibility. All tasks are killed when smolcoder exits.
 
 import { ChildProcess, spawn } from "child_process";
 import { pickShell, killTree } from "./shell";

@@ -52,7 +52,7 @@ function toWireTools(tools: ToolSpec[]): any[] {
 /** Keep the model resident between tool calls and while the user reads or
  * approves. Ollama's own default (5 min) unloads mid-session on any longer
  * pause, and a reload of a 17 GB model costs 10-20 s plus a cold cache. */
-const KEEP_ALIVE = process.env.TINY_CODER_KEEP_ALIVE || "30m";
+const KEEP_ALIVE = process.env.SMOLCODER_KEEP_ALIVE || "30m";
 
 export class OllamaProvider implements Provider {
   readonly label: string;

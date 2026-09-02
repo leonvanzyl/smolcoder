@@ -1,4 +1,4 @@
-# tiny-coder — TODO
+# smolcoder — TODO
 
 ## Done
 - [x] **AGENTS.md memory files** — injected after the system prompt, size-capped (~2k tokens),
@@ -17,7 +17,7 @@
   the write_file/edit_file result with a line number.
 - [x] **Compaction v2** — structured hand-over notes written with thinking off, old reasoning traces
   not replayed, stale reads of overwritten files evicted immediately.
-- [x] **Ollama keep_alive** — the model stays resident 30 min between calls (`TINY_CODER_KEEP_ALIVE`).
+- [x] **Ollama keep_alive** — the model stays resident 30 min between calls (`SMOLCODER_KEEP_ALIVE`).
 - [x] **Unit tests** — `npm test` (node:test, no deps).
 - [x] **Real tier-2 compaction on a live model** — `bench/run.sh mc-compact <model> off --ctx 12000`:
   tier-1 eviction then a hand-over-notes compaction (7.5k → 2.1k tokens) on LM Studio, five
@@ -32,4 +32,4 @@
 - [ ] **Plan persistence across sessions** (write/restore from the workspace?).
 - [ ] **Per-backend effort memory** — one saved effort for both backends is awkward now that the
   levels differ (`high` → `medium` on qwen/LM Studio, `→ thinking on` on Ollama).
-- [ ] **npm publish** — the `tiny-coder` name is available; needs a repo + first release.
+- [ ] **npm publish** — package `smolcoder`, command `smol`; repo at github.com/leonvanzyl/smolcoder. First release pending.

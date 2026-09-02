@@ -50,7 +50,7 @@ function parseNodeError(stderr: string, tmpFile: string): JsError | null {
 /** Run `node --check` on a snippet, as a classic script first (non-strict,
  * matches a browser <script>), then as a module if it needs import/export. */
 function checkJs(source: string, forceModule = false): JsError | null {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tiny-coder-check-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "smolcoder-check-"));
   try {
     const tryAs = (ext: string): JsError | null => {
       const tmp = path.join(dir, `snippet${ext}`);

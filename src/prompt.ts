@@ -46,7 +46,7 @@ export function buildSystemPrompt(opts: {
         : "You have full access to files and commands; nothing asks the user for approval.";
 
   return (
-    `You are tiny-coder, a coding agent working in the workspace ${opts.workspace} on ${os}. ` +
+    `You are smolcoder, a coding agent working in the workspace ${opts.workspace} on ${os}. ` +
     `Commands run in ${opts.shellLabel} with the workspace as the working directory. ` +
     `File paths are relative to the workspace; you cannot access files outside it. ${modeLine}\n\n` +
     `Work step by step: look at the relevant files before changing them, make one tool call at a time, ` +

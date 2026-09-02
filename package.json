@@ -1,18 +1,31 @@
 {
-  "name": "tiny-coder",
-  "version": "0.3.0",
-  "description": "A tiny, zero-config CLI coding agent for local models (Ollama & LM Studio). It just works.",
+  "name": "smolcoder",
+  "version": "0.4.0",
+  "description": "A smol, zero-config CLI coding agent for local models (Ollama & LM Studio). It just works.",
   "keywords": [
     "cli",
     "coding-agent",
+    "agent",
     "ollama",
     "lm-studio",
     "local-llm",
+    "local-models",
+    "smol",
     "ai"
   ],
   "license": "MIT",
+  "author": "Leon van Zyl",
+  "homepage": "https://github.com/leonvanzyl/smolcoder#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leonvanzyl/smolcoder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/leonvanzyl/smolcoder/issues"
+  },
   "bin": {
-    "tiny-coder": "dist/index.js"
+    "smol": "dist/index.js",
+    "smolcoder": "dist/index.js"
   },
   "main": "dist/index.js",
   "files": [
@@ -22,7 +35,7 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc -w",
-    "prepublishOnly": "tsc",
+    "prepublishOnly": "tsc && node --test",
     "test": "tsc && node --test"
   },
   "engines": {

@@ -60,7 +60,7 @@ function toWireTools(tools: ToolSpec[]): any[] {
   }));
 }
 
-/** Exported for tests. Map a tiny-coder effort onto LM Studio's wire value,
+/** Exported for tests. Map a smolcoder effort onto LM Studio's wire value,
  * respecting what the model supports. Returns undefined for "leave it to the
  * backend". */
 export function mapEffort(effort: Effort | null, info: ReasoningInfo | undefined): string | undefined {

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// tiny-coder — a tiny, zero-config CLI coding agent for local models.
+// smolcoder — a tiny, zero-config CLI coding agent for local models.
 //
 // Interactive: an opencode-style inline TUI. No upfront questions — the last
 // (or first) detected model is picked automatically; switch with /models,
 // cycle modes with shift+tab, set reasoning effort with /effort.
-// Headless: tiny-coder -p "prompt" for people and automations.
+// Headless: smol -p "prompt" for people and automations.
 
 import * as fs from "fs";
 import * as os from "os";
@@ -27,7 +27,7 @@ import { WebUI } from "./web/webui";
 import { c } from "./util";
 
 const VERSION = require("../package.json").version as string;
-const CONFIG_PATH = path.join(os.homedir(), ".tiny-coder.json");
+const CONFIG_PATH = path.join(os.homedir(), ".smolcoder.json");
 
 interface CliArgs {
   workspace: string;
@@ -81,7 +81,7 @@ function parseArgs(argv: string[]): CliArgs {
       if (argv[i + 1] && /^\d+$/.test(argv[i + 1])) args.webPort = Number(argv[++i]);
     } else if (!a.startsWith("-")) args.workspace = path.resolve(a);
     else {
-      console.error(`Unknown option "${a}". Try tiny-coder --help.`);
+      console.error(`Unknown option "${a}". Try smol --help.`);
       process.exit(1);
     }
   }
@@ -89,12 +89,12 @@ function parseArgs(argv: string[]): CliArgs {
 }
 
 const HELP = `
-${c.bold("tiny-coder")} v${VERSION} — a tiny, zero-config coding agent for local models.
+${c.bold("smolcoder")} v${VERSION} — a tiny, zero-config coding agent for local models.
 
 Detects Ollama and LM Studio automatically. No configuration.
 
 ${c.bold("Usage:")}
-  tiny-coder [workspace] [options]
+  smol [workspace] [options]
 
 ${c.bold("Options:")}
   -m, --mode <ro|edit|bypass>  ro: read files only. edit: read/write files and run
@@ -227,10 +227,10 @@ function autoPickModel(
 function noBackendsMessage(): string {
   return (
     c.red("No local model backend found.") +
-    `\n\ntiny-coder looks for:\n` +
+    `\n\nsmolcoder looks for:\n` +
     `  · ${c.bold("Ollama")} at http://127.0.0.1:11434 ${c.dim("(or $OLLAMA_HOST)")} — install: https://ollama.com, then: ollama pull qwen3\n` +
     `  · ${c.bold("LM Studio")} at http://127.0.0.1:1234 — start its local server (Developer tab → Start Server)\n\n` +
-    `Start one of them and run tiny-coder again. No configuration needed.`
+    `Start one of them and run smol again. No configuration needed.`
   );
 }
 
@@ -383,14 +383,14 @@ const SLASH_COMMANDS = [
   { name: "stop", desc: "Stop a background task — /stop t1" },
   { name: "clear", desc: "Reset the conversation" },
   { name: "help", desc: "Show help" },
-  { name: "exit", desc: "Quit tiny-coder" },
+  { name: "exit", desc: "Quit smolcoder" },
 ];
 
 async function runInteractive(args: CliArgs): Promise<void> {
   const isWeb = !!args.web;
   if (!isWeb && (!process.stdout.isTTY || !process.stdin.isTTY)) {
     console.error(
-      'Interactive mode needs a terminal. For headless use, run: tiny-coder -p "your prompt" — or serve a browser UI with --web'
+      'Interactive mode needs a terminal. For headless use, run: smol -p "your prompt" — or serve a browser UI with --web'
     );
     process.exit(1);
   }

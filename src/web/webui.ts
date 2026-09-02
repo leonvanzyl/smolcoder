@@ -39,7 +39,7 @@ export class WebUI implements SessionUI {
   start(): void {
     this.server = http.createServer((req, res) => this.route(req, res));
     this.server.listen(this.port, "127.0.0.1", () => {
-      console.log(`\n  tiny-coder web UI:  ${this.url()}\n`);
+      console.log(`\n  smolcoder web UI:  ${this.url()}\n`);
     });
     process.on("SIGINT", () => this.onExit?.());
   }
@@ -58,7 +58,7 @@ export class WebUI implements SessionUI {
       !origin || origin === `http://127.0.0.1:${this.port}` || origin === `http://localhost:${this.port}`;
     if (url.searchParams.get("k") !== this.authToken || !sameOrigin) {
       res.writeHead(403, { "content-type": "text/plain" });
-      res.end("forbidden — open tiny-coder's printed URL (it includes the session key)");
+      res.end("forbidden — open smolcoder's printed URL (it includes the session key)");
       return;
     }
 

@@ -367,7 +367,7 @@ export class Agent {
       const reason = commandEscapesWorkspace(command, this.toolCtx.workspace);
       if (reason !== null && !isAutoApproved(command, this.alwaysAllowed)) {
         if (!this.interactive) {
-          return `Error: this command ${reason}, which needs user approval, and this session is non-interactive. Keep every path inside the workspace (relative paths, a scratch folder in the workspace instead of /tmp), or the user can rerun tiny-coder with --mode bypass, or run this themselves: ${command}`;
+          return `Error: this command ${reason}, which needs user approval, and this session is non-interactive. Keep every path inside the workspace (relative paths, a scratch folder in the workspace instead of /tmp), or the user can rerun smol with --mode bypass, or run this themselves: ${command}`;
         }
         const answer = await this.ui.confirmCommand(command, reason);
         if (answer === "no") {

@@ -1,17 +1,17 @@
-# tiny-coder
+# smolcoder
 
 A tiny, zero-config CLI coding agent for **local models**. Ollama and LM Studio only — and because it supports only those, it can make them first-class: no base URLs, no API keys, no config files, no setup questions. Start it and code.
 
 ```bash
-npm install -g tiny-coder
-tiny-coder
+npm install -g smolcoder
+smol
 ```
 
 Works on Windows, macOS, and Linux. Zero runtime dependencies.
 
 ## The TUI
 
-tiny-coder opens straight into a session — the last model you used (or the first one detected) is picked automatically. Everything is changed in-session:
+smol opens straight into a session — the last model you used (or the first one detected) is picked automatically. Everything is changed in-session:
 
 - **`/` slash commands** with an autocomplete menu: `/models` (switch model, type to filter), `/mode`, `/effort`, `/tasks`, `/compact`, …
 - **shift+tab** cycles read-only → edit → bypass permissions
@@ -19,15 +19,15 @@ tiny-coder opens straight into a session — the last model you used (or the fir
 - The status line under the input shows mode · model · effort · context fill · running background tasks, live.
 - `/effort` maps to Ollama's `think` parameter and LM Studio's `reasoning_effort`. `off` disables thinking on qwen3-class models — a real speedup. Models that don't support it fall back silently.
 
-For scripts and automations there is a headless mode that prints the transcript and exits: `tiny-coder -p "prompt"` (reasoning noise suppressed, exit code reflects success).
+For scripts and automations there is a headless mode that prints the transcript and exits: `smol -p "prompt"` (reasoning noise suppressed, exit code reflects success).
 
 ## Why
 
-Most coding harnesses treat local models as an afterthought: you configure endpoints by hand, and then they inject huge system prompts, dozens of tools, MCP servers and skills into a model with a small context window. tiny-coder is built the other way around:
+Most coding harnesses treat local models as an afterthought: you configure endpoints by hand, and then they inject huge system prompts, dozens of tools, MCP servers and skills into a model with a small context window. smolcoder is built the other way around:
 
 - **Zero config.** Probes the standard Ollama (`127.0.0.1:11434`, or `$OLLAMA_HOST`) and LM Studio (`127.0.0.1:1234`) endpoints and lists whatever models you already have. Docker-hosted Ollama with the usual port mapping is picked up automatically.
 - **Tiny context footprint.** A two-paragraph system prompt, exactly seven flat tools, hard caps on every tool output, and no MCP, no skills, no subagents.
-- **Context windows handled properly.** For Ollama, tiny-coder respects the server's own configured context length (the Ollama app's setting) — it preloads the model and reads the effective window from `/api/ps`, sending an explicit `num_ctx` only on old Ollama versions where the silent tiny default would truncate prompts, or when you pass `--ctx`. For LM Studio it reads the loaded context length from `/api/v0/models` and budgets within it. Real token usage reported by the backend drives a live context meter and automatic compaction (old tool output is evicted first — nearly free — and the conversation is summarized only when that's not enough).
+- **Context windows handled properly.** For Ollama, smolcoder respects the server's own configured context length (the Ollama app's setting) — it preloads the model and reads the effective window from `/api/ps`, sending an explicit `num_ctx` only on old Ollama versions where the silent tiny default would truncate prompts, or when you pass `--ctx`. For LM Studio it reads the loaded context length from `/api/v0/models` and budgets within it. Real token usage reported by the backend drives a live context meter and automatic compaction (old tool output is evicted first — nearly free — and the conversation is summarized only when that's not enough).
 - **Small-model-friendly tools.** Flat string parameters, an example call in every description, and error messages written as coaching (a failed edit shows the closest real snippet to copy). The edit tool forgives whitespace drift — the difference between usable and unusable local editing.
 
 ## Modes
@@ -57,17 +57,17 @@ If the workspace contains an `AGENTS.md`, its contents are injected right after 
 
 `read_file` · `write_file` · `edit_file` · `list_files` · `search` · `plan` · `run_command` · `task`
 
-`task` manages background processes (dev servers, watchers): `start`, `list`, `logs`, `stop`. Background tasks are non-blocking, keep a ring buffer of recent output, show up in the status line, and are killed when tiny-coder exits. You can inspect them yourself with `/tasks`, `/logs <id>`, `/stop <id>`.
+`task` manages background processes (dev servers, watchers): `start`, `list`, `logs`, `stop`. Background tasks are non-blocking, keep a ring buffer of recent output, show up in the status line, and are killed when smolcoder exits. You can inspect them yourself with `/tasks`, `/logs <id>`, `/stop <id>`.
 
 ## Usage
 
 ```bash
-tiny-coder                        # current folder, remembers your last model & mode
-tiny-coder path/to/project        # a specific workspace
-tiny-coder --mode bypass          # bypass permissions: no approval prompts
-tiny-coder --model qwen3          # pick a model by (partial) name
-tiny-coder --ctx 16384            # cap the context window (Ollama: sets num_ctx)
-tiny-coder -p "fix the failing test"   # one-shot, non-interactive
+smol                        # current folder, remembers your last model & mode
+smol path/to/project        # a specific workspace
+smol --mode bypass          # bypass permissions: no approval prompts
+smol --model qwen3          # pick a model by (partial) name
+smol --ctx 16384            # cap the context window (Ollama: sets num_ctx)
+smol -p "fix the failing test"   # one-shot, non-interactive
 ```
 
 In a session: `/mode`, `/model`, `/context`, `/compact`, `/tasks`, `/logs <id>`, `/stop <id>`, `/clear`, `/help`, `/exit`. `Ctrl+C` cancels a running turn.
@@ -93,7 +93,7 @@ harness sends and from load settings:
   supports some of them and a value the model lacks is silently replaced by the
   model's *default* — which for current qwen3.x builds is **xhigh**, the maximum.
   Asking for `high` therefore produced 8,000-token thinking bursts before single
-  tool calls. tiny-coder now reads the model's supported levels and default from
+  tool calls. smolcoder now reads the model's supported levels and default from
   `/api/v1/models`, sends `none` for `off` (measured: fully disables thinking), and
   snaps other levels to the nearest one the model has (`high` → `medium` on qwen;
   ties go to the cheaper level). The status line shows the mapping (`high → medium`,
@@ -113,14 +113,14 @@ harness sends and from load settings:
   Prompt caching works on both (only the new tail of the prompt is processed).
 - **Ollama keeps the model resident** for 30 minutes between calls (its own default
   unloads after 5 min — a long approval pause used to cost a 10–20 s reload).
-  Override with `TINY_CODER_KEEP_ALIVE=1h`.
+  Override with `SMOLCODER_KEEP_ALIVE=1h`.
 - **Reasoning traces are not replayed** for finished turns (the qwen templates drop
   them anyway); only the current turn's traces travel with the tool loop. On a
   thinking model this is the largest single prompt-size saving.
 
 ## End-to-end: the same Minecraft build on both backends
 
-One headless run each (`tiny-coder -p "<prompt>" --mode bypass --effort off`), same
+One headless run each (`smol -p "<prompt>" --mode bypass --effort off`), same
 model weights, same prompt (procedural voxel terrain, first-person controls, block
 place/remove, three.js from a CDN, then serve it). Nobody typed "continue".
 
