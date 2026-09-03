@@ -2,7 +2,7 @@
 
 A smol coding agent for the models already running on your machine.
 
-If you have Ollama or LM Studio installed, you are two commands away from an AI pair programmer that reads your code, edits files, runs your tests and starts your dev server, all without an API key, a config file, or a single question about base URLs.
+If you have Ollama or LM Studio running, you are two commands away from an AI pair programmer that reads your code, edits files, runs your tests and starts your dev server, all without an API key or a config file.
 
 ```bash
 npm install -g smolcoder
@@ -15,7 +15,7 @@ That is the whole setup. smolcoder finds your local server, lists the models you
 
 Most coding agents are built for big cloud models and treat local ones as an afterthought. They ship huge system prompts, dozens of tools and plugin systems, then wonder why a 7B model with a 16k window gets lost. smolcoder goes the other way.
 
-- **Zero config.** It probes the standard Ollama and LM Studio ports and uses whatever it finds. Docker-hosted Ollama with the usual port mapping works too.
+- **Zero config.** It probes Ollama on IPv4 and IPv6 loopback, respects `OLLAMA_HOST`, and checks running Docker containers that publish Ollama's port. It also probes the standard LM Studio port.
 - **Built for small context windows.** A two-paragraph system prompt, seven flat tools, and hard caps on every tool output. Nothing else competes for the model's attention.
 - **Context handled for you.** It reads the real token counts from the backend, shows a live context meter, and compacts old tool output before it ever has to summarise your conversation.
 - **Small-model-friendly tools.** Every tool has an example call in its description, error messages coach the model toward the fix, and the edit tool forgives whitespace drift. That last one is the difference between a local model that can edit files and one that cannot.

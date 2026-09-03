@@ -10,6 +10,7 @@
 //     The same endpoint tells us which reasoning levels the model supports
 //     and which one it defaults to — that default is often the MAXIMUM.
 
+import { execFile } from "child_process";
 import { ReasoningInfo } from "./providers/lmstudio";
 import { tryFetchJson } from "./util";
 
@@ -33,16 +34,78 @@ export interface DetectedModel {
   note?: string;
 }
 
-function ollamaBaseUrl(): string {
-  const env = process.env.OLLAMA_HOST;
+const DEFAULT_OLLAMA_BASE = "http://127.0.0.1:11434";
+const OLLAMA_PROBE_TIMEOUT_MS = 3000;
+const DOCKER_DISCOVERY_TIMEOUT_MS = 2000;
+
+function normalizeOllamaBase(env?: string): string {
   let base: string;
-  if (!env) base = "http://127.0.0.1:11434";
+  if (!env) base = DEFAULT_OLLAMA_BASE;
   else if (env.startsWith("http://") || env.startsWith("https://")) base = env.replace(/\/$/, "");
   else base = `http://${env.replace(/\/$/, "")}`;
   // OLLAMA_HOST=0.0.0.0 is the documented way to expose the SERVER on the LAN,
   // but as a CLIENT connect address 0.0.0.0/:: fails on Windows (WSAEADDRNOTAVAIL)
   // and would make detection silently return no models. Rewrite to loopback.
-  return base.replace(/^(https?:\/\/)(0\.0\.0\.0|\[::\]|::)(?=[:/]|$)/, "$1127.0.0.1");
+  base = base.replace(/^(https?:\/\/)(0\.0\.0\.0|\[::\]|::)(?=[:/]|$)/, "$1127.0.0.1");
+  // A bare local OLLAMA_HOST is common in desktop environment settings. Ollama
+  // means port 11434 there, while fetch would otherwise try port 80.
+  if (/^https?:\/\/(localhost|127(?:\.\d+){3}|\[::1\])$/i.test(base)) base += ":11434";
+  return base;
+}
+
+function loopbackAliases(base: string): string[] {
+  const match = base.match(/^(https?:\/\/)(localhost|127(?:\.\d+){3}|\[::1\])(?=[:/]|$)/i);
+  if (!match) return [base];
+  const tail = base.slice(match[0].length);
+  return [match[2], "127.0.0.1", "localhost", "[::1]"]
+    .map((host) => `${match[1]}${host}${tail}`)
+    .filter((url, i, urls) => urls.indexOf(url) === i);
+}
+
+/** Probe the configured endpoint first, then every loopback spelling. A remote
+ * OLLAMA_HOST remains authoritative when it works, but a stale setting does
+ * not hide a healthy local or Docker-published server. */
+export function ollamaBaseUrls(env?: string): string[] {
+  const primary = normalizeOllamaBase(env);
+  const candidates = [...loopbackAliases(primary), ...loopbackAliases(DEFAULT_OLLAMA_BASE)];
+  return candidates.filter((url, i) => candidates.indexOf(url) === i);
+}
+
+/** Parse `docker ps --format {{.Ports}}` and return host endpoints that publish
+ * a container's Ollama port. Unpublished/expose-only ports are intentionally
+ * ignored because the CLI cannot reach them from the host. */
+export function parseDockerOllamaBaseUrls(output: string): string[] {
+  const urls: string[] = [];
+  const mapping = /(\[[^\]]+\]|(?:\d{1,3}\.){3}\d{1,3}|localhost):(\d+)->11434\/tcp\b/gi;
+  for (const match of output.matchAll(mapping)) {
+    let host = match[1].toLowerCase();
+    if (host === "0.0.0.0") host = "127.0.0.1";
+    else if (host === "[::]") host = "[::1]";
+    urls.push(`http://${host}:${match[2]}`);
+  }
+  return urls.filter((url, i) => urls.indexOf(url) === i);
+}
+
+function dockerOllamaBaseUrls(): Promise<string[]> {
+  return new Promise((resolve) => {
+    execFile(
+      "docker",
+      ["ps", "--format", "{{.Ports}}"],
+      { encoding: "utf8", timeout: DOCKER_DISCOVERY_TIMEOUT_MS, windowsHide: true },
+      (err, stdout) => resolve(err ? [] : parseDockerOllamaBaseUrls(stdout))
+    );
+  });
+}
+
+async function probeOllama(base: string): Promise<DetectedModel[]> {
+  const data = await tryFetchJson(`${base}/api/tags`, undefined, OLLAMA_PROBE_TIMEOUT_MS);
+  if (!data || !Array.isArray(data.models) || data.models.length === 0) return [];
+  return data.models.map((m: any) => ({
+    id: m.name as string,
+    backend: "ollama" as const,
+    baseUrl: base,
+    contextWindow: 0, // resolved lazily via /api/show when the model is chosen
+  }));
 }
 
 const DEFAULT_OLLAMA_CTX_CAP = 32768; // avoid surprise VRAM blowups on huge-window models
@@ -50,15 +113,22 @@ const LMSTUDIO_JIT_GUESS = 4096; // LM Studio's usual default when a model is JI
 const LMSTUDIO_BASE = "http://127.0.0.1:1234";
 
 export async function detectOllamaModels(): Promise<DetectedModel[]> {
-  const base = ollamaBaseUrl();
-  const data = await tryFetchJson(`${base}/api/tags`);
-  if (!data || !Array.isArray(data.models)) return [];
-  return data.models.map((m: any) => ({
-    id: m.name as string,
-    backend: "ollama" as const,
-    baseUrl: base,
-    contextWindow: 0, // resolved lazily via /api/show when the model is chosen
-  }));
+  const tried = ollamaBaseUrls(process.env.OLLAMA_HOST);
+  for (const base of tried) {
+    const models = await probeOllama(base);
+    if (models.length) return models;
+  }
+
+  // Standard Docker publishing (-p 11434:11434) was covered above. Ask Docker
+  // only after those cheap probes fail so a nonstandard host port also works
+  // without making every normal startup shell out to the Docker CLI.
+  const dockerBases = await dockerOllamaBaseUrls();
+  for (const base of dockerBases) {
+    if (tried.includes(base)) continue;
+    const models = await probeOllama(base);
+    if (models.length) return models;
+  }
+  return [];
 }
 
 const NOT_LOADED_NOTE =

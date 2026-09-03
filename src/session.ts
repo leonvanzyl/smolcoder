@@ -107,11 +107,13 @@ export function autoPickModel(
 
 export function noBackendsMessage(): string {
   return (
-    c.red("No local model backend found.") +
-    `\n\nsmolcoder looks for:\n` +
-    `  · ${c.bold("Ollama")} at http://127.0.0.1:11434 ${c.dim("(or $OLLAMA_HOST)")} — install: https://ollama.com, then: ollama pull qwen3\n` +
-    `  · ${c.bold("LM Studio")} at http://127.0.0.1:1234 — start its local server (Developer tab → Start Server)\n\n` +
-    `Start one of them and run smol again. No configuration needed.`
+    c.red("No usable local model found.") +
+    `\n\nsmolcoder connects to a running model server; it does not scan installed apps or drives.\n` +
+    `  · ${c.bold("Ollama")}: start the app (or run: ollama serve), then check: ollama list\n` +
+    `    Probes local loopback, ${c.dim("$OLLAMA_HOST")}, and published Docker port 11434/tcp.\n` +
+    `    If the list is empty, run: ollama pull qwen3\n` +
+    `  · ${c.bold("LM Studio")}: load a model and start Local Server in the Developer tab.\n\n` +
+    `Then run smol again.`
   );
 }
 
