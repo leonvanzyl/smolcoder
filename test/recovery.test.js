@@ -124,11 +124,11 @@ test('background compaction preserves appended results and rejects a changed pre
   const source = [{ role: 'system', content: 's' }, ...Array.from({ length: 12 }, () => ({ role: 'assistant', content: 'history '.repeat(240) }))];
   const cm = new ContextManager(8000, 2000);
   const p = fake(async () => ({ content: 'Notes: cached.', toolCalls: [] }));
-  cm.prepareBackground(source, [], p, state); await new Promise(setImmediate);
+  cm.prepareBackground(source, [], p, state, 0); await new Promise(resolve => setTimeout(resolve, 10));
   const live = [...source, { role: 'assistant', content: 'NEW_RESULT' }];
   const result = await cm.manage(live, [], p, state, { force: true });
   assert.ok(result.messages.some(m => m.content.includes('NEW_RESULT')));
-  const cm2 = new ContextManager(8000, 2000); cm2.prepareBackground(source, [], p, state); await new Promise(setImmediate);
+  const cm2 = new ContextManager(8000, 2000); cm2.prepareBackground(source, [], p, state, 0); await new Promise(resolve => setTimeout(resolve, 10));
   const changed = source.map(m => ({ ...m })); changed[0].content = 'new system';
   const invalidated = await cm2.manage(changed, [], p, state, { force: true, deterministic: true });
   assert.equal(invalidated.messages[0].content, 'new system');

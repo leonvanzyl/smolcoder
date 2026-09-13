@@ -5,15 +5,25 @@ const out=path.resolve(process.env.BLOCK_MEADOW_LOG_DIR || 'playground/.block-me
 require('node:fs').mkdirSync(out,{recursive:true});
 const {chromium}=require(process.env.PLAYWRIGHT_PATH || 'playwright');
 const assert=require('node:assert/strict');const fs=require('node:fs');
-let browser;
+let browser, preview;
 (async()=>{
  browser=await chromium.launch({headless:true,executablePath:process.env.CHROME_PATH || undefined,args:['--enable-unsafe-swiftshader']});
- const page=await browser.newPage({viewport:{width:1280,height:800}});const errors=[],results=[];
+ let page=await browser.newPage({viewport:{width:1280,height:800}});const errors=[],results=[];
  page.setDefaultTimeout(8000);
  page.on('pageerror',e=>errors.push(e.message));
  const snapshot=()=>page.evaluate(()=>window.voxelDebug.snapshot());
  const step=async(name,fn)=>{try{const detail=await fn();results.push({name,passed:true,detail});}catch(e){results.push({name,passed:false,error:e.message});}};
- await page.goto(process.env.BLOCK_MEADOW_URL || 'http://127.0.0.1:4187');await page.waitForFunction(()=>window.voxelDebug);
+ const url=process.env.BLOCK_MEADOW_URL || 'http://127.0.0.1:4187';
+ if(process.env.BLOCK_MEADOW_PREVIEW==='1'){
+  preview=await require('./preview-harness.cjs').openPreview(page,url,path.join(out,'hub'));
+  const host=page,frame=preview.frame;
+  page=new Proxy(host,{get(target,key){
+   if(key==='reload')return ()=>frame.goto(frame.url());
+   const owner=['evaluate','click','locator','waitForFunction'].includes(key)?frame:target;
+   const value=owner[key];return typeof value==='function'?value.bind(owner):value;
+  }});
+ }else await page.goto(url);
+ await page.waitForFunction(()=>window.voxelDebug);
  await step('play, gravity and safe landing',async()=>{
   await page.click('#btn-play');await page.waitForFunction(()=>!!document.pointerLockElement);await page.waitForTimeout(2200);
   const s=await snapshot();assert.equal(s.paused,false);assert.ok(s.player.y<15 && s.player.y>=0);return s;
@@ -86,5 +96,5 @@ let browser;
   await page.evaluate(()=>localStorage.setItem('block-meadow:v1','{bad json'));await page.reload();await page.waitForFunction(()=>window.voxelDebug);assert.ok(Object.values((await snapshot()).player).every(Number.isFinite));
  });
  await step('no browser exceptions',async()=>assert.deepEqual(errors,[]));
- const result={time:new Date().toISOString(),passed:results.every(r=>r.passed),results,errors};fs.writeFileSync(out+'/browser-results.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));await browser.close();if(!result.passed)process.exitCode=1;
-})().catch(async e=>{console.error(e);await browser?.close();process.exitCode=1;});
+ const result={time:new Date().toISOString(),preview:!!preview,passed:results.every(r=>r.passed),results,errors};fs.writeFileSync(out+'/browser-results.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));await browser.close();preview?.close();if(!result.passed)process.exitCode=1;
+})().catch(async e=>{console.error(e);await browser?.close();preview?.close();process.exitCode=1;});

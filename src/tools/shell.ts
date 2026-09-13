@@ -74,6 +74,14 @@ export function killTree(pid: number): void {
 const OUTPUT_CAP = 8000;
 const DEFAULT_TIMEOUT_MS = 120_000;
 
+/** Keep bash alive while ordinary background jobs own its output pipes. On
+ * Windows taskkill cannot find descendants after their shell has exited. */
+export function managedCommand(shell: ShellInfo, command: string): string {
+  return /(?:^|[\\/])bash(?:\.exe)?$/.test(shell.exe)
+    ? `${command}\n__smol_command_status=$?\nwait\nexit "$__smol_command_status"`
+    : command;
+}
+
 export function runCommand(command: string, cwd: string, signal?: AbortSignal): Promise<string> {
   if (signal?.aborted) return Promise.resolve("Error: command cancelled before starting");
   return new Promise((resolve) => {
@@ -82,7 +90,7 @@ export function runCommand(command: string, cwd: string, signal?: AbortSignal): 
     let finished = false;
     const started = Date.now();
 
-    const proc = spawn(shell.exe, shell.argsFor(command), {
+    const proc = spawn(shell.exe, shell.argsFor(managedCommand(shell, command)), {
       cwd,
       env: process.env,
       detached: process.platform !== "win32", // process group for killTree
@@ -106,6 +114,8 @@ export function runCommand(command: string, cwd: string, signal?: AbortSignal): 
       clearTimeout(timer);
       cleanup();
       killTree(proc.pid!);
+      proc.stdout.destroy();
+      proc.stderr.destroy();
       resolve(
         (output.trim() ? truncateMiddle(output, OUTPUT_CAP) + "\n" : "") +
           "[command cancelled by the user before it finished]"
@@ -119,9 +129,11 @@ export function runCommand(command: string, cwd: string, signal?: AbortSignal): 
       finished = true;
       cleanup();
       killTree(proc.pid!);
+      proc.stdout.destroy();
+      proc.stderr.destroy();
       resolve(
         "Error: " + truncateMiddle(output, OUTPUT_CAP) +
-          `\n[command timed out after ${DEFAULT_TIMEOUT_MS / 1000}s and was killed. For long-running commands like dev servers, use the task tool with {"action": "start"} instead.]`
+          `\n[command timed out after ${DEFAULT_TIMEOUT_MS / 1000}s and was killed. For tests/builds, isolate the stuck test or phase and inspect its loop or initialization before rerunning. For a persistent dev server, use task {"action": "start"}.]`
       );
     }, DEFAULT_TIMEOUT_MS);
 

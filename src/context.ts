@@ -27,6 +27,8 @@
 
 import { lastUserIndex, Msg, Provider, ToolSpec } from "./providers/types";
 import { estimateTokens, truncateEnd, truncateMiddle } from "./util";
+import { abortableDelay } from "./providers/transport";
+import { isHistoryPlaceholder } from "./history";
 
 const MSG_OVERHEAD_TOKENS = 8;
 const EVICT_KEEP_RECENT = 6; // never evict tool results in the last N messages
@@ -46,6 +48,7 @@ export interface CompactState {
   filesTouched: Set<string>;
   commandsRun: string[];
   planLine?: string | null;
+  verificationLine?: string;
 }
 
 /** Tool-call args for a tool-result message (the call lives on the preceding
@@ -171,14 +174,19 @@ export class ContextManager {
   }
 
   /** Only run while a command is using the CPU/shell. Never queue behind coding. */
-  prepareBackground(messages: Msg[], tools: ToolSpec[], provider: Provider, state: CompactState): void {
+  prepareBackground(messages: Msg[], tools: ToolSpec[], provider: Provider, state: CompactState, delayMs = 750): void {
     if (this.background || this.prepared || messages.length < Math.max(10, this.preparedAt + 6) || this.estimatePrompt(messages, tools) < this.usableWindow() * 0.6) return;
     this.preparedAt = messages.length;
     const snapshot: Msg[] = JSON.parse(JSON.stringify(messages));
     const source = JSON.stringify(snapshot);
     const controller = new AbortController();
     const frozen = { ...state, filesTouched: new Set(state.filesTouched), commandsRun: [...state.commandsRun] };
-    const work = this.compact(snapshot, provider, frozen, { signal: controller.signal, background: true }).then((compacted) => {
+    // Most shell checks finish faster than a local-model prefill. Give them
+    // time to finish before occupying the GPU with a summary we'd immediately
+    // cancel. Long installs/builds still overlap with useful compaction.
+    const work = abortableDelay(delayMs, controller.signal).then(() =>
+      this.compact(snapshot, provider, frozen, { signal: controller.signal, background: true })
+    ).then((compacted) => {
       if (!controller.signal.aborted && this.estimatePrompt(compacted, tools) < this.estimatePrompt(snapshot, tools)) {
         this.prepared = { source, count: snapshot.length, messages: compacted };
       }
@@ -284,32 +292,39 @@ export class ContextManager {
 
     // Completed writes are already on disk. Old request bodies can be much
     // larger than tool results, and used to force a summary after every file.
-    // Keep the newest tool group intact and never mask an unexecuted call.
+    // Replace completed calls with marked historical data, never synthetic
+    // executable arguments or assistant answers: small models imitate both.
+    // Keep the newest group intact and never remove an unexecuted/failed call.
     let latestGroup = messages.length;
     for (let i = messages.length - 1; i >= 1; i--) {
       if (messages[i].role === "assistant" && messages[i].toolCalls?.length) { latestGroup = i; break; }
     }
-    for (let i = 1; i < latestGroup; i++) {
+    for (let i = latestGroup - 1; i >= 1; i--) {
       const message = messages[i];
       if (!message.toolCalls) continue;
       const results: Msg[] = [];
       for (let j = i + 1; j < messages.length && messages[j].role === "tool"; j++) results.push(messages[j]);
-      message.toolCalls = message.toolCalls.map((call) => {
+      const removed = new Set<string>();
+      const receipts: string[] = [];
+      for (const call of message.toolCalls) {
         const receipt = results.find((m) => m.toolCallId === call.id);
-        if (!receipt || !/^(Created|Overwrote|Edited) /.test(receipt.content)) return call;
+        if (!receipt || !/^(Created|Overwrote|Edited) /.test(receipt.content)) continue;
         const keys = call.name === "write_file" ? ["content"] : call.name === "edit_file" ? ["old_text", "new_text"] : [];
-        const args = { ...call.args };
-        let changed = false;
-        for (const key of keys) {
-          if (typeof args[key] === "string" && args[key].length > 1200) {
-            args[key] = `[${args[key].length} characters already applied to ${args.path}. Read the file for current code.]`;
-            changed = true;
-          }
-        }
-        if (!changed) return call;
-        this.resetAnchor();
-        return { ...call, args, rawArgs: undefined };
+        if (!keys.some((key) => typeof call.args[key] === "string" &&
+          (call.args[key].length > 1200 || isHistoryPlaceholder(call.args[key])))) continue;
+        removed.add(call.id);
+        receipts.push(`${call.name}: ${truncateEnd(receipt.content, 600)}`);
+      }
+      if (!removed.size) continue;
+      const remainingCalls = message.toolCalls.filter((call) => !removed.has(call.id));
+      const retained: Msg[] = remainingCalls.length
+        ? [{ ...message, toolCalls: remainingCalls }, ...results.filter((result) => !removed.has(result.toolCallId!))]
+        : message.content ? [{ role: "assistant", content: message.content }] : [];
+      messages.splice(i, results.length + 1, ...retained, {
+        role: "user", historyNote: true,
+        content: `[Harness history record — earlier tool executions, not a new request. Applied code omitted; read_file returns current source. Future changes require actual tool calls.]\n${receipts.join("\n")}`,
       });
+      this.resetAnchor();
     }
 
     // Tier 1b: evict old tool-result bodies, oldest first.
@@ -435,7 +450,7 @@ export class ContextManager {
     // so the model retains the material it just fetched for its next action.
     let keepFrom = messages.length;
     for (let i = messages.length - 1; i >= Math.max(1, messages.length - 8); i--) {
-      if (messages[i].role === "user" && !messages[i].compactNote) { keepFrom = i; break; }
+      if (messages[i].role === "user" && !messages[i].compactNote && !messages[i].historyNote) { keepFrom = i; break; }
     }
     if (keepFrom === messages.length) {
       for (let i = messages.length - 1; i >= 1; i--) {
@@ -466,6 +481,7 @@ export class ContextManager {
     const note =
       `[The conversation so far was compacted to save context. Continue the task from these notes — do not start over, and do not redo finished steps.]\n` +
       requestLines +
+      (state.verificationLine ? state.verificationLine + "\n" : "") +
       (facts.length ? truncateEnd(facts.join("\n"), 2400) + "\n" : "") +
       (narrative ? `\n[Model-written summary; file contents and tool results take precedence.]\nHand-over notes:\n${narrative}` : "");
 

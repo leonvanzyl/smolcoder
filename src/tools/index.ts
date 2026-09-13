@@ -66,12 +66,12 @@ export function buildToolSpecs(mode: Mode): ToolSpec[] {
     {
       name: "plan",
       description:
-        'Plan runnable increments, kept across compaction. Create: {"action":"set","steps":"wire entry point\\nrun build\\nadd movement and test"}. Finish current step: {"action":"done"} (or supply step). Save exact APIs, error and next edit before a long investigation: {"action":"checkpoint","text":"..."} (max 1000 chars, replaces current step notes). Append: {"action":"add","text":"..."}. Show: {"action":"show"}.',
+        'Plan runnable increments, kept across compaction. Create: {"action":"set","steps":"wire entry point; run build; add movement and test"}. Finish current step: {"action":"done"} (or supply step). Save exact APIs, error and next edit before a long investigation: {"action":"checkpoint","text":"..."} (max 1000 chars, replaces current step notes). Append: {"action":"add","text":"..."}. Show: {"action":"show"}.',
       parameters: {
         type: "object",
         properties: {
           action: { type: "string", enum: ["set", "done", "add", "show", "checkpoint"] },
-          steps: { type: "string", description: 'The steps, one per line (only for "set")' },
+          steps: { type: "string", description: 'The steps, one per line; semicolon lists also accepted (only for "set")' },
           step: { type: "number", description: 'Step number to mark done (optional, for "done")' },
           text: { type: "string", description: 'Step to append or working checkpoint' },
         },
@@ -173,8 +173,8 @@ export async function executeTool(
         result = await searchFilesBounded(ctx.workspace, args, signal);
         break;
       case "plan": {
-        const action = args.action;
-        if (action === "set") result = ctx.plan.set(String(args.steps ?? ""));
+        const action = args.action ?? (typeof args.steps === "string" ? "set" : undefined);
+        if (action === "set") result = ctx.plan.set(typeof args.steps === "string" ? args.steps : "");
         else if (action === "done")
           result = ctx.plan.markDone(args.step === undefined ? undefined : Number(args.step));
         else if (action === "add") result = ctx.plan.add(String(args.text ?? ""));

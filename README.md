@@ -112,9 +112,29 @@ smol --mode bypass              # never ask for approval
 smol --ctx 16384                # cap the context window
 smol --web                      # browser UI with a workspace sidebar (see below)
 smol -p "fix the failing test"  # headless: run one prompt, print the transcript, exit
+smol -p "build the app" --verify "npm test && npm run test:e2e"
 ```
 
-Headless mode is for scripts and automation. It suppresses reasoning noise and the exit code tells you whether the run succeeded.
+After file edits, the shared agent loop automatically runs available Node project scripts named `build`, `test`, and `test:e2e` before completing. During longer implementations it also runs these checks after each 24 tool calls, so cycles of reading and adjusting interfaces encounter actual compiler/test feedback. This works in the terminal, web UI, and headless mode. An unrelated follow-up question does not rerun checks. Project scripts only establish what they actually test; a zero exit code does not certify every requested behavior.
+
+`--verify` supplies a caller-owned final acceptance command. The host keeps the command; the model receives its failure evidence. Project checks run during longer implementations without consuming final acceptance attempts. Before final acceptance begins, recovery from repeated tools also uses a known failing project check. After acceptance fails, periodic checks use that same acceptance command and count toward its limit. Before completing, the harness runs the acceptance command in the workspace, feeds actual failures back to the same agent, and continues repairs automatically. It also uses acceptance feedback to recover from repeated tool attempts or sustained reading after edits. Bounded excerpts of actual failures survive compaction. Six acceptance attempts by default and the overall model-step budget bound the work; exhaustion or cancellation exits nonzero. Use `--verify-attempts 12` when a complex task needs a larger repair budget. This changes the allowed number of checks; the acceptance command must still pass. Each check has the normal 120-second command deadline. This option currently applies to headless runs. Supply behavioral checks: a production build alone cannot establish that a game's Play button, movement, or saving works.
+
+```mermaid
+flowchart LR
+    Task[One user request] --> Work[Agent implements and tests]
+    Work -->|Every 24 tool calls after edits| Progress[Run project or active acceptance checks]
+    Progress -->|Feedback| Work
+    Work --> Candidate[Agent proposes completion]
+    Candidate --> Check[Run caller-owned acceptance command]
+    Check -->|Pass| Done[Verified completion]
+    Check -->|Fail, attempts remain| Evidence[Preserve failure evidence]
+    Evidence -->|Different failure| Work
+    Evidence -->|Same failure twice| Refresh[Task + plan + actual failure<br/>Discard stale narrative]
+    Refresh --> Work
+    Check -->|Limit or cancellation| Incomplete[Nonzero exit: incomplete]
+```
+
+In a fresh conversation, two consecutive equivalent acceptance failures trigger facts-only compaction even if the context window has space. It retains the request, plan/checkpoint, touched files and actual failure, and discards old model-written narratives before continuing. This gives a repeated wrong assumption less room to perpetuate itself. Repeat detection ignores numbers and whitespace; the model still receives the original output. A changed failure keeps the working context, and this recovery never raises the attempt limit or adds a summarization request. Sessions with earlier user turns retain ordinary compaction so this reset cannot discard prior user decisions stored in summaries.
 
 ## The web UI
 
@@ -151,7 +171,7 @@ The input budget includes instructions, tool schemas, requests and history. Back
 
 ### Compaction in stages
 
-Large obsolete file reads are replaced with stubs after a successful edit or write. Before a subsequent model request, context management normally starts above **80% of the usable input budget**. A completed, valid background handover can be reused immediately; otherwise older reasoning, completed write payloads and old tool output are removed before asking the model to summarize. The newest tool group is protected. If the remaining content cannot shrink further, repeated futile summaries are suppressed while the final fit check stays active.
+Large obsolete file reads are replaced with stubs after a successful edit or write. Before a subsequent model request, context management normally starts above **80% of the usable input budget**. A completed, valid background handover can be reused immediately; otherwise older reasoning, completed write payloads and old tool output are removed before asking the model to summarize. Completed writes become marked harness history records, with no placeholder code in executable tool arguments or fabricated assistant answers. The newest tool group is protected. If the remaining content cannot shrink further, repeated futile summaries are suppressed while the final fit check stays active.
 
 ```mermaid
 flowchart TD
@@ -172,7 +192,7 @@ Eviction aims for 60% to create headroom. The handover combines **harness-record
 - The model receives a sized digest and previous handover, with three headings: **In progress**, **Next** and **Notes**. It is asked to preserve exact APIs and unresolved errors without repeating the goal and checklist. Reasoning is off, tools are absent, output is capped at 700 tokens and the deadline is 45 seconds. The returned narrative also has a context-sized character cap.
 - Very small budgets skip model summarization. A failed foreground summary falls back to recorded facts and the previous narrative. Recent assistant/tool groups stay paired; whole groups are removed only when necessary to fit the hard input budget. Crossing the 80% soft target alone does not erase the source just read.
 
-File reads return contiguous, context-sized pages with an accurate continuation line. Recent command records retain exit outcomes rather than entire inline scripts. Repeated unchanged reads trigger coaching and eventually a recoverable stop, so a model cannot spend an entire session rereading the same modules indefinitely. Model-written summaries and checkpoints remain advisory; current files and tool results take precedence.
+File reads return contiguous, context-sized pages with an accurate continuation line. Recent command records retain exit outcomes rather than entire inline scripts. The repeated-read guard counts evidence still present in the model's context: refetching data removed by compaction is allowed. Repeated retained observations trigger coaching, then acceptance feedback when configured or a recoverable stop. Model-written summaries and checkpoints remain advisory; current files and tool results take precedence.
 
 Failed edits return a bounded source range and continuation arguments. Bash pipelines preserve upstream failure codes, and long command logs retain both their beginning and final error details. These checks keep verification failures visible to the model.
 
@@ -189,7 +209,7 @@ sequenceDiagram
     participant Model as Local model
     participant Cache as Prepared handover
     Agent->>Shell: Run command
-    Note over Agent,Model: Context pressure + enough history + server idle
+    Note over Agent,Model: Context pressure + enough history + command still running after 750 ms
     Agent->>Model: Summarize frozen transcript prefix
     alt Summary finishes during the command
         Model-->>Cache: Store smaller candidate
@@ -223,7 +243,7 @@ flowchart TD
     Note --> Next["Resume coding<br/>with the next step"]
 ```
 
-The model creates a plan with one newline-separated string:
+The model creates a plan with one newline-separated string. A single-line semicolon list is accepted too, so it cannot accidentally become one giant completed step:
 
 ```json
 {"action":"set","steps":"Inspect the failing test\nImplement the fix\nRun the tests"}
@@ -256,15 +276,17 @@ The current validation includes a live Ollama run at a **4,096-token window**: 2
 
 A larger trial built a playable Minecraft-inspired voxel sandbox through Ollama, followed by supervised repairs and independent browser checks. Its initial 8k and 16k builds stalled; focused repairs produced the working result. The [full lifecycle record](docs/lifecycle-2026-09-13.md) documents those failures, the resulting harness changes, acceptance tests and fault-injection checks. This is evidence of a recoverable workflow, not unattended complex-build reliability.
 
+The [unattended follow-up](docs/unattended-2026-09-13.md#final-accepted-results) includes accepted fresh voxel-game builds through both Ollama and LM Studio, with no manual game edits or agent restarts within either trial. Both unchanged games passed thirty independent checks across the actual preview and a direct browser, covering Play, movement after turning, visible block edits, saving, New World and invalid-save recovery. Exact source archives, traces and failed trials are retained. These runs used installed 27B Q4 models at 64k context; they demonstrate selected successful builds, not a general completion rate or a competitor ranking.
+
 Implementation: [context manager](src/context.ts), [plan state](src/plan.ts), [agent loop](src/agent.ts), [tool schemas](src/tools/index.ts), [inference scheduler](src/providers/scheduler.ts).
 
 ## Local APIs and failure recovery
 
 Ollama uses [native chat](https://docs.ollama.com/api/chat) for tools, thinking, keep-alive and token/timing usage, plus [running-model information](https://docs.ollama.com/api/ps) for loaded context. LM Studio uses its [native model catalog](https://lmstudio.ai/docs/developer/rest/list) and [OpenAI-compatible tool streaming](https://lmstudio.ai/docs/developer/openai-compat/chat-completions). For an unloaded LM Studio model, an explicit `--ctx` uses the [native load API](https://lmstudio.ai/docs/developer/rest/load) and checks the returned allocation. Already-loaded models are not reloaded to enlarge their windows.
 
-Requests have a three-minute silence timeout and a fifteen-minute total deadline. Transient failures retry up to three attempts, with cancellable backoff. Context-overflow recovery gets one forced compaction attempt. Malformed or incomplete streams cannot execute partial tool calls. Repeated empty responses and repeated tools without progress stop with a recoverable error, and failed or cancelled headless runs exit unsuccessfully.
+Requests have a three-minute silence timeout and a fifteen-minute total deadline. Transient failures retry up to three attempts, with cancellable backoff. Context-overflow recovery gets one forced compaction attempt. Malformed or incomplete streams cannot execute partial tool calls. Repeated empty responses stop with a recoverable error. Repeated failed or unchanged tool calls invoke available acceptance checks for automatic repair, or fail visibly when no check is available. Failed or cancelled headless runs exit unsuccessfully.
 
-If reasoning consumes the entire reply without producing an answer or tool call, the harness announces one continuation with thinking disabled. The session's chosen effort is restored on the following request. This avoids asking the model to repeat the same over-budget reasoning indefinitely; recovery remains bounded.
+If reasoning consumes the entire reply without producing an answer or tool call, the harness announces one response with thinking disabled. Repeated exhaustion in the same turn extends that recovery interval to four, then at most eight responses. It then retries the selected effort; the session preference is never changed. This limits repeated unproductive reasoning while still allowing the model to reason again.
 
 Restored web sessions repair interrupted tool conversations and retire old approval buttons; an interrupted command's outcome must be inspected before retrying. These protections make failures visible and preserve a path to continuation. They cannot guarantee that a local server stays running or that generated code is correct.
 

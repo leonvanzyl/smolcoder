@@ -31,11 +31,12 @@ export class Plan {
     this.steps = [];
   }
 
-  /** Replace the plan. Steps arrive as one newline-separated string — the most
-   * reliable shape for small models (no arrays to mangle). */
+  /** Replace the plan. Accept the semicolon lists local models often return
+   * when asked for a newline-separated string. Keep explicit multiline steps
+   * intact, including punctuation or code within a step. */
   set(stepsText: string): string {
     const lines = stepsText
-      .split("\n")
+      .split(stepsText.includes("\n") ? "\n" : /;\s*/)
       .map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])?\s*(?:\[.\]\s*)?/, "").trim())
       .filter(Boolean)
       .slice(0, 20);

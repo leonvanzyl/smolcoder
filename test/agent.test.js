@@ -55,16 +55,18 @@ test("alternating unchanged reads stop with a recoverable error before the model
   assert.match(agent.messages.at(-1).content, /Do not restart the same reads/);
 });
 
-test("showing a plan does not re-arm its premature-completion nudge", async () => {
+test("implicit plan creation renders once; showing it does not re-arm its completion nudge", async () => {
   const provider = scriptedProvider([
-    {toolCalls:[{id:'p1',name:'plan',args:{action:'set',steps:'Implement\nTest'}}]},
+    {toolCalls:[{id:'p1',name:'plan',args:{steps:'Implement; Test'}}]},
     {content:'paused'},
     {toolCalls:[{id:'p2',name:'plan',args:{action:'show'}}]},
     {content:'blocked and needs clarification'},
   ]);
-  const agent = makeAgent(provider, fakeUi());
+  let updates=0;const ui=fakeUi();ui.planUpdated=()=>updates++;
+  const agent = makeAgent(provider, ui);
   await agent.runTurn('build');
   assert.equal(provider.seen.length, 4);
+  assert.equal(updates,1);
 });
 
 test("a cut-off tool call (empty, truncated, no thinking) is coached to split the file", async () => {
@@ -121,6 +123,22 @@ test("a truncated call that arrives as unparseable JSON (LM Studio) gets the sam
   const toolMsg = provider.seen[1].find((m) => m.role === "tool");
   assert.ok(toolMsg);
   assert.match(toolMsg.content, /^Error: Your tool call was cut off by the output limit of 2000 tokens/);
+});
+
+test('repeated reasoning exhaustion extends a bounded recovery interval then restores effort',async()=>{
+  const options=[];
+  const read=i=>({toolCalls:[{id:'read'+i,name:'list_files',args:{path:'.',limit:10+i}}]});
+  const provider=scriptedProvider([
+    {thinking:'exhausted',truncated:true},read(0),
+    {thinking:'exhausted again',truncated:true},...Array.from({length:4},(_,i)=>read(i+1)),
+    {content:'done'}
+  ]);
+  const chat=provider.chat.bind(provider);
+  provider.chat=(messages,tools,opts)=>{options.push(opts.effortOverride);return chat(messages);};
+  provider.setEffort=()=>{throw Error('must not mutate preference');};
+  const agent=makeAgent(provider,fakeUi());await agent.runTurn('make progress');
+  assert.equal(agent.outcome,'completed');
+  assert.deepEqual(options,[undefined,'off',undefined,'off','off','off','off',undefined]);
 });
 
 test("turn stats accumulate tokens, speed and tool calls", async () => {

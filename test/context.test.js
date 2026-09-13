@@ -4,6 +4,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { ContextManager, renderForDigest } = require("../dist/context");
 const { describeStats } = require("../dist/agent");
+const { lastUserIndex } = require("../dist/providers/types");
 
 test("compaction keeps a fresh tool result that fits the hard budget above the soft target", async () => {
   const cm = new ContextManager(4096, 1024);
@@ -50,7 +51,12 @@ test("old successful write payloads are evicted without summarizing or changing 
   const result = await cm.manage(input,[],{chat:async()=>{throw Error('must not summarize');}},
     {originalRequest:'build',filesTouched:new Set(['a.js']),commandsRun:[]});
   assert.equal(result.report.action,'evicted');
-  assert.match(result.messages[2].toolCalls[0].args.content,/already applied to a.js/);
+  assert.equal(result.messages[2].toolCalls,undefined);
+  assert.equal(result.messages[2].role,'user','synthetic receipts must never teach an assistant answer pattern');
+  assert.equal(result.messages[2].historyNote,true);
+  assert.equal(lastUserIndex(result.messages),1,'history records are not new user turns');
+  assert.match(result.messages[2].content,/write_file: Created a.js/);
+  assert.equal(result.messages.some(m=>m.toolCallId==='w'),false,'remove the paired result');
   assert.equal(originalCall.args.content,body,'UI/audit references keep their original call');
   assert.equal(result.messages.at(-1).content,'fresh reference '.repeat(200));
 });
@@ -65,6 +71,39 @@ test("handover command records retain recent outcomes without copying whole inli
   assert.match(note,/check-7 -> \[exit code 1\]/);
   assert.doesNotMatch(note,/check-0/);
   assert.ok(note.length < 1600);
+});
+
+test('write compaction preserves mixed batch pairs, failed and pending writes, and migrates legacy markers', async () => {
+  const body='actual code '.repeat(700);
+  const calls=[
+    {id:'ok',name:'write_file',args:{path:'ok.js',content:body}},
+    {id:'read',name:'read_file',args:{path:'reference.js'}},
+    {id:'fail',name:'edit_file',args:{path:'fail.js',old_text:body,new_text:'fixed'}},
+    {id:'pending',name:'write_file',args:{path:'pending.js',content:body}},
+    {id:'legacy',name:'write_file',args:{path:'legacy.js',content:'[7000 characters already applied to legacy.js. Read the file for current code.]'}},
+  ];
+  // Reasoning supplies pressure without forcing loss of the remaining calls.
+  const input=[{role:'system',content:'sys'},{role:'user',content:'build'},
+    {role:'assistant',content:'writing',thinking:'old '.repeat(50000),toolCalls:calls},
+    toolResult('ok','write_file','Created ok.js (100 lines).\nWarning: syntax error at line 2'),
+    toolResult('read','read_file','real reference'),
+    toolResult('fail','edit_file','Error: old_text was not found'),
+    toolResult('legacy','write_file','Overwrote legacy.js (100 lines).'),
+    readCall('latest','latest.js'),toolResult('latest','read_file','latest source')];
+  const result=await new ContextManager(32768,8192).manage(input,[],
+    {chat:async()=>{throw Error('no summary needed');}},
+    {originalRequest:'build',filesTouched:new Set(),commandsRun:[]});
+  assert.equal(result.report.action,'evicted');
+  assert.deepEqual(result.messages[2].toolCalls.map(c=>c.id),['read','fail','pending']);
+  const history=result.messages.find(m=>m.historyNote);
+  assert.equal(history.role,'user');
+  assert.match(history.content,/syntax error at line 2/);
+  assert.match(history.content,/Overwrote legacy.js/);
+  assert.equal(result.messages[2].content,'writing');
+  assert.deepEqual(result.messages.filter(m=>m.role==='tool').map(m=>m.toolCallId),['read','fail','latest']);
+  assert.equal(result.messages[2].toolCalls[2].args.content,body);
+  assert.equal(calls.length,5,'audit references are unchanged');
+  assert.doesNotMatch(JSON.stringify(result.messages),/characters already applied/);
 });
 
 function readCall(id, path) {

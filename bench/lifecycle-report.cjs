@@ -15,6 +15,9 @@ const rows=collect(path.resolve(process.argv[2])).map(file=>{
   codingRequests:events.filter(e=>e.event==='request'&&e.kind==='coding').length,
   summaryRequests:events.filter(e=>e.event==='request'&&e.kind==='summary').length,
   tools:events.filter(e=>e.event==='tool_call').length,
+  acceptanceAttempts:events.filter(e=>e.event==='post_verify').length,
+  progressChecks:events.filter(e=>e.event==='post_progress_check').length,
+  acceptancePassed:end?.verification?.passed??null,
   evictions:actions.filter(a=>a==='evicted').length,summariesApplied:actions.filter(a=>a==='compacted'||a==='floor').length,
   error:end?.error??null};
 }).filter(Boolean);

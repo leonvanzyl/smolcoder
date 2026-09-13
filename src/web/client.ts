@@ -641,7 +641,9 @@ function buildBrowserTab(v, t) {
   empty.appendChild(el("div", "", "Enter a URL to preview it here."));
   const urlsEl = el("div", "urls"); empty.appendChild(urlsEl);
   const frame = document.createElement("iframe"); frame.hidden = true;
-  frame.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin allow-popups");
+  // Games need pointer lock; confirmation dialogs must reach the user.
+  // Keep navigation to the harness origin blocked below.
+  frame.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin allow-popups allow-pointer-lock allow-modals");
   frame.referrerPolicy = "no-referrer";
   frame.title = "App preview";
   body.appendChild(bar); body.appendChild(empty); body.appendChild(frame);

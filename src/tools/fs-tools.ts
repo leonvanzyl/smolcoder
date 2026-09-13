@@ -7,6 +7,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { resolveInWorkspace, relPath, SandboxError } from "../sandbox";
 import { truncateEnd } from "../util";
+import { isHistoryPlaceholder } from "../history";
 
 const READ_LINE_LIMIT = 250;
 // Must stay under TOOL_RESULT_CAP (10000) so the registry's outer truncateMiddle
@@ -109,6 +110,9 @@ export function writeFile(root: string, args: any): string {
   if (typeof args.content !== "string") {
     return 'Error: content is required and must be a string. Example: {"path": "notes.txt", "content": "hello"}';
   }
+  if (isHistoryPlaceholder(args.content)) {
+    return "Error: this is a history placeholder, not source code. No file was changed. Read the current file and provide the actual complete contents.";
+  }
   if (fs.existsSync(abs) && fs.statSync(abs).isDirectory()) {
     return `Error: "${args.path}" is an existing folder; cannot write a file there.`;
   }
@@ -183,6 +187,9 @@ export function editFile(root: string, args: any): string {
   }
   if (typeof newText !== "string") {
     return "Error: new_text must be a string (use an empty string to delete the old text).";
+  }
+  if (isHistoryPlaceholder(newText)) {
+    return "Error: this is a history placeholder, not source code. No file was changed. Read the current file and provide the actual replacement text.";
   }
 
   const rawContent = fs.readFileSync(abs, "utf8");

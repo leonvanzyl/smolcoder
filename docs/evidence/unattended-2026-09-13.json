@@ -1,0 +1,5013 @@
+{
+  "date": "2026-09-13",
+  "method": "One fresh Agent.runTurn per trial, no resume, no supervisor-written game source, no follow-up repair prompt. Caller-owned acceptance runs automatically; screenshots also inspected by supervisor.",
+  "scope": "Installed Qwen3.8 27B Q4_K_M models, 65,536-token context, reasoning off, sequential providers. Weight files not verified byte-identical. These selected successful trials follow failed development trials; they are not a completion-rate or competitor-superiority estimate.",
+  "machine": {
+    "os": "win32",
+    "node": "v24.16.0",
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "gpuMemoryMiB": 32607
+  },
+  "harnessTests": {
+    "total": 108,
+    "passed": 107,
+    "failed": 0,
+    "skipped": 1,
+    "skipReason": "Windows symlink creation privilege unavailable"
+  },
+  "meshObserverFixtures": {
+    "passed": 7
+  },
+  "hudFixtures": {
+    "passed": 8
+  },
+  "runs": [
+    {
+      "name": "lm-verified-v11",
+      "workspace": "playground/unattended-lm-verified-v11",
+      "startedAt": "2026-09-13T21:18:29.297Z",
+      "finishedAt": "2026-09-13T21:34:05.869Z",
+      "model": "qwen/qwen3.8-27b",
+      "backend": "lmstudio",
+      "context": 65536,
+      "effort": "off",
+      "harnessHash": "3ff04f06e300c7a42f1db8856f670ed3b62cc5f2914f94714ba83304e9495eec",
+      "promptHash": "464bd25fb87af4d3ff2e65b8d2c339c92c8c740941682c96514b156af5445bce",
+      "runnerOutcome": "completed",
+      "accepted": true,
+      "stats": {
+        "modelCalls": 187,
+        "toolCalls": 195,
+        "generatedTokens": 55875,
+        "genSeconds": 555.524,
+        "thinkingChars": 0,
+        "promptTokensLast": 26028,
+        "durationMs": 936570
+      },
+      "summaryRequests": 8,
+      "progressChecks": 5,
+      "factsOnlyRefocuses": 1,
+      "compaction": [
+        {
+          "action": "evicted",
+          "before": 45884,
+          "after": 21719
+        },
+        {
+          "action": "evicted",
+          "before": 47906,
+          "after": 34127
+        },
+        {
+          "action": "evicted",
+          "before": 47450,
+          "after": 33244
+        },
+        {
+          "action": "evicted",
+          "before": 45889,
+          "after": 34304
+        },
+        {
+          "action": "compacted",
+          "before": 32928,
+          "after": 3953
+        }
+      ],
+      "attempts": [
+        {
+          "time": "2026-09-13T21:29:07.876Z",
+          "attempt": 1,
+          "passed": false,
+          "output": "Error: command exited with code 1\nBrowser acceptance (preview): playing shows crosshair, FPS and five hotbar slots\nFPS HUD never displayed a positive frame rate: \"FPS: --\"\nConsole errors: none\nUncaught exceptions: none\nAlready passed in this view: startup exposes live game state without exceptions; Play leaves the menu and acquires pointer lock; the game canvas renders terrain beyond the menu. Preserve these behaviors.\nFix the game implementation. Both the embedded preview and direct browser must pass. The check uses real buttons, keyboard and mouse; debug teleport only arranges test positions. Diagnostic files are outside the project; use the failure above to repair project files.\n\n[exit code 1 in 8.5s]"
+        },
+        {
+          "time": "2026-09-13T21:29:40.525Z",
+          "attempt": 2,
+          "passed": false,
+          "output": "Error: command exited with code 1\nBrowser acceptance (preview): playing shows crosshair, FPS and five hotbar slots\nFPS HUD never displayed a positive frame rate: \"FPS: --\"\nConsole errors: none\nUncaught exceptions: none\nAlready passed in this view: startup exposes live game state without exceptions; Play leaves the menu and acquires pointer lock; the game canvas renders terrain beyond the menu. Preserve these behaviors.\nFix the game implementation. Both the embedded preview and direct browser must pass. The check uses real buttons, keyboard and mouse; debug teleport only arranges test positions. Diagnostic files are outside the project; use the failure above to repair project files.\n\n[exit code 1 in 8.5s]"
+        },
+        {
+          "time": "2026-09-13T21:31:06.390Z",
+          "attempt": 3,
+          "passed": false,
+          "output": "Error: command exited with code 1\nBrowser acceptance (preview): New World confirmation can be declined and accepted\nframe.waitForFunction: Timeout 8000ms exceeded.\nConsole errors: none\nUncaught exceptions: none\nAlready passed in this view: startup exposes live game state without exceptions; Play leaves the menu and acquires pointer lock; the game canvas renders terrain beyond the menu; playing shows crosshair, FPS and five hotbar slots; rendered voxel triangles match their surface normals; gravity lands on terrain and a grounded jump rises; WASD stays opposite and perpendicular at three headings; five hotbar keys select five distinct blocks; mouse look targets terrain and left click visibly removes a real block; right click places one adjacent block; pointer unlock pauses and Play resumes twice; Save and reload preserve edits, selection and position. Preserve these behaviors.\nFix the game implementation. Both the embedded preview and direct browser must pass. The check uses real buttons, keyboard and mouse; debug teleport only arranges test positions. Diagnostic files are outside the project; use the failure above to repair project files.\n\n[exit code 1 in 25.2s]"
+        },
+        {
+          "time": "2026-09-13T21:33:13.232Z",
+          "attempt": 4,
+          "passed": true,
+          "output": "PASS: project tests, production build, and all 15 gameplay checks in each of the embedded preview and direct browser (30 checks total).\nReport: C:\\Projects\\tinycoder\\playground\\.unattended\\lm-verified-v11\\acceptance\\2026-09-13T21-32-32-000Z\\results.json\n\n[exit code 0 in 41.5s]"
+        },
+        {
+          "time": "2026-09-13T21:34:05.866Z",
+          "attempt": 5,
+          "passed": true,
+          "output": "PASS: project tests, production build, and all 15 gameplay checks in each of the embedded preview and direct browser (30 checks total).\nReport: C:\\Projects\\tinycoder\\playground\\.unattended\\lm-verified-v11\\acceptance\\2026-09-13T21-33-24-624Z\\results.json\n\n[exit code 0 in 41.5s]"
+        }
+      ],
+      "browser": {
+        "path": "playground/.unattended/lm-verified-v11/acceptance/2026-09-13T21-33-24-624Z/results.json",
+        "report": {
+          "url": "http://127.0.0.1:54453",
+          "checkerHash": "5f6a25709cb0f7fd79fe310bff4f8fab2f05af4191571ca8f98f008dd5f86635",
+          "passed": true,
+          "views": [
+            {
+              "name": "preview",
+              "report": {
+                "url": "http://127.0.0.1:54453",
+                "preview": true,
+                "checkerHash": "5f6a25709cb0f7fd79fe310bff4f8fab2f05af4191571ca8f98f008dd5f86635",
+                "passed": true,
+                "results": [
+                  {
+                    "name": "startup exposes live game state without exceptions",
+                    "passed": true,
+                    "detail": {
+                      "player": {
+                        "x": 24.5,
+                        "y": 15,
+                        "z": 24.5
+                      },
+                      "selected": 1,
+                      "targeted": null,
+                      "editCount": 203
+                    }
+                  },
+                  {
+                    "name": "Play leaves the menu and acquires pointer lock",
+                    "passed": true,
+                    "detail": {
+                      "player": {
+                        "x": 24.5,
+                        "y": 15,
+                        "z": 24.5
+                      },
+                      "selected": 1,
+                      "targeted": null,
+                      "editCount": 203
+                    }
+                  },
+                  {
+                    "name": "the game canvas renders terrain beyond the menu",
+                    "passed": true,
+                    "detail": {
+                      "width": 519,
+                      "height": 819,
+                      "colors": 10,
+                      "largestColorFraction": 0.6189727463312369
+                    }
+                  },
+                  {
+                    "name": "playing shows crosshair, FPS and five hotbar slots",
+                    "passed": true,
+                    "detail": {
+                      "fps": "FPS: 134",
+                      "slots": 5
+                    }
+                  },
+                  {
+                    "name": "rendered voxel triangles match their surface normals",
+                    "passed": true,
+                    "detail": {
+                      "triangles": 16956,
+                      "invalid": 0,
+                      "examples": [],
+                      "geometryChanges": 1
+                    }
+                  },
+                  {
+                    "name": "gravity lands on terrain and a grounded jump rises",
+                    "passed": true,
+                    "detail": {
+                      "a": [
+                        24.5,
+                        15,
+                        24.5
+                      ],
+                      "b": [
+                        24.5,
+                        15.862793859999995,
+                        24.5
+                      ]
+                    }
+                  },
+                  {
+                    "name": "WASD stays opposite and perpendicular at three headings",
+                    "passed": true,
+                    "detail": [
+                      {
+                        "forward": [
+                          -0.9401942126459172,
+                          -0.3406388740398315
+                        ],
+                        "vectors": {
+                          "w": [
+                            -0.9534697549284914,
+                            -0.34544869494127894
+                          ],
+                          "s": [
+                            0.9681931962985288,
+                            0.35078309970874244
+                          ],
+                          "a": [
+                            -0.3458165849252417,
+                            0.9544851646781467
+                          ],
+                          "d": [
+                            0.33238860051059405,
+                            -0.9174227088156428
+                          ]
+                        }
+                      },
+                      {
+                        "forward": [
+                          -0.7360388287618225,
+                          -0.6769393196992806
+                        ],
+                        "vectors": {
+                          "w": [
+                            -0.7531885334719703,
+                            -0.6927120058482714
+                          ],
+                          "s": [
+                            0.7237764218746321,
+                            0.6656615106330719
+                          ],
+                          "a": [
+                            -0.6641993217025224,
+                            0.7221865780045142
+                          ],
+                          "d": [
+                            0.6612749438414305,
+                            -0.7190068902642679
+                          ]
+                        }
+                      },
+                      {
+                        "forward": [
+                          -0.41796126092011054,
+                          -0.9084648503767613
+                        ],
+                        "vectors": {
+                          "w": [
+                            -0.427248360137753,
+                            -0.9286509393521278
+                          ],
+                          "s": [
+                            0.4272483601377566,
+                            0.9286509393521278
+                          ],
+                          "a": [
+                            -0.9330660785249556,
+                            0.4292796518658264
+                          ],
+                          "d": [
+                            0.8869524027198423,
+                            -0.4080639382615132
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "name": "five hotbar keys select five distinct blocks",
+                    "passed": true,
+                    "detail": [
+                      1,
+                      2,
+                      3,
+                      4,
+                      5
+                    ]
+                  },
+                  {
+                    "name": "mouse look targets terrain and left click visibly removes a real block",
+                    "passed": true,
+                    "detail": [
+                      24,
+                      14,
+                      24
+                    ]
+                  },
+                  {
+                    "name": "right click places one adjacent block",
+                    "passed": true,
+                    "detail": [
+                      27,
+                      13,
+                      27
+                    ]
+                  },
+                  {
+                    "name": "pointer unlock pauses and Play resumes twice",
+                    "passed": true
+                  },
+                  {
+                    "name": "Save and reload preserve edits, selection and position",
+                    "passed": true,
+                    "detail": {
+                      "a": {
+                        "player": {
+                          "x": 28.5,
+                          "y": 12,
+                          "z": 28.5
+                        },
+                        "selected": 5,
+                        "targeted": {
+                          "x": 27,
+                          "y": 13,
+                          "z": 27
+                        },
+                        "editCount": 205
+                      },
+                      "b": {
+                        "player": {
+                          "x": 28.5,
+                          "y": 12,
+                          "z": 28.5
+                        },
+                        "selected": 5,
+                        "targeted": null,
+                        "editCount": 205
+                      },
+                      "resumed": {
+                        "player": {
+                          "x": 28.5,
+                          "y": 12,
+                          "z": 28.5
+                        },
+                        "selected": 5,
+                        "targeted": null,
+                        "editCount": 205
+                      }
+                    }
+                  },
+                  {
+                    "name": "New World confirmation can be declined and accepted",
+                    "passed": true,
+                    "detail": {
+                      "player": {
+                        "x": 24.5,
+                        "y": 12,
+                        "z": 24.5
+                      },
+                      "selected": 1,
+                      "targeted": null,
+                      "editCount": 0
+                    }
+                  },
+                  {
+                    "name": "invalid saved data recovers to a playable world",
+                    "passed": true
+                  },
+                  {
+                    "name": "no browser exceptions during the lifecycle",
+                    "passed": true
+                  }
+                ],
+                "errors": [],
+                "consoleErrors": []
+              }
+            },
+            {
+              "name": "direct",
+              "report": {
+                "url": "http://127.0.0.1:54453",
+                "preview": false,
+                "checkerHash": "5f6a25709cb0f7fd79fe310bff4f8fab2f05af4191571ca8f98f008dd5f86635",
+                "passed": true,
+                "results": [
+                  {
+                    "name": "startup exposes live game state without exceptions",
+                    "passed": true,
+                    "detail": {
+                      "player": {
+                        "x": 24.5,
+                        "y": 15,
+                        "z": 24.5
+                      },
+                      "selected": 1,
+                      "targeted": null,
+                      "editCount": 203
+                    }
+                  },
+                  {
+                    "name": "Play leaves the menu and acquires pointer lock",
+                    "passed": true,
+                    "detail": {
+                      "player": {
+                        "x": 24.5,
+                        "y": 15,
+                        "z": 24.5
+                      },
+                      "selected": 1,
+                      "targeted": null,
+                      "editCount": 203
+                    }
+                  },
+                  {
+                    "name": "the game canvas renders terrain beyond the menu",
+                    "passed": true,
+                    "detail": {
+                      "width": 1440,
+                      "height": 900,
+                      "colors": 17,
+                      "largestColorFraction": 0.5990682137834037
+                    }
+                  },
+                  {
+                    "name": "playing shows crosshair, FPS and five hotbar slots",
+                    "passed": true,
+                    "detail": {
+                      "fps": "FPS: 96",
+                      "slots": 5
+                    }
+                  },
+                  {
+                    "name": "rendered voxel triangles match their surface normals",
+                    "passed": true,
+                    "detail": {
+                      "triangles": 16956,
+                      "invalid": 0,
+                      "examples": [],
+                      "geometryChanges": 1
+                    }
+                  },
+                  {
+                    "name": "gravity lands on terrain and a grounded jump rises",
+                    "passed": true,
+                    "detail": {
+                      "a": [
+                        24.5,
+                        15,
+                        24.5
+                      ],
+                      "b": [
+                        24.5,
+                        15.8693261,
+                        24.5
+                      ]
+                    }
+                  },
+                  {
+                    "name": "WASD stays opposite and perpendicular at three headings",
+                    "passed": true,
+                    "detail": [
+                      {
+                        "forward": [
+                          0.010999778167987938,
+                          -0.9999395006100396
+                        ],
+                        "vectors": {
+                          "w": [
+                            0.011256072999302091,
+                            -1.0232380909742567
+                          ],
+                          "s": [
+                            -0.010846221264763756,
+                            0.9859803451815132
+                          ],
+                          "a": [
+                            -0.9897601164938195,
+                            -0.01088780042623938
+                          ],
+                          "d": [
+                            1.0189183523316103,
+                            0.011208553957615663
+                          ]
+                        }
+                      },
+                      {
+                        "forward": [
+                          0.39585617590238903,
+                          -0.9183125219662078
+                        ],
+                        "vectors": {
+                          "w": [
+                            0.3890474496768661,
+                            -0.9025175465883848
+                          ],
+                          "s": [
+                            -0.4042245754609617,
+                            0.9377256486805727
+                          ],
+                          "a": [
+                            -0.943676313822909,
+                            -0.40678972348080933
+                          ],
+                          "d": [
+                            0.898054547731622,
+                            0.38712358866197505
+                          ]
+                        }
+                      },
+                      {
+                        "forward": [
+                          0.7194429797923988,
+                          -0.694551509124726
+                        ],
+                        "vectors": {
+                          "w": [
+                            0.7296015146670634,
+                            -0.7043585764335631
+                          ],
+                          "s": [
+                            -0.7373714988488125,
+                            0.7118597327321083
+                          ],
+                          "a": [
+                            -0.7073590389529798,
+                            -0.7327095083397666
+                          ],
+                          "d": [
+                            0.6766042981289395,
+                            0.7008525731945596
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "name": "five hotbar keys select five distinct blocks",
+                    "passed": true,
+                    "detail": [
+                      1,
+                      2,
+                      3,
+                      4,
+                      5
+                    ]
+                  },
+                  {
+                    "name": "mouse look targets terrain and left click visibly removes a real block",
+                    "passed": true,
+                    "detail": [
+                      24,
+                      14,
+                      24
+                    ]
+                  },
+                  {
+                    "name": "right click places one adjacent block",
+                    "passed": true,
+                    "detail": [
+                      28,
+                      13,
+                      25
+                    ]
+                  },
+                  {
+                    "name": "pointer unlock pauses and Play resumes twice",
+                    "passed": true
+                  },
+                  {
+                    "name": "Save and reload preserve edits, selection and position",
+                    "passed": true,
+                    "detail": {
+                      "a": {
+                        "player": {
+                          "x": 28.5,
+                          "y": 12,
+                          "z": 28.5
+                        },
+                        "selected": 5,
+                        "targeted": {
+                          "x": 28,
+                          "y": 13,
+                          "z": 25
+                        },
+                        "editCount": 205
+                      },
+                      "b": {
+                        "player": {
+                          "x": 28.5,
+                          "y": 12,
+                          "z": 28.5
+                        },
+                        "selected": 5,
+                        "targeted": null,
+                        "editCount": 205
+                      },
+                      "resumed": {
+                        "player": {
+                          "x": 28.5,
+                          "y": 12,
+                          "z": 28.5
+                        },
+                        "selected": 5,
+                        "targeted": {
+                          "x": 28,
+                          "y": 13,
+                          "z": 25
+                        },
+                        "editCount": 205
+                      }
+                    }
+                  },
+                  {
+                    "name": "New World confirmation can be declined and accepted",
+                    "passed": true,
+                    "detail": {
+                      "player": {
+                        "x": 24.5,
+                        "y": 11,
+                        "z": 24.5
+                      },
+                      "selected": 1,
+                      "targeted": {
+                        "x": 28,
+                        "y": 13,
+                        "z": 25
+                      },
+                      "editCount": 0
+                    }
+                  },
+                  {
+                    "name": "invalid saved data recovers to a playable world",
+                    "passed": true
+                  },
+                  {
+                    "name": "no browser exceptions during the lifecycle",
+                    "passed": true
+                  }
+                ],
+                "errors": [],
+                "consoleErrors": [
+                  "Failed to load resource: the server responded with a status of 404 (Not Found)"
+                ]
+              }
+            }
+          ],
+          "results": [
+            {
+              "name": "preview: startup exposes live game state without exceptions",
+              "passed": true,
+              "detail": {
+                "player": {
+                  "x": 24.5,
+                  "y": 15,
+                  "z": 24.5
+                },
+                "selected": 1,
+                "targeted": null,
+                "editCount": 203
+              }
+            },
+            {
+              "name": "preview: Play leaves the menu and acquires pointer lock",
+              "passed": true,
+              "detail": {
+                "player": {
+                  "x": 24.5,
+                  "y": 15,
+                  "z": 24.5
+                },
+                "selected": 1,
+                "targeted": null,
+                "editCount": 203
+              }
+            },
+            {
+              "name": "preview: the game canvas renders terrain beyond the menu",
+              "passed": true,
+              "detail": {
+                "width": 519,
+                "height": 819,
+                "colors": 10,
+                "largestColorFraction": 0.6189727463312369
+              }
+            },
+            {
+              "name": "preview: playing shows crosshair, FPS and five hotbar slots",
+              "passed": true,
+              "detail": {
+                "fps": "FPS: 134",
+                "slots": 5
+              }
+            },
+            {
+              "name": "preview: rendered voxel triangles match their surface normals",
+              "passed": true,
+              "detail": {
+                "triangles": 16956,
+                "invalid": 0,
+                "examples": [],
+                "geometryChanges": 1
+              }
+            },
+            {
+              "name": "preview: gravity lands on terrain and a grounded jump rises",
+              "passed": true,
+              "detail": {
+                "a": [
+                  24.5,
+                  15,
+                  24.5
+                ],
+                "b": [
+                  24.5,
+                  15.862793859999995,
+                  24.5
+                ]
+              }
+            },
+            {
+              "name": "preview: WASD stays opposite and perpendicular at three headings",
+              "passed": true,
+              "detail": [
+                {
+                  "forward": [
+                    -0.9401942126459172,
+                    -0.3406388740398315
+                  ],
+                  "vectors": {
+                    "w": [
+                      -0.9534697549284914,
+                      -0.34544869494127894
+                    ],
+                    "s": [
+                      0.9681931962985288,
+                      0.35078309970874244
+                    ],
+                    "a": [
+                      -0.3458165849252417,
+                      0.9544851646781467
+                    ],
+                    "d": [
+                      0.33238860051059405,
+                      -0.9174227088156428
+                    ]
+                  }
+                },
+                {
+                  "forward": [
+                    -0.7360388287618225,
+                    -0.6769393196992806
+                  ],
+                  "vectors": {
+                    "w": [
+                      -0.7531885334719703,
+                      -0.6927120058482714
+                    ],
+                    "s": [
+                      0.7237764218746321,
+                      0.6656615106330719
+                    ],
+                    "a": [
+                      -0.6641993217025224,
+                      0.7221865780045142
+                    ],
+                    "d": [
+                      0.6612749438414305,
+                      -0.7190068902642679
+                    ]
+                  }
+                },
+                {
+                  "forward": [
+                    -0.41796126092011054,
+                    -0.9084648503767613
+                  ],
+                  "vectors": {
+                    "w": [
+                      -0.427248360137753,
+                      -0.9286509393521278
+                    ],
+                    "s": [
+                      0.4272483601377566,
+                      0.9286509393521278
+                    ],
+                    "a": [
+                      -0.9330660785249556,
+                      0.4292796518658264
+                    ],
+                    "d": [
+                      0.8869524027198423,
+                      -0.4080639382615132
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "preview: five hotbar keys select five distinct blocks",
+              "passed": true,
+              "detail": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            {
+              "name": "preview: mouse look targets terrain and left click visibly removes a real block",
+              "passed": true,
+              "detail": [
+                24,
+                14,
+                24
+              ]
+            },
+            {
+              "name": "preview: right click places one adjacent block",
+              "passed": true,
+              "detail": [
+                27,
+                13,
+                27
+              ]
+            },
+            {
+              "name": "preview: pointer unlock pauses and Play resumes twice",
+              "passed": true
+            },
+            {
+              "name": "preview: Save and reload preserve edits, selection and position",
+              "passed": true,
+              "detail": {
+                "a": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 12,
+                    "z": 28.5
+                  },
+                  "selected": 5,
+                  "targeted": {
+                    "x": 27,
+                    "y": 13,
+                    "z": 27
+                  },
+                  "editCount": 205
+                },
+                "b": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 12,
+                    "z": 28.5
+                  },
+                  "selected": 5,
+                  "targeted": null,
+                  "editCount": 205
+                },
+                "resumed": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 12,
+                    "z": 28.5
+                  },
+                  "selected": 5,
+                  "targeted": null,
+                  "editCount": 205
+                }
+              }
+            },
+            {
+              "name": "preview: New World confirmation can be declined and accepted",
+              "passed": true,
+              "detail": {
+                "player": {
+                  "x": 24.5,
+                  "y": 12,
+                  "z": 24.5
+                },
+                "selected": 1,
+                "targeted": null,
+                "editCount": 0
+              }
+            },
+            {
+              "name": "preview: invalid saved data recovers to a playable world",
+              "passed": true
+            },
+            {
+              "name": "preview: no browser exceptions during the lifecycle",
+              "passed": true
+            },
+            {
+              "name": "direct: startup exposes live game state without exceptions",
+              "passed": true,
+              "detail": {
+                "player": {
+                  "x": 24.5,
+                  "y": 15,
+                  "z": 24.5
+                },
+                "selected": 1,
+                "targeted": null,
+                "editCount": 203
+              }
+            },
+            {
+              "name": "direct: Play leaves the menu and acquires pointer lock",
+              "passed": true,
+              "detail": {
+                "player": {
+                  "x": 24.5,
+                  "y": 15,
+                  "z": 24.5
+                },
+                "selected": 1,
+                "targeted": null,
+                "editCount": 203
+              }
+            },
+            {
+              "name": "direct: the game canvas renders terrain beyond the menu",
+              "passed": true,
+              "detail": {
+                "width": 1440,
+                "height": 900,
+                "colors": 17,
+                "largestColorFraction": 0.5990682137834037
+              }
+            },
+            {
+              "name": "direct: playing shows crosshair, FPS and five hotbar slots",
+              "passed": true,
+              "detail": {
+                "fps": "FPS: 96",
+                "slots": 5
+              }
+            },
+            {
+              "name": "direct: rendered voxel triangles match their surface normals",
+              "passed": true,
+              "detail": {
+                "triangles": 16956,
+                "invalid": 0,
+                "examples": [],
+                "geometryChanges": 1
+              }
+            },
+            {
+              "name": "direct: gravity lands on terrain and a grounded jump rises",
+              "passed": true,
+              "detail": {
+                "a": [
+                  24.5,
+                  15,
+                  24.5
+                ],
+                "b": [
+                  24.5,
+                  15.8693261,
+                  24.5
+                ]
+              }
+            },
+            {
+              "name": "direct: WASD stays opposite and perpendicular at three headings",
+              "passed": true,
+              "detail": [
+                {
+                  "forward": [
+                    0.010999778167987938,
+                    -0.9999395006100396
+                  ],
+                  "vectors": {
+                    "w": [
+                      0.011256072999302091,
+                      -1.0232380909742567
+                    ],
+                    "s": [
+                      -0.010846221264763756,
+                      0.9859803451815132
+                    ],
+                    "a": [
+                      -0.9897601164938195,
+                      -0.01088780042623938
+                    ],
+                    "d": [
+                      1.0189183523316103,
+                      0.011208553957615663
+                    ]
+                  }
+                },
+                {
+                  "forward": [
+                    0.39585617590238903,
+                    -0.9183125219662078
+                  ],
+                  "vectors": {
+                    "w": [
+                      0.3890474496768661,
+                      -0.9025175465883848
+                    ],
+                    "s": [
+                      -0.4042245754609617,
+                      0.9377256486805727
+                    ],
+                    "a": [
+                      -0.943676313822909,
+                      -0.40678972348080933
+                    ],
+                    "d": [
+                      0.898054547731622,
+                      0.38712358866197505
+                    ]
+                  }
+                },
+                {
+                  "forward": [
+                    0.7194429797923988,
+                    -0.694551509124726
+                  ],
+                  "vectors": {
+                    "w": [
+                      0.7296015146670634,
+                      -0.7043585764335631
+                    ],
+                    "s": [
+                      -0.7373714988488125,
+                      0.7118597327321083
+                    ],
+                    "a": [
+                      -0.7073590389529798,
+                      -0.7327095083397666
+                    ],
+                    "d": [
+                      0.6766042981289395,
+                      0.7008525731945596
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "direct: five hotbar keys select five distinct blocks",
+              "passed": true,
+              "detail": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            {
+              "name": "direct: mouse look targets terrain and left click visibly removes a real block",
+              "passed": true,
+              "detail": [
+                24,
+                14,
+                24
+              ]
+            },
+            {
+              "name": "direct: right click places one adjacent block",
+              "passed": true,
+              "detail": [
+                28,
+                13,
+                25
+              ]
+            },
+            {
+              "name": "direct: pointer unlock pauses and Play resumes twice",
+              "passed": true
+            },
+            {
+              "name": "direct: Save and reload preserve edits, selection and position",
+              "passed": true,
+              "detail": {
+                "a": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 12,
+                    "z": 28.5
+                  },
+                  "selected": 5,
+                  "targeted": {
+                    "x": 28,
+                    "y": 13,
+                    "z": 25
+                  },
+                  "editCount": 205
+                },
+                "b": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 12,
+                    "z": 28.5
+                  },
+                  "selected": 5,
+                  "targeted": null,
+                  "editCount": 205
+                },
+                "resumed": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 12,
+                    "z": 28.5
+                  },
+                  "selected": 5,
+                  "targeted": {
+                    "x": 28,
+                    "y": 13,
+                    "z": 25
+                  },
+                  "editCount": 205
+                }
+              }
+            },
+            {
+              "name": "direct: New World confirmation can be declined and accepted",
+              "passed": true,
+              "detail": {
+                "player": {
+                  "x": 24.5,
+                  "y": 11,
+                  "z": 24.5
+                },
+                "selected": 1,
+                "targeted": {
+                  "x": 28,
+                  "y": 13,
+                  "z": 25
+                },
+                "editCount": 0
+              }
+            },
+            {
+              "name": "direct: invalid saved data recovers to a playable world",
+              "passed": true
+            },
+            {
+              "name": "direct: no browser exceptions during the lifecycle",
+              "passed": true
+            }
+          ],
+          "errors": [],
+          "consoleErrors": [
+            "Failed to load resource: the server responded with a status of 404 (Not Found)"
+          ]
+        }
+      },
+      "repeatReports": [
+        {
+          "path": "playground/.unattended/lm-v11-complete-final/2026-09-13T21-34-37-529Z/results.json",
+          "report": {
+            "url": "http://127.0.0.1:60011",
+            "checkerHash": "5f6a25709cb0f7fd79fe310bff4f8fab2f05af4191571ca8f98f008dd5f86635",
+            "passed": true,
+            "views": [
+              {
+                "name": "preview",
+                "report": {
+                  "url": "http://127.0.0.1:60011",
+                  "preview": true,
+                  "checkerHash": "5f6a25709cb0f7fd79fe310bff4f8fab2f05af4191571ca8f98f008dd5f86635",
+                  "passed": true,
+                  "results": [
+                    {
+                      "name": "startup exposes live game state without exceptions",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 24.5,
+                          "y": 15,
+                          "z": 24.5
+                        },
+                        "selected": 1,
+                        "targeted": null,
+                        "editCount": 203
+                      }
+                    },
+                    {
+                      "name": "Play leaves the menu and acquires pointer lock",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 24.5,
+                          "y": 15,
+                          "z": 24.5
+                        },
+                        "selected": 1,
+                        "targeted": null,
+                        "editCount": 203
+                      }
+                    },
+                    {
+                      "name": "the game canvas renders terrain beyond the menu",
+                      "passed": true,
+                      "detail": {
+                        "width": 519,
+                        "height": 819,
+                        "colors": 10,
+                        "largestColorFraction": 0.6189727463312369
+                      }
+                    },
+                    {
+                      "name": "playing shows crosshair, FPS and five hotbar slots",
+                      "passed": true,
+                      "detail": {
+                        "fps": "FPS: 134",
+                        "slots": 5
+                      }
+                    },
+                    {
+                      "name": "rendered voxel triangles match their surface normals",
+                      "passed": true,
+                      "detail": {
+                        "triangles": 16956,
+                        "invalid": 0,
+                        "examples": [],
+                        "geometryChanges": 1
+                      }
+                    },
+                    {
+                      "name": "gravity lands on terrain and a grounded jump rises",
+                      "passed": true,
+                      "detail": {
+                        "a": [
+                          24.5,
+                          15,
+                          24.5
+                        ],
+                        "b": [
+                          24.5,
+                          15.858618939999998,
+                          24.5
+                        ]
+                      }
+                    },
+                    {
+                      "name": "WASD stays opposite and perpendicular at three headings",
+                      "passed": true,
+                      "detail": [
+                        {
+                          "forward": [
+                            -0.9401942126459174,
+                            -0.3406388740398304
+                          ],
+                          "vectors": {
+                            "w": [
+                              -0.9224997575639406,
+                              -0.3342280504304078
+                            ],
+                            "s": [
+                              0.9270691014373966,
+                              0.3358835553582402
+                            ],
+                            "a": [
+                              -0.3463684199011894,
+                              0.9560082793026332
+                            ],
+                            "d": [
+                              0.346184474909208,
+                              -0.9555005744277949
+                            ]
+                          }
+                        },
+                        {
+                          "forward": [
+                            -0.7360388287618229,
+                            -0.67693931969928
+                          ],
+                          "vectors": {
+                            "w": [
+                              -0.7257637267123052,
+                              -0.6674892467962756
+                            ],
+                            "s": [
+                              0.7217891170369874,
+                              0.6638337744698894
+                            ],
+                            "a": [
+                              -0.6835733250323344,
+                              0.7432520092836867
+                            ],
+                            "d": [
+                              0.6901531752198125,
+                              -0.7504063066992579
+                            ]
+                          }
+                        },
+                        {
+                          "forward": [
+                            -0.41796126092010477,
+                            -0.908464850376764
+                          ],
+                          "vectors": {
+                            "w": [
+                              -0.42453997116698616,
+                              -0.922764087121692
+                            ],
+                            "s": [
+                              0.4109980263131767,
+                              0.8933298259694915
+                            ],
+                            "a": [
+                              -0.8908769708734603,
+                              0.40986953090868994
+                            ],
+                            "d": [
+                              0.8879335447582477,
+                              -0.40851533642331006
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "five hotbar keys select five distinct blocks",
+                      "passed": true,
+                      "detail": [
+                        1,
+                        2,
+                        3,
+                        4,
+                        5
+                      ]
+                    },
+                    {
+                      "name": "mouse look targets terrain and left click visibly removes a real block",
+                      "passed": true,
+                      "detail": [
+                        24,
+                        14,
+                        24
+                      ]
+                    },
+                    {
+                      "name": "right click places one adjacent block",
+                      "passed": true,
+                      "detail": [
+                        27,
+                        13,
+                        27
+                      ]
+                    },
+                    {
+                      "name": "pointer unlock pauses and Play resumes twice",
+                      "passed": true
+                    },
+                    {
+                      "name": "Save and reload preserve edits, selection and position",
+                      "passed": true,
+                      "detail": {
+                        "a": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 12,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": {
+                            "x": 27,
+                            "y": 13,
+                            "z": 27
+                          },
+                          "editCount": 205
+                        },
+                        "b": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 12,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": null,
+                          "editCount": 205
+                        },
+                        "resumed": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 12,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": null,
+                          "editCount": 205
+                        }
+                      }
+                    },
+                    {
+                      "name": "New World confirmation can be declined and accepted",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 24.5,
+                          "y": 14,
+                          "z": 24.5
+                        },
+                        "selected": 1,
+                        "targeted": null,
+                        "editCount": 0
+                      }
+                    },
+                    {
+                      "name": "invalid saved data recovers to a playable world",
+                      "passed": true
+                    },
+                    {
+                      "name": "no browser exceptions during the lifecycle",
+                      "passed": true
+                    }
+                  ],
+                  "errors": [],
+                  "consoleErrors": []
+                }
+              },
+              {
+                "name": "direct",
+                "report": {
+                  "url": "http://127.0.0.1:60011",
+                  "preview": false,
+                  "checkerHash": "5f6a25709cb0f7fd79fe310bff4f8fab2f05af4191571ca8f98f008dd5f86635",
+                  "passed": true,
+                  "results": [
+                    {
+                      "name": "startup exposes live game state without exceptions",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 24.5,
+                          "y": 15,
+                          "z": 24.5
+                        },
+                        "selected": 1,
+                        "targeted": null,
+                        "editCount": 203
+                      }
+                    },
+                    {
+                      "name": "Play leaves the menu and acquires pointer lock",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 24.5,
+                          "y": 15,
+                          "z": 24.5
+                        },
+                        "selected": 1,
+                        "targeted": null,
+                        "editCount": 203
+                      }
+                    },
+                    {
+                      "name": "the game canvas renders terrain beyond the menu",
+                      "passed": true,
+                      "detail": {
+                        "width": 1440,
+                        "height": 900,
+                        "colors": 17,
+                        "largestColorFraction": 0.5990682137834037
+                      }
+                    },
+                    {
+                      "name": "playing shows crosshair, FPS and five hotbar slots",
+                      "passed": true,
+                      "detail": {
+                        "fps": "FPS: 100",
+                        "slots": 5
+                      }
+                    },
+                    {
+                      "name": "rendered voxel triangles match their surface normals",
+                      "passed": true,
+                      "detail": {
+                        "triangles": 16956,
+                        "invalid": 0,
+                        "examples": [],
+                        "geometryChanges": 1
+                      }
+                    },
+                    {
+                      "name": "gravity lands on terrain and a grounded jump rises",
+                      "passed": true,
+                      "detail": {
+                        "a": [
+                          24.5,
+                          15,
+                          24.5
+                        ],
+                        "b": [
+                          24.5,
+                          15.863789379999998,
+                          24.5
+                        ]
+                      }
+                    },
+                    {
+                      "name": "WASD stays opposite and perpendicular at three headings",
+                      "passed": true,
+                      "detail": [
+                        {
+                          "forward": [
+                            0.010999778167987799,
+                            -0.9999395006100394
+                          ],
+                          "vectors": {
+                            "w": [
+                              0.011244193238880484,
+                              -1.0221581563135942
+                            ],
+                            "s": [
+                              -0.010757123061601703,
+                              0.9778808352265713
+                            ],
+                            "a": [
+                              -0.9762609332355972,
+                              -0.010739303420969293
+                            ],
+                            "d": [
+                              1.0183783850012738,
+                              0.01120261407740486
+                            ]
+                          }
+                        },
+                        {
+                          "forward": [
+                            0.3958561759023842,
+                            -0.9183125219662099
+                          ],
+                          "vectors": {
+                            "w": [
+                              0.403583288455998,
+                              -0.9362379823949887
+                            ],
+                            "s": [
+                              -0.38797863800193255,
+                              0.9000381027790745
+                            ],
+                            "a": [
+                              -0.9010298803028043,
+                              -0.3884061626719024
+                            ],
+                            "d": [
+                              0.9332626498238135,
+                              0.4023007144460742
+                            ]
+                          }
+                        },
+                        {
+                          "forward": [
+                            0.7194429797923964,
+                            -0.6945515091247285
+                          ],
+                          "vectors": {
+                            "w": [
+                              0.7288245162488849,
+                              -0.7036084608037108
+                            ],
+                            "s": [
+                              -0.7315440107125042,
+                              0.7062338655081959
+                            ],
+                            "a": [
+                              -0.6799798184632841,
+                              -0.7043490660763396
+                            ],
+                            "d": [
+                              0.6698532574602503,
+                              0.6938595874309819
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "five hotbar keys select five distinct blocks",
+                      "passed": true,
+                      "detail": [
+                        1,
+                        2,
+                        3,
+                        4,
+                        5
+                      ]
+                    },
+                    {
+                      "name": "mouse look targets terrain and left click visibly removes a real block",
+                      "passed": true,
+                      "detail": [
+                        24,
+                        14,
+                        24
+                      ]
+                    },
+                    {
+                      "name": "right click places one adjacent block",
+                      "passed": true,
+                      "detail": [
+                        28,
+                        13,
+                        25
+                      ]
+                    },
+                    {
+                      "name": "pointer unlock pauses and Play resumes twice",
+                      "passed": true
+                    },
+                    {
+                      "name": "Save and reload preserve edits, selection and position",
+                      "passed": true,
+                      "detail": {
+                        "a": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 12,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": {
+                            "x": 28,
+                            "y": 13,
+                            "z": 25
+                          },
+                          "editCount": 205
+                        },
+                        "b": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 12,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": null,
+                          "editCount": 205
+                        },
+                        "resumed": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 12,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": {
+                            "x": 28,
+                            "y": 13,
+                            "z": 25
+                          },
+                          "editCount": 205
+                        }
+                      }
+                    },
+                    {
+                      "name": "New World confirmation can be declined and accepted",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 24.5,
+                          "y": 9,
+                          "z": 24.5
+                        },
+                        "selected": 1,
+                        "targeted": {
+                          "x": 28,
+                          "y": 13,
+                          "z": 25
+                        },
+                        "editCount": 0
+                      }
+                    },
+                    {
+                      "name": "invalid saved data recovers to a playable world",
+                      "passed": true
+                    },
+                    {
+                      "name": "no browser exceptions during the lifecycle",
+                      "passed": true
+                    }
+                  ],
+                  "errors": [],
+                  "consoleErrors": [
+                    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+                  ]
+                }
+              }
+            ],
+            "results": [
+              {
+                "name": "preview: startup exposes live game state without exceptions",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 24.5,
+                    "y": 15,
+                    "z": 24.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 203
+                }
+              },
+              {
+                "name": "preview: Play leaves the menu and acquires pointer lock",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 24.5,
+                    "y": 15,
+                    "z": 24.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 203
+                }
+              },
+              {
+                "name": "preview: the game canvas renders terrain beyond the menu",
+                "passed": true,
+                "detail": {
+                  "width": 519,
+                  "height": 819,
+                  "colors": 10,
+                  "largestColorFraction": 0.6189727463312369
+                }
+              },
+              {
+                "name": "preview: playing shows crosshair, FPS and five hotbar slots",
+                "passed": true,
+                "detail": {
+                  "fps": "FPS: 134",
+                  "slots": 5
+                }
+              },
+              {
+                "name": "preview: rendered voxel triangles match their surface normals",
+                "passed": true,
+                "detail": {
+                  "triangles": 16956,
+                  "invalid": 0,
+                  "examples": [],
+                  "geometryChanges": 1
+                }
+              },
+              {
+                "name": "preview: gravity lands on terrain and a grounded jump rises",
+                "passed": true,
+                "detail": {
+                  "a": [
+                    24.5,
+                    15,
+                    24.5
+                  ],
+                  "b": [
+                    24.5,
+                    15.858618939999998,
+                    24.5
+                  ]
+                }
+              },
+              {
+                "name": "preview: WASD stays opposite and perpendicular at three headings",
+                "passed": true,
+                "detail": [
+                  {
+                    "forward": [
+                      -0.9401942126459174,
+                      -0.3406388740398304
+                    ],
+                    "vectors": {
+                      "w": [
+                        -0.9224997575639406,
+                        -0.3342280504304078
+                      ],
+                      "s": [
+                        0.9270691014373966,
+                        0.3358835553582402
+                      ],
+                      "a": [
+                        -0.3463684199011894,
+                        0.9560082793026332
+                      ],
+                      "d": [
+                        0.346184474909208,
+                        -0.9555005744277949
+                      ]
+                    }
+                  },
+                  {
+                    "forward": [
+                      -0.7360388287618229,
+                      -0.67693931969928
+                    ],
+                    "vectors": {
+                      "w": [
+                        -0.7257637267123052,
+                        -0.6674892467962756
+                      ],
+                      "s": [
+                        0.7217891170369874,
+                        0.6638337744698894
+                      ],
+                      "a": [
+                        -0.6835733250323344,
+                        0.7432520092836867
+                      ],
+                      "d": [
+                        0.6901531752198125,
+                        -0.7504063066992579
+                      ]
+                    }
+                  },
+                  {
+                    "forward": [
+                      -0.41796126092010477,
+                      -0.908464850376764
+                    ],
+                    "vectors": {
+                      "w": [
+                        -0.42453997116698616,
+                        -0.922764087121692
+                      ],
+                      "s": [
+                        0.4109980263131767,
+                        0.8933298259694915
+                      ],
+                      "a": [
+                        -0.8908769708734603,
+                        0.40986953090868994
+                      ],
+                      "d": [
+                        0.8879335447582477,
+                        -0.40851533642331006
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "preview: five hotbar keys select five distinct blocks",
+                "passed": true,
+                "detail": [
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ]
+              },
+              {
+                "name": "preview: mouse look targets terrain and left click visibly removes a real block",
+                "passed": true,
+                "detail": [
+                  24,
+                  14,
+                  24
+                ]
+              },
+              {
+                "name": "preview: right click places one adjacent block",
+                "passed": true,
+                "detail": [
+                  27,
+                  13,
+                  27
+                ]
+              },
+              {
+                "name": "preview: pointer unlock pauses and Play resumes twice",
+                "passed": true
+              },
+              {
+                "name": "preview: Save and reload preserve edits, selection and position",
+                "passed": true,
+                "detail": {
+                  "a": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 12,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": {
+                      "x": 27,
+                      "y": 13,
+                      "z": 27
+                    },
+                    "editCount": 205
+                  },
+                  "b": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 12,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": null,
+                    "editCount": 205
+                  },
+                  "resumed": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 12,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": null,
+                    "editCount": 205
+                  }
+                }
+              },
+              {
+                "name": "preview: New World confirmation can be declined and accepted",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 24.5,
+                    "y": 14,
+                    "z": 24.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "preview: invalid saved data recovers to a playable world",
+                "passed": true
+              },
+              {
+                "name": "preview: no browser exceptions during the lifecycle",
+                "passed": true
+              },
+              {
+                "name": "direct: startup exposes live game state without exceptions",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 24.5,
+                    "y": 15,
+                    "z": 24.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 203
+                }
+              },
+              {
+                "name": "direct: Play leaves the menu and acquires pointer lock",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 24.5,
+                    "y": 15,
+                    "z": 24.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 203
+                }
+              },
+              {
+                "name": "direct: the game canvas renders terrain beyond the menu",
+                "passed": true,
+                "detail": {
+                  "width": 1440,
+                  "height": 900,
+                  "colors": 17,
+                  "largestColorFraction": 0.5990682137834037
+                }
+              },
+              {
+                "name": "direct: playing shows crosshair, FPS and five hotbar slots",
+                "passed": true,
+                "detail": {
+                  "fps": "FPS: 100",
+                  "slots": 5
+                }
+              },
+              {
+                "name": "direct: rendered voxel triangles match their surface normals",
+                "passed": true,
+                "detail": {
+                  "triangles": 16956,
+                  "invalid": 0,
+                  "examples": [],
+                  "geometryChanges": 1
+                }
+              },
+              {
+                "name": "direct: gravity lands on terrain and a grounded jump rises",
+                "passed": true,
+                "detail": {
+                  "a": [
+                    24.5,
+                    15,
+                    24.5
+                  ],
+                  "b": [
+                    24.5,
+                    15.863789379999998,
+                    24.5
+                  ]
+                }
+              },
+              {
+                "name": "direct: WASD stays opposite and perpendicular at three headings",
+                "passed": true,
+                "detail": [
+                  {
+                    "forward": [
+                      0.010999778167987799,
+                      -0.9999395006100394
+                    ],
+                    "vectors": {
+                      "w": [
+                        0.011244193238880484,
+                        -1.0221581563135942
+                      ],
+                      "s": [
+                        -0.010757123061601703,
+                        0.9778808352265713
+                      ],
+                      "a": [
+                        -0.9762609332355972,
+                        -0.010739303420969293
+                      ],
+                      "d": [
+                        1.0183783850012738,
+                        0.01120261407740486
+                      ]
+                    }
+                  },
+                  {
+                    "forward": [
+                      0.3958561759023842,
+                      -0.9183125219662099
+                    ],
+                    "vectors": {
+                      "w": [
+                        0.403583288455998,
+                        -0.9362379823949887
+                      ],
+                      "s": [
+                        -0.38797863800193255,
+                        0.9000381027790745
+                      ],
+                      "a": [
+                        -0.9010298803028043,
+                        -0.3884061626719024
+                      ],
+                      "d": [
+                        0.9332626498238135,
+                        0.4023007144460742
+                      ]
+                    }
+                  },
+                  {
+                    "forward": [
+                      0.7194429797923964,
+                      -0.6945515091247285
+                    ],
+                    "vectors": {
+                      "w": [
+                        0.7288245162488849,
+                        -0.7036084608037108
+                      ],
+                      "s": [
+                        -0.7315440107125042,
+                        0.7062338655081959
+                      ],
+                      "a": [
+                        -0.6799798184632841,
+                        -0.7043490660763396
+                      ],
+                      "d": [
+                        0.6698532574602503,
+                        0.6938595874309819
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "direct: five hotbar keys select five distinct blocks",
+                "passed": true,
+                "detail": [
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ]
+              },
+              {
+                "name": "direct: mouse look targets terrain and left click visibly removes a real block",
+                "passed": true,
+                "detail": [
+                  24,
+                  14,
+                  24
+                ]
+              },
+              {
+                "name": "direct: right click places one adjacent block",
+                "passed": true,
+                "detail": [
+                  28,
+                  13,
+                  25
+                ]
+              },
+              {
+                "name": "direct: pointer unlock pauses and Play resumes twice",
+                "passed": true
+              },
+              {
+                "name": "direct: Save and reload preserve edits, selection and position",
+                "passed": true,
+                "detail": {
+                  "a": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 12,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": {
+                      "x": 28,
+                      "y": 13,
+                      "z": 25
+                    },
+                    "editCount": 205
+                  },
+                  "b": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 12,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": null,
+                    "editCount": 205
+                  },
+                  "resumed": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 12,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": {
+                      "x": 28,
+                      "y": 13,
+                      "z": 25
+                    },
+                    "editCount": 205
+                  }
+                }
+              },
+              {
+                "name": "direct: New World confirmation can be declined and accepted",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 24.5,
+                    "y": 9,
+                    "z": 24.5
+                  },
+                  "selected": 1,
+                  "targeted": {
+                    "x": 28,
+                    "y": 13,
+                    "z": 25
+                  },
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "direct: invalid saved data recovers to a playable world",
+                "passed": true
+              },
+              {
+                "name": "direct: no browser exceptions during the lifecycle",
+                "passed": true
+              }
+            ],
+            "errors": [],
+            "consoleErrors": [
+              "Failed to load resource: the server responded with a status of 404 (Not Found)"
+            ]
+          }
+        }
+      ],
+      "source": {
+        "sha256": "bed9069695e8c802c74a439e21177cdfb2d946b38bb202de3c569e1cda7e1eb0",
+        "files": [
+          {
+            "path": "index.html",
+            "sha256": "e25b681af477916425f39497e29ab65e1a1fd5036f3079f792d3dc1d9db86e6b"
+          },
+          {
+            "path": "package-lock.json",
+            "sha256": "f4d657327a1f717936a6008bc3ac2387f5be0b1da48447b60a9be1f294a6d228"
+          },
+          {
+            "path": "package.json",
+            "sha256": "c2f2076728985da53b1b9652d9b7efb49f900cbf79c79d77dc4a0a6306f44ffc"
+          },
+          {
+            "path": "README.md",
+            "sha256": "60fb03b79bcd7965c6b7330aec7506b2331f2e51d3105b66bf6145e81ceb4963"
+          },
+          {
+            "path": "src/core/blocks.js",
+            "sha256": "946e035b74fc118099a0c74f19fc887bb9314dab8b871e3cd4ea1bc8174dcfd7"
+          },
+          {
+            "path": "src/core/collision.js",
+            "sha256": "86c0c0b4f1c94d7807685fd5248a5b0ee1c19c5e2004e1c5bc09289622c39f47"
+          },
+          {
+            "path": "src/core/raycast.js",
+            "sha256": "5a00bd7bd132a842e4e2f1ff848774cf06b531a8b64550285725402ab7e0362d"
+          },
+          {
+            "path": "src/core/save.js",
+            "sha256": "0c2d87050549010c9d20a30086e9485d9b66d043fa8fbda1f117bfef88474210"
+          },
+          {
+            "path": "src/core/terrain.js",
+            "sha256": "1249a4ba4202c7eac7284037f57650356dc7844d6d5badcc248f3d484fb39825"
+          },
+          {
+            "path": "src/core/world.js",
+            "sha256": "493e0de43140262760f1faec007ea4f29a259e08f939d88fa1ac1ce14b021dfa"
+          },
+          {
+            "path": "src/game.js",
+            "sha256": "fb0dd96a565ae95ee0b038a74be2d772ecdb8cf211563e478d546c8e7e72558a"
+          },
+          {
+            "path": "src/main.js",
+            "sha256": "0d51b644193dc833452915b21095f60cd0ffb3e06bcf9f9df3d0f42a68ffc63b"
+          },
+          {
+            "path": "src/render/worldMesh.js",
+            "sha256": "c419ef6dbaa61d875ee8f29328b36923373e62275a32d692fe6301c437b464b7"
+          },
+          {
+            "path": "src/ui.css",
+            "sha256": "e2f90f4a61d9611efa9b8d9e1c75b2ed24a757852d1c0769ea986d48356f2271"
+          },
+          {
+            "path": "test/collision.test.js",
+            "sha256": "42c74432c38bc2dddf9c2bf627ee67deed0afda0c3e71613b63e27b98c8c194c"
+          },
+          {
+            "path": "test/save.test.js",
+            "sha256": "b41ab2a41f4b8c81a33db9fbd3c77d9972ad4e4555178c6fb60be09afeccd981"
+          },
+          {
+            "path": "test/terrain.test.js",
+            "sha256": "7ff9811cd056262f0f2b28979fbd3d808743d6a64870bf4034f6e1e1e41c75b8"
+          },
+          {
+            "path": "vite.config.js",
+            "sha256": "fde9f2197acf7870026756982505785f6485ec962a581cac958f0d94efb6f8ed"
+          }
+        ]
+      },
+      "projectTests": {
+        "total": 23,
+        "passed": 23,
+        "failed": 0
+      },
+      "archive": {
+        "path": "docs/evidence/lmstudio-v11-block-meadow.zip",
+        "sha256": "597534dda6d0b9229f95c89c15d58023d9adbcafacb48f69a1f14efd2c429049"
+      },
+      "trace": {
+        "path": "docs/evidence/lmstudio-v11-run.jsonl.gz",
+        "uncompressedSha256": "ef0c3d87be0f5cb1cfd331e7ff6e220f3817519926f9253afcb846298f888494",
+        "sha256": "5fcc1fb4f49a0cf5ed7c144321520638661e1602ea444f3eeb3c65aed72cf6cf"
+      }
+    },
+    {
+      "name": "ollama-verified-v9",
+      "workspace": "playground/unattended-ollama-verified-v9",
+      "startedAt": "2026-09-13T19:27:56.598Z",
+      "finishedAt": "2026-09-13T19:32:18.050Z",
+      "model": "qwen3.8:latest",
+      "backend": "ollama",
+      "context": 65536,
+      "effort": "off",
+      "harnessHash": "3ff04f06e300c7a42f1db8856f670ed3b62cc5f2914f94714ba83304e9495eec",
+      "promptHash": "464bd25fb87af4d3ff2e65b8d2c339c92c8c740941682c96514b156af5445bce",
+      "runnerOutcome": "completed",
+      "accepted": true,
+      "stats": {
+        "modelCalls": 65,
+        "toolCalls": 63,
+        "generatedTokens": 29496,
+        "genSeconds": 180.31898499499994,
+        "thinkingChars": 0,
+        "promptTokensLast": 43869,
+        "durationMs": 261451
+      },
+      "summaryRequests": 3,
+      "progressChecks": 2,
+      "factsOnlyRefocuses": 0,
+      "compaction": [],
+      "attempts": [
+        {
+          "time": "2026-09-13T19:31:51.514Z",
+          "attempt": 1,
+          "passed": false,
+          "output": "Error: command exited with code 1\nBrowser acceptance: right click places one adjacent block\nThe placed block does not match the hotbar selection\n\n5 !== 'leaves'\n\nBrowser errors: none\nFix the game implementation. The check uses real buttons, keyboard and mouse; debug teleport only arranges test positions. Diagnostic files are stored outside the project for the caller; use the failure above to repair project files.\n\n[exit code 1 in 14.5s]"
+        },
+        {
+          "time": "2026-09-13T19:32:18.046Z",
+          "attempt": 2,
+          "passed": true,
+          "output": "PASS: project tests, production build, and all 14 gameplay checks inside the smolcoder preview.\nReport: C:\\Projects\\tinycoder\\playground\\.unattended\\ollama-verified-v9\\acceptance\\2026-09-13T19-32-01-385Z\\results.json\n\n[exit code 0 in 16.9s]"
+        }
+      ],
+      "browser": {
+        "path": "playground/.unattended/ollama-verified-v9/acceptance/2026-09-13T19-32-01-385Z/results.json",
+        "report": {
+          "url": "http://127.0.0.1:52761",
+          "preview": true,
+          "checkerHash": "638fe3a201c012f090c3b56249166c15e8a5233322654fa320bb2c7b234779d1",
+          "passed": true,
+          "results": [
+            {
+              "name": "startup exposes live game state without exceptions",
+              "passed": true,
+              "detail": {
+                "player": {
+                  "x": 32.5,
+                  "y": 13,
+                  "z": 32.5
+                },
+                "selected": 1,
+                "targeted": null,
+                "editCount": 0
+              }
+            },
+            {
+              "name": "Play leaves the menu and acquires pointer lock",
+              "passed": true,
+              "detail": {
+                "player": {
+                  "x": 32.5,
+                  "y": 11,
+                  "z": 32.5
+                },
+                "selected": 1,
+                "targeted": null,
+                "editCount": 0
+              }
+            },
+            {
+              "name": "the game canvas renders terrain beyond the menu",
+              "passed": true,
+              "detail": {
+                "width": 519,
+                "height": 819,
+                "colors": 4,
+                "largestColorFraction": 0.529874213836478
+              }
+            },
+            {
+              "name": "playing shows crosshair, FPS and five hotbar slots",
+              "passed": true,
+              "detail": {
+                "fps": "125 FPS",
+                "slots": 5
+              }
+            },
+            {
+              "name": "rendered voxel triangles match their surface normals",
+              "passed": true,
+              "detail": {
+                "triangles": 60,
+                "invalid": 0,
+                "examples": []
+              }
+            },
+            {
+              "name": "gravity lands on terrain and a grounded jump rises",
+              "passed": true,
+              "detail": {
+                "a": [
+                  24.5,
+                  11,
+                  24.5
+                ],
+                "b": [
+                  24.5,
+                  11.67203675987183,
+                  24.5
+                ]
+              }
+            },
+            {
+              "name": "all WASD keys move the live player",
+              "passed": true,
+              "detail": {
+                "w": 0.5849412429377736,
+                "a": 0.5274564067883567,
+                "s": 0.5549776515221154,
+                "d": 0.5437547288415772
+              }
+            },
+            {
+              "name": "five hotbar keys select five distinct blocks",
+              "passed": true,
+              "detail": [
+                1,
+                2,
+                3,
+                4,
+                5
+              ]
+            },
+            {
+              "name": "mouse look targets terrain and left click removes a real block",
+              "passed": true,
+              "detail": [
+                24,
+                10,
+                24
+              ]
+            },
+            {
+              "name": "right click places one adjacent block",
+              "passed": true,
+              "detail": [
+                26,
+                11,
+                28
+              ]
+            },
+            {
+              "name": "pointer unlock pauses and Play resumes twice",
+              "passed": true
+            },
+            {
+              "name": "Save and reload preserve edits, selection and position",
+              "passed": true,
+              "detail": {
+                "a": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 11,
+                    "z": 28.5
+                  },
+                  "selected": 5,
+                  "targeted": {
+                    "x": 26,
+                    "y": 11,
+                    "z": 28
+                  },
+                  "editCount": 2
+                },
+                "b": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 11,
+                    "z": 28.5
+                  },
+                  "selected": 5,
+                  "targeted": null,
+                  "editCount": 2
+                },
+                "resumed": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 11,
+                    "z": 28.5
+                  },
+                  "selected": 5,
+                  "targeted": null,
+                  "editCount": 2
+                }
+              }
+            },
+            {
+              "name": "New World confirmation can be declined and accepted",
+              "passed": true,
+              "detail": {
+                "player": {
+                  "x": 32.5,
+                  "y": 13,
+                  "z": 32.5
+                },
+                "selected": 1,
+                "targeted": null,
+                "editCount": 0
+              }
+            },
+            {
+              "name": "no browser exceptions during the lifecycle",
+              "passed": true
+            }
+          ],
+          "errors": []
+        }
+      },
+      "repeatReports": [
+        {
+          "path": "playground/.unattended/ollama-v9-complete-final/2026-09-13T21-17-31-676Z/results.json",
+          "report": {
+            "url": "http://127.0.0.1:52840",
+            "checkerHash": "5f6a25709cb0f7fd79fe310bff4f8fab2f05af4191571ca8f98f008dd5f86635",
+            "passed": true,
+            "views": [
+              {
+                "name": "preview",
+                "report": {
+                  "url": "http://127.0.0.1:52840",
+                  "preview": true,
+                  "checkerHash": "5f6a25709cb0f7fd79fe310bff4f8fab2f05af4191571ca8f98f008dd5f86635",
+                  "passed": true,
+                  "results": [
+                    {
+                      "name": "startup exposes live game state without exceptions",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 32.5,
+                          "y": 13,
+                          "z": 32.5
+                        },
+                        "selected": 1,
+                        "targeted": null,
+                        "editCount": 0
+                      }
+                    },
+                    {
+                      "name": "Play leaves the menu and acquires pointer lock",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 32.5,
+                          "y": 11,
+                          "z": 32.5
+                        },
+                        "selected": 1,
+                        "targeted": null,
+                        "editCount": 0
+                      }
+                    },
+                    {
+                      "name": "the game canvas renders terrain beyond the menu",
+                      "passed": true,
+                      "detail": {
+                        "width": 519,
+                        "height": 819,
+                        "colors": 4,
+                        "largestColorFraction": 0.529874213836478
+                      }
+                    },
+                    {
+                      "name": "playing shows crosshair, FPS and five hotbar slots",
+                      "passed": true,
+                      "detail": {
+                        "fps": "121 FPS",
+                        "slots": 5
+                      }
+                    },
+                    {
+                      "name": "rendered voxel triangles match their surface normals",
+                      "passed": true,
+                      "detail": {
+                        "triangles": 60,
+                        "invalid": 0,
+                        "examples": [],
+                        "geometryChanges": 10
+                      }
+                    },
+                    {
+                      "name": "gravity lands on terrain and a grounded jump rises",
+                      "passed": true,
+                      "detail": {
+                        "a": [
+                          24.5,
+                          11,
+                          24.5
+                        ],
+                        "b": [
+                          24.5,
+                          11.673107519808823,
+                          24.5
+                        ]
+                      }
+                    },
+                    {
+                      "name": "WASD stays opposite and perpendicular at three headings",
+                      "passed": true,
+                      "detail": [
+                        {
+                          "forward": [
+                            -0.9881659802757237,
+                            -0.15338838099972954
+                          ],
+                          "vectors": {
+                            "w": [
+                              -0.3488797962383714,
+                              -0.054154978188570624
+                            ],
+                            "s": [
+                              0.2821352662292149,
+                              0.04379453712599002
+                            ],
+                            "a": [
+                              -0.0445300595986069,
+                              0.2868736843573281
+                            ],
+                            "d": [
+                              0.04423607570683785,
+                              -0.28497976723859253
+                            ]
+                          }
+                        },
+                        {
+                          "forward": [
+                            -0.8525264419911281,
+                            -0.5226840974297455
+                          ],
+                          "vectors": {
+                            "w": [
+                              -0.2591956417168859,
+                              -0.1589128892378966
+                            ],
+                            "s": [
+                              0.2634703283343107,
+                              0.16153370028416347
+                            ],
+                            "a": [
+                              -0.1504114806988781,
+                              0.24532937792713128
+                            ],
+                            "d": [
+                              0.15068947734435056,
+                              -0.2457828057092577
+                            ]
+                          }
+                        },
+                        {
+                          "forward": [
+                            -0.5849350686157033,
+                            -0.811080122739759
+                          ],
+                          "vectors": {
+                            "w": [
+                              -0.1810587107425441,
+                              -0.2510588426159934
+                            ],
+                            "s": [
+                              0.17987841093480128,
+                              0.24942222042611917
+                            ],
+                            "a": [
+                              -0.23475386208686544,
+                              0.16929987873915664
+                            ],
+                            "d": [
+                              0.25246019073513537,
+                              -0.1820693355072791
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "five hotbar keys select five distinct blocks",
+                      "passed": true,
+                      "detail": [
+                        1,
+                        2,
+                        3,
+                        4,
+                        5
+                      ]
+                    },
+                    {
+                      "name": "mouse look targets terrain and left click visibly removes a real block",
+                      "passed": true,
+                      "detail": [
+                        24,
+                        10,
+                        24
+                      ]
+                    },
+                    {
+                      "name": "right click places one adjacent block",
+                      "passed": true,
+                      "detail": [
+                        26,
+                        11,
+                        28
+                      ]
+                    },
+                    {
+                      "name": "pointer unlock pauses and Play resumes twice",
+                      "passed": true
+                    },
+                    {
+                      "name": "Save and reload preserve edits, selection and position",
+                      "passed": true,
+                      "detail": {
+                        "a": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 11,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": {
+                            "x": 26,
+                            "y": 11,
+                            "z": 28
+                          },
+                          "editCount": 2
+                        },
+                        "b": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 11,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": null,
+                          "editCount": 2
+                        },
+                        "resumed": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 11,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": null,
+                          "editCount": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "New World confirmation can be declined and accepted",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 35.5,
+                          "y": 13,
+                          "z": 32.5
+                        },
+                        "selected": 1,
+                        "targeted": null,
+                        "editCount": 0
+                      }
+                    },
+                    {
+                      "name": "invalid saved data recovers to a playable world",
+                      "passed": true
+                    },
+                    {
+                      "name": "no browser exceptions during the lifecycle",
+                      "passed": true
+                    }
+                  ],
+                  "errors": [],
+                  "consoleErrors": []
+                }
+              },
+              {
+                "name": "direct",
+                "report": {
+                  "url": "http://127.0.0.1:52840",
+                  "preview": false,
+                  "checkerHash": "5f6a25709cb0f7fd79fe310bff4f8fab2f05af4191571ca8f98f008dd5f86635",
+                  "passed": true,
+                  "results": [
+                    {
+                      "name": "startup exposes live game state without exceptions",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 32.5,
+                          "y": 13,
+                          "z": 32.5
+                        },
+                        "selected": 1,
+                        "targeted": null,
+                        "editCount": 0
+                      }
+                    },
+                    {
+                      "name": "Play leaves the menu and acquires pointer lock",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 32.5,
+                          "y": 11,
+                          "z": 32.5
+                        },
+                        "selected": 1,
+                        "targeted": null,
+                        "editCount": 0
+                      }
+                    },
+                    {
+                      "name": "the game canvas renders terrain beyond the menu",
+                      "passed": true,
+                      "detail": {
+                        "width": 1440,
+                        "height": 900,
+                        "colors": 23,
+                        "largestColorFraction": 0.4581575246132208
+                      }
+                    },
+                    {
+                      "name": "playing shows crosshair, FPS and five hotbar slots",
+                      "passed": true,
+                      "detail": {
+                        "fps": "127 FPS",
+                        "slots": 5
+                      }
+                    },
+                    {
+                      "name": "rendered voxel triangles match their surface normals",
+                      "passed": true,
+                      "detail": {
+                        "triangles": 60,
+                        "invalid": 0,
+                        "examples": [],
+                        "geometryChanges": 10
+                      }
+                    },
+                    {
+                      "name": "gravity lands on terrain and a grounded jump rises",
+                      "passed": true,
+                      "detail": {
+                        "a": [
+                          24.5,
+                          11,
+                          24.5
+                        ],
+                        "b": [
+                          24.5,
+                          11.677914060000315,
+                          24.5
+                        ]
+                      }
+                    },
+                    {
+                      "name": "WASD stays opposite and perpendicular at three headings",
+                      "passed": true,
+                      "detail": [
+                        {
+                          "forward": [
+                            -0.3918117819616918,
+                            -0.9200453942692195
+                          ],
+                          "vectors": {
+                            "w": [
+                              -0.13819765266742934,
+                              -0.3245132476590946
+                            ],
+                            "s": [
+                              0.12208076552003888,
+                              0.2866678625211563
+                            ],
+                            "a": [
+                              -0.28693874667967734,
+                              0.12219612461592888
+                            ],
+                            "d": [
+                              0.28272166678433663,
+                              -0.12040023324059135
+                            ]
+                          }
+                        },
+                        {
+                          "forward": [
+                            -0.00659995208409569,
+                            -0.9999782200790612
+                          ],
+                          "vectors": {
+                            "w": [
+                              -0.0020389393134436773,
+                              -0.3089257133275076
+                            ],
+                            "s": [
+                              0.002019660922758959,
+                              0.30600478745348525
+                            ],
+                            "a": [
+                              -0.2899871115178563,
+                              0.001913942726542217
+                            ],
+                            "d": [
+                              0.31123956652929863,
+                              -0.002054210966313974
+                            ]
+                          }
+                        },
+                        {
+                          "forward": [
+                            0.37963340128665374,
+                            -0.925137006409065
+                          ],
+                          "vectors": {
+                            "w": [
+                              0.11664523544924066,
+                              -0.2842553462620856
+                            ],
+                            "s": [
+                              -0.11587480319221655,
+                              0.2823778629071434
+                            ],
+                            "a": [
+                              -0.286907050682931,
+                              -0.11773337219169733
+                            ],
+                            "d": [
+                              0.26463269914093956,
+                              0.10859300943595684
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "name": "five hotbar keys select five distinct blocks",
+                      "passed": true,
+                      "detail": [
+                        1,
+                        2,
+                        3,
+                        4,
+                        5
+                      ]
+                    },
+                    {
+                      "name": "mouse look targets terrain and left click visibly removes a real block",
+                      "passed": true,
+                      "detail": [
+                        24,
+                        10,
+                        24
+                      ]
+                    },
+                    {
+                      "name": "right click places one adjacent block",
+                      "passed": true,
+                      "detail": [
+                        27,
+                        11,
+                        26
+                      ]
+                    },
+                    {
+                      "name": "pointer unlock pauses and Play resumes twice",
+                      "passed": true
+                    },
+                    {
+                      "name": "Save and reload preserve edits, selection and position",
+                      "passed": true,
+                      "detail": {
+                        "a": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 11,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": {
+                            "x": 27,
+                            "y": 11,
+                            "z": 26
+                          },
+                          "editCount": 2
+                        },
+                        "b": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 11,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": null,
+                          "editCount": 2
+                        },
+                        "resumed": {
+                          "player": {
+                            "x": 28.5,
+                            "y": 11,
+                            "z": 28.5
+                          },
+                          "selected": 5,
+                          "targeted": null,
+                          "editCount": 2
+                        }
+                      }
+                    },
+                    {
+                      "name": "New World confirmation can be declined and accepted",
+                      "passed": true,
+                      "detail": {
+                        "player": {
+                          "x": 32.5,
+                          "y": 13,
+                          "z": 32.5
+                        },
+                        "selected": 1,
+                        "targeted": null,
+                        "editCount": 0
+                      }
+                    },
+                    {
+                      "name": "invalid saved data recovers to a playable world",
+                      "passed": true
+                    },
+                    {
+                      "name": "no browser exceptions during the lifecycle",
+                      "passed": true
+                    }
+                  ],
+                  "errors": [],
+                  "consoleErrors": [
+                    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+                  ]
+                }
+              }
+            ],
+            "results": [
+              {
+                "name": "preview: startup exposes live game state without exceptions",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 32.5,
+                    "y": 13,
+                    "z": 32.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "preview: Play leaves the menu and acquires pointer lock",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 32.5,
+                    "y": 11,
+                    "z": 32.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "preview: the game canvas renders terrain beyond the menu",
+                "passed": true,
+                "detail": {
+                  "width": 519,
+                  "height": 819,
+                  "colors": 4,
+                  "largestColorFraction": 0.529874213836478
+                }
+              },
+              {
+                "name": "preview: playing shows crosshair, FPS and five hotbar slots",
+                "passed": true,
+                "detail": {
+                  "fps": "121 FPS",
+                  "slots": 5
+                }
+              },
+              {
+                "name": "preview: rendered voxel triangles match their surface normals",
+                "passed": true,
+                "detail": {
+                  "triangles": 60,
+                  "invalid": 0,
+                  "examples": [],
+                  "geometryChanges": 10
+                }
+              },
+              {
+                "name": "preview: gravity lands on terrain and a grounded jump rises",
+                "passed": true,
+                "detail": {
+                  "a": [
+                    24.5,
+                    11,
+                    24.5
+                  ],
+                  "b": [
+                    24.5,
+                    11.673107519808823,
+                    24.5
+                  ]
+                }
+              },
+              {
+                "name": "preview: WASD stays opposite and perpendicular at three headings",
+                "passed": true,
+                "detail": [
+                  {
+                    "forward": [
+                      -0.9881659802757237,
+                      -0.15338838099972954
+                    ],
+                    "vectors": {
+                      "w": [
+                        -0.3488797962383714,
+                        -0.054154978188570624
+                      ],
+                      "s": [
+                        0.2821352662292149,
+                        0.04379453712599002
+                      ],
+                      "a": [
+                        -0.0445300595986069,
+                        0.2868736843573281
+                      ],
+                      "d": [
+                        0.04423607570683785,
+                        -0.28497976723859253
+                      ]
+                    }
+                  },
+                  {
+                    "forward": [
+                      -0.8525264419911281,
+                      -0.5226840974297455
+                    ],
+                    "vectors": {
+                      "w": [
+                        -0.2591956417168859,
+                        -0.1589128892378966
+                      ],
+                      "s": [
+                        0.2634703283343107,
+                        0.16153370028416347
+                      ],
+                      "a": [
+                        -0.1504114806988781,
+                        0.24532937792713128
+                      ],
+                      "d": [
+                        0.15068947734435056,
+                        -0.2457828057092577
+                      ]
+                    }
+                  },
+                  {
+                    "forward": [
+                      -0.5849350686157033,
+                      -0.811080122739759
+                    ],
+                    "vectors": {
+                      "w": [
+                        -0.1810587107425441,
+                        -0.2510588426159934
+                      ],
+                      "s": [
+                        0.17987841093480128,
+                        0.24942222042611917
+                      ],
+                      "a": [
+                        -0.23475386208686544,
+                        0.16929987873915664
+                      ],
+                      "d": [
+                        0.25246019073513537,
+                        -0.1820693355072791
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "preview: five hotbar keys select five distinct blocks",
+                "passed": true,
+                "detail": [
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ]
+              },
+              {
+                "name": "preview: mouse look targets terrain and left click visibly removes a real block",
+                "passed": true,
+                "detail": [
+                  24,
+                  10,
+                  24
+                ]
+              },
+              {
+                "name": "preview: right click places one adjacent block",
+                "passed": true,
+                "detail": [
+                  26,
+                  11,
+                  28
+                ]
+              },
+              {
+                "name": "preview: pointer unlock pauses and Play resumes twice",
+                "passed": true
+              },
+              {
+                "name": "preview: Save and reload preserve edits, selection and position",
+                "passed": true,
+                "detail": {
+                  "a": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 11,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": {
+                      "x": 26,
+                      "y": 11,
+                      "z": 28
+                    },
+                    "editCount": 2
+                  },
+                  "b": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 11,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": null,
+                    "editCount": 2
+                  },
+                  "resumed": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 11,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": null,
+                    "editCount": 2
+                  }
+                }
+              },
+              {
+                "name": "preview: New World confirmation can be declined and accepted",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 35.5,
+                    "y": 13,
+                    "z": 32.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "preview: invalid saved data recovers to a playable world",
+                "passed": true
+              },
+              {
+                "name": "preview: no browser exceptions during the lifecycle",
+                "passed": true
+              },
+              {
+                "name": "direct: startup exposes live game state without exceptions",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 32.5,
+                    "y": 13,
+                    "z": 32.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "direct: Play leaves the menu and acquires pointer lock",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 32.5,
+                    "y": 11,
+                    "z": 32.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "direct: the game canvas renders terrain beyond the menu",
+                "passed": true,
+                "detail": {
+                  "width": 1440,
+                  "height": 900,
+                  "colors": 23,
+                  "largestColorFraction": 0.4581575246132208
+                }
+              },
+              {
+                "name": "direct: playing shows crosshair, FPS and five hotbar slots",
+                "passed": true,
+                "detail": {
+                  "fps": "127 FPS",
+                  "slots": 5
+                }
+              },
+              {
+                "name": "direct: rendered voxel triangles match their surface normals",
+                "passed": true,
+                "detail": {
+                  "triangles": 60,
+                  "invalid": 0,
+                  "examples": [],
+                  "geometryChanges": 10
+                }
+              },
+              {
+                "name": "direct: gravity lands on terrain and a grounded jump rises",
+                "passed": true,
+                "detail": {
+                  "a": [
+                    24.5,
+                    11,
+                    24.5
+                  ],
+                  "b": [
+                    24.5,
+                    11.677914060000315,
+                    24.5
+                  ]
+                }
+              },
+              {
+                "name": "direct: WASD stays opposite and perpendicular at three headings",
+                "passed": true,
+                "detail": [
+                  {
+                    "forward": [
+                      -0.3918117819616918,
+                      -0.9200453942692195
+                    ],
+                    "vectors": {
+                      "w": [
+                        -0.13819765266742934,
+                        -0.3245132476590946
+                      ],
+                      "s": [
+                        0.12208076552003888,
+                        0.2866678625211563
+                      ],
+                      "a": [
+                        -0.28693874667967734,
+                        0.12219612461592888
+                      ],
+                      "d": [
+                        0.28272166678433663,
+                        -0.12040023324059135
+                      ]
+                    }
+                  },
+                  {
+                    "forward": [
+                      -0.00659995208409569,
+                      -0.9999782200790612
+                    ],
+                    "vectors": {
+                      "w": [
+                        -0.0020389393134436773,
+                        -0.3089257133275076
+                      ],
+                      "s": [
+                        0.002019660922758959,
+                        0.30600478745348525
+                      ],
+                      "a": [
+                        -0.2899871115178563,
+                        0.001913942726542217
+                      ],
+                      "d": [
+                        0.31123956652929863,
+                        -0.002054210966313974
+                      ]
+                    }
+                  },
+                  {
+                    "forward": [
+                      0.37963340128665374,
+                      -0.925137006409065
+                    ],
+                    "vectors": {
+                      "w": [
+                        0.11664523544924066,
+                        -0.2842553462620856
+                      ],
+                      "s": [
+                        -0.11587480319221655,
+                        0.2823778629071434
+                      ],
+                      "a": [
+                        -0.286907050682931,
+                        -0.11773337219169733
+                      ],
+                      "d": [
+                        0.26463269914093956,
+                        0.10859300943595684
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "direct: five hotbar keys select five distinct blocks",
+                "passed": true,
+                "detail": [
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ]
+              },
+              {
+                "name": "direct: mouse look targets terrain and left click visibly removes a real block",
+                "passed": true,
+                "detail": [
+                  24,
+                  10,
+                  24
+                ]
+              },
+              {
+                "name": "direct: right click places one adjacent block",
+                "passed": true,
+                "detail": [
+                  27,
+                  11,
+                  26
+                ]
+              },
+              {
+                "name": "direct: pointer unlock pauses and Play resumes twice",
+                "passed": true
+              },
+              {
+                "name": "direct: Save and reload preserve edits, selection and position",
+                "passed": true,
+                "detail": {
+                  "a": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 11,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": {
+                      "x": 27,
+                      "y": 11,
+                      "z": 26
+                    },
+                    "editCount": 2
+                  },
+                  "b": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 11,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": null,
+                    "editCount": 2
+                  },
+                  "resumed": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 11,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": null,
+                    "editCount": 2
+                  }
+                }
+              },
+              {
+                "name": "direct: New World confirmation can be declined and accepted",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 32.5,
+                    "y": 13,
+                    "z": 32.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "direct: invalid saved data recovers to a playable world",
+                "passed": true
+              },
+              {
+                "name": "direct: no browser exceptions during the lifecycle",
+                "passed": true
+              }
+            ],
+            "errors": [],
+            "consoleErrors": [
+              "Failed to load resource: the server responded with a status of 404 (Not Found)"
+            ]
+          }
+        }
+      ],
+      "source": {
+        "sha256": "7428cef65b027c3daa4861270f0a1f6b56ce41c2ed32525aa67873c982ca7957",
+        "files": [
+          {
+            "path": "index.html",
+            "sha256": "87e26c80ad42dd3f8b0d4d5887753c20e0e67079ccb93ab9f303c4f1cb0cdc7b"
+          },
+          {
+            "path": "package-lock.json",
+            "sha256": "f0769d79c43165189e983d986bb3d18bd4d280868eb44ed8b4026eecddb4d208"
+          },
+          {
+            "path": "package.json",
+            "sha256": "491cb924c9ff4da80451d67d2d2bd1490ccc8cdd8b61ad1ce2735ca1828742f4"
+          },
+          {
+            "path": "README.md",
+            "sha256": "ae6360435475802db26e5248ee784e66c9817ebfc70084a20c22f059541011ab"
+          },
+          {
+            "path": "src/blocks.js",
+            "sha256": "2c7c19a7d4ee5a0772c74032c722919ff145813c180d52985d94ecdf992ce663"
+          },
+          {
+            "path": "src/main.js",
+            "sha256": "19cdd276aef7ed26e880ee2adb5928e28870464ab6296488d17cc8f18f0b2cc6"
+          },
+          {
+            "path": "src/noise.js",
+            "sha256": "2bdabea53af477d17fb4328657cbb6f06a393ff96bd32c0f5dc3b694bba91840"
+          },
+          {
+            "path": "src/physics.js",
+            "sha256": "1305444a5f6a9ce651f86f06ec4b615e7525fa634970bc171f7926f2fe0dbeb6"
+          },
+          {
+            "path": "src/raycast.js",
+            "sha256": "280ef855fd7c0baf59fbc9ce08c0d7caeadd6fc3b9333a263db2f79a5b73de8e"
+          },
+          {
+            "path": "src/renderer.js",
+            "sha256": "d23e44226b6c8faec267041cea7c89b058572b16e1047ede68410f1056eac7d9"
+          },
+          {
+            "path": "src/sceneSetup.js",
+            "sha256": "cdd89142523b35927a59cefbd303fd5182830386c345cacb980198c1795887a9"
+          },
+          {
+            "path": "src/style.css",
+            "sha256": "ed007c65220e0fdb16cdeb1914171ad156eab263b8b24f75512aec30ca4a78dc"
+          },
+          {
+            "path": "src/world.js",
+            "sha256": "0df319588762e625f5d8fdfed6618cf788794fb3d6fc9e6e69bf23795f1637df"
+          },
+          {
+            "path": "tests/physics.test.js",
+            "sha256": "b3b9d47c39a78fa899a6887c7f6fd0a64fbe2ab98ff38b3a8f9bbcf3db45a121"
+          },
+          {
+            "path": "tests/raycast.test.js",
+            "sha256": "f3db49907f8bbb42d5dbda973266e1dc49823ab2bbfb23851dced24bbe923515"
+          },
+          {
+            "path": "tests/world.test.js",
+            "sha256": "9d4e63717e21daf002d45b2c77162573791d70ee5317f2b4747177d29756e65c"
+          }
+        ]
+      },
+      "projectTests": {
+        "total": 28,
+        "passed": 28,
+        "failed": 0
+      },
+      "archive": {
+        "path": "docs/evidence/ollama-v9-block-meadow.zip",
+        "sha256": "507be458d852a5978f889d11012b01ddee4efc19b12f07d3b2d6f4e576a91ffe"
+      },
+      "trace": {
+        "path": "docs/evidence/ollama-v9-run.jsonl.gz",
+        "uncompressedSha256": "28d4aa1f04bb86a7b3d4f620d00ec71ec0afeacb0f5a9eddaf995373d1c494f3",
+        "sha256": "0a9876838c122d7e15cda699aa7763b22eede18bf8d3a14b3041a1b793f9e338"
+      }
+    }
+  ],
+  "rejectedEarlierArtifact": {
+    "workspace": "playground/unattended-ollama-verified-v6",
+    "reason": "Twelve behavioral groups passed, but visual inspection found malformed faces. The strengthened mesh check rejects it; it is not a finished-game pass.",
+    "report": {
+      "url": "http://127.0.0.1:4188",
+      "preview": true,
+      "checkerHash": "34b0de7006a57cd02e8f85c3f9adad80c432f2df76d07ad6c1a2def14f3a304b",
+      "passed": false,
+      "results": [
+        {
+          "name": "startup exposes live game state without exceptions",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 32.5,
+              "y": 13,
+              "z": 32.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "Play leaves the menu and acquires pointer lock",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 32.5,
+              "y": 13.000001031598975,
+              "z": 32.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "the game canvas renders terrain beyond the menu",
+          "passed": true,
+          "detail": {
+            "width": 519,
+            "height": 819,
+            "colors": 37,
+            "largestColorFraction": 0.3480083857442348
+          }
+        },
+        {
+          "name": "rendered voxel triangles match their surface normals",
+          "passed": false,
+          "error": "Rendered terrain contains degenerate, reversed or non-planar faces. Triangle winding and positions must match their outward normals. Actual uploaded triangle examples: [{\"points\":[[0,0,0],[0,0,1],[1,0,1]],\"normals\":[[0,0,-1],[0,0,-1],[0,0,-1]],\"alignment\":0},{\"points\":[[0,0,1],[0,0,0],[0,1,0]],\"normals\":[[-1,0,0],[-1,0,0],[-1,0,0]],\"alignment\":-1},{\"points\":[[1,0,0],[1,0,1],[2,0,1]],\"normals\":[[0,0,-1],[0,0,-1],[0,0,-1]],\"alignment\":0},{\"points\":[[2,0,0],[2,0,1],[3,0,1]],\"normals\":[[0,0,-1],[0,0,-1],[0,0,-1]],\"alignment\":0}]\n\n6434 !== 0\n"
+        }
+      ],
+      "errors": []
+    }
+  },
+  "rejectedHUDArtifact": {
+    "workspace": "playground/unattended-ollama-verified-v8",
+    "reason": "Thirteen groups passed, but visual inspection found a permanently hidden crosshair, hotbar and FPS. The fourteenth group rejects the unchanged game.",
+    "report": {
+      "url": "http://127.0.0.1:59743",
+      "preview": true,
+      "checkerHash": "638fe3a201c012f090c3b56249166c15e8a5233322654fa320bb2c7b234779d1",
+      "passed": false,
+      "results": [
+        {
+          "name": "startup exposes live game state without exceptions",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 24.5,
+              "y": 7.2,
+              "z": 24.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "Play leaves the menu and acquires pointer lock",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 24.5,
+              "y": 7.000523759999999,
+              "z": 24.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "the game canvas renders terrain beyond the menu",
+          "passed": true,
+          "detail": {
+            "width": 519,
+            "height": 819,
+            "colors": 19,
+            "largestColorFraction": 0.5131027253668763
+          }
+        },
+        {
+          "name": "playing shows crosshair, FPS and five hotbar slots",
+          "passed": false,
+          "error": "Crosshair HUD is hidden while playing. Observed layout: {\"display\":\"none\",\"visibility\":\"visible\",\"opacity\":1,\"width\":0,\"height\":0,\"x\":0,\"y\":0,\"inViewport\":false}"
+        }
+      ],
+      "errors": []
+    }
+  },
+  "consoleDiagnosticRegression": {
+    "workspace": "playground/unattended-lm-verified-v7",
+    "reason": "Failed after twelve checks. Rechecking the unchanged game exposes the caught storage.setItem failure previously omitted from feedback.",
+    "report": {
+      "url": "http://127.0.0.1:50740",
+      "preview": true,
+      "checkerHash": "861132f0d4db675e9cf409964743558576c4938523e53df77157dda2edaba5ab",
+      "passed": false,
+      "results": [
+        {
+          "name": "startup exposes live game state without exceptions",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 32.5,
+              "y": 10.03,
+              "z": 32.5
+            },
+            "selected": 1,
+            "targeted": {
+              "x": 32,
+              "y": 11,
+              "z": 26
+            },
+            "editCount": 0
+          }
+        },
+        {
+          "name": "Play leaves the menu and acquires pointer lock",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 32.5,
+              "y": 9.998,
+              "z": 32.5
+            },
+            "selected": 1,
+            "targeted": {
+              "x": 32,
+              "y": 11,
+              "z": 26
+            },
+            "editCount": 0
+          }
+        },
+        {
+          "name": "the game canvas renders terrain beyond the menu",
+          "passed": true,
+          "detail": {
+            "width": 519,
+            "height": 819,
+            "colors": 19,
+            "largestColorFraction": 0.44627882599580715
+          }
+        },
+        {
+          "name": "playing shows crosshair, FPS and five hotbar slots",
+          "passed": true,
+          "detail": {
+            "fps": "FPS 118",
+            "slots": 5
+          }
+        },
+        {
+          "name": "rendered voxel triangles match their surface normals",
+          "passed": true,
+          "detail": {
+            "triangles": 26055,
+            "invalid": 0,
+            "examples": []
+          }
+        },
+        {
+          "name": "gravity lands on terrain and a grounded jump rises",
+          "passed": true,
+          "detail": {
+            "a": [
+              24.5,
+              15.998,
+              24.5
+            ],
+            "b": [
+              24.5,
+              16.710224139999998,
+              24.5
+            ]
+          }
+        },
+        {
+          "name": "all WASD keys move the live player",
+          "passed": true,
+          "detail": {
+            "w": 1.3681200000000011,
+            "a": 1.3473199999999927,
+            "s": 1.3941199999999867,
+            "d": 1.403479999999977
+          }
+        },
+        {
+          "name": "five hotbar keys select five distinct blocks",
+          "passed": true,
+          "detail": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "name": "mouse look targets terrain and left click removes a real block",
+          "passed": true,
+          "detail": [
+            24,
+            15,
+            24
+          ]
+        },
+        {
+          "name": "right click places one adjacent block",
+          "passed": true,
+          "detail": [
+            27,
+            14,
+            27
+          ]
+        },
+        {
+          "name": "pointer unlock pauses and Play resumes twice",
+          "passed": true
+        },
+        {
+          "name": "Save and reload preserve edits, selection and position",
+          "passed": false,
+          "error": "Clicking Save did not write localStorage before navigation; unload auto-save cannot satisfy manual Save"
+        }
+      ],
+      "errors": [],
+      "consoleErrors": [
+        "[BlockMeadow] writeSave failed: TypeError: i.setItem is not a function\n    at Ml (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:1:8075)\n    at vr (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:114854)\n    at Yp (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:114412)\n    at Xp.onSelect (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:114322)\n    at Xp._onKey (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:113088)",
+        "[BlockMeadow] writeSave failed: TypeError: i.setItem is not a function\n    at Ml (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:1:8075)\n    at vr (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:114854)\n    at mo (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:115769)\n    at Wp.onBreak (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:114211)\n    at Wp._onMouseDown (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:110557)",
+        "[BlockMeadow] writeSave failed: TypeError: i.setItem is not a function\n    at Ml (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:1:8075)\n    at vr (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:114854)\n    at mo (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:115769)\n    at Wp.onPlace (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:114235)\n    at Wp._onMouseDown (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:110600)",
+        "[BlockMeadow] writeSave failed: TypeError: i.setItem is not a function\n    at Ml (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:1:8075)\n    at vr (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:114854)\n    at Xp.onSave (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:114290)\n    at HTMLButtonElement.<anonymous> (http://127.0.0.1:50740/assets/index-Co4C6nTw.js:3686:112557)"
+      ]
+    }
+  },
+  "consoleFixtures": {
+    "passed": true,
+    "checks": [
+      "caught browser exception",
+      "duplicate suppression",
+      "bounded evidence"
+    ]
+  },
+  "directViewRegression": {
+    "workspace": "playground/unattended-lm-verified-v8",
+    "reason": "The embedded lifecycle passed, but the direct view placed a block nearer the player and exposed an overly broad save-restore clearance check. The combined gate rejects it.",
+    "report": {
+      "url": "http://127.0.0.1:54906",
+      "checkerHash": "a27a63b1fdeb1e834bc0f94f86a7ad1ea0b69fe1c7e4e940134c635437fbe058",
+      "passed": false,
+      "views": [
+        {
+          "name": "preview",
+          "report": {
+            "url": "http://127.0.0.1:54906",
+            "preview": true,
+            "checkerHash": "a27a63b1fdeb1e834bc0f94f86a7ad1ea0b69fe1c7e4e940134c635437fbe058",
+            "passed": true,
+            "results": [
+              {
+                "name": "startup exposes live game state without exceptions",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 24.5,
+                    "z": 28.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "Play leaves the menu and acquires pointer lock",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 21,
+                    "z": 28.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "the game canvas renders terrain beyond the menu",
+                "passed": true,
+                "detail": {
+                  "width": 519,
+                  "height": 819,
+                  "colors": 18,
+                  "largestColorFraction": 0.46514675052410903
+                }
+              },
+              {
+                "name": "playing shows crosshair, FPS and five hotbar slots",
+                "passed": true,
+                "detail": {
+                  "fps": "127 FPS",
+                  "slots": 5
+                }
+              },
+              {
+                "name": "rendered voxel triangles match their surface normals",
+                "passed": true,
+                "detail": {
+                  "triangles": 32604,
+                  "invalid": 0,
+                  "examples": []
+                }
+              },
+              {
+                "name": "gravity lands on terrain and a grounded jump rises",
+                "passed": true,
+                "detail": {
+                  "a": [
+                    24.5,
+                    22,
+                    24.5
+                  ],
+                  "b": [
+                    24.5,
+                    22.78722904,
+                    24.5
+                  ]
+                }
+              },
+              {
+                "name": "all WASD keys move the live player",
+                "passed": true,
+                "detail": {
+                  "w": 1.385799999999989,
+                  "a": 1.3509599999999828,
+                  "s": 1.355639999999994,
+                  "d": 1.3873599999999904
+                }
+              },
+              {
+                "name": "five hotbar keys select five distinct blocks",
+                "passed": true,
+                "detail": [
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ]
+              },
+              {
+                "name": "mouse look targets terrain and left click removes a real block",
+                "passed": true,
+                "detail": [
+                  24,
+                  21,
+                  24
+                ]
+              },
+              {
+                "name": "right click places one adjacent block",
+                "passed": true,
+                "detail": [
+                  26,
+                  21,
+                  28
+                ]
+              },
+              {
+                "name": "pointer unlock pauses and Play resumes twice",
+                "passed": true
+              },
+              {
+                "name": "Save and reload preserve edits, selection and position",
+                "passed": true,
+                "detail": {
+                  "a": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 21,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": {
+                      "x": 26,
+                      "y": 21,
+                      "z": 28
+                    },
+                    "editCount": 2
+                  },
+                  "b": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 21,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": null,
+                    "editCount": 2
+                  },
+                  "resumed": {
+                    "player": {
+                      "x": 28.5,
+                      "y": 21,
+                      "z": 28.5
+                    },
+                    "selected": 5,
+                    "targeted": null,
+                    "editCount": 2
+                  }
+                }
+              },
+              {
+                "name": "New World confirmation can be declined and accepted",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 23.5,
+                    "z": 28.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "no browser exceptions during the lifecycle",
+                "passed": true
+              }
+            ],
+            "errors": [],
+            "consoleErrors": []
+          }
+        },
+        {
+          "name": "direct",
+          "report": {
+            "url": "http://127.0.0.1:54906",
+            "preview": false,
+            "checkerHash": "a27a63b1fdeb1e834bc0f94f86a7ad1ea0b69fe1c7e4e940134c635437fbe058",
+            "passed": false,
+            "results": [
+              {
+                "name": "startup exposes live game state without exceptions",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 24.5,
+                    "z": 28.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "Play leaves the menu and acquires pointer lock",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 28.5,
+                    "y": 21,
+                    "z": 28.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "the game canvas renders terrain beyond the menu",
+                "passed": true,
+                "detail": {
+                  "width": 1440,
+                  "height": 900,
+                  "colors": 27,
+                  "largestColorFraction": 0.44760900140646975
+                }
+              },
+              {
+                "name": "playing shows crosshair, FPS and five hotbar slots",
+                "passed": true,
+                "detail": {
+                  "fps": "127 FPS",
+                  "slots": 5
+                }
+              },
+              {
+                "name": "rendered voxel triangles match their surface normals",
+                "passed": true,
+                "detail": {
+                  "triangles": 32604,
+                  "invalid": 0,
+                  "examples": []
+                }
+              },
+              {
+                "name": "gravity lands on terrain and a grounded jump rises",
+                "passed": true,
+                "detail": {
+                  "a": [
+                    24.5,
+                    22,
+                    24.5
+                  ],
+                  "b": [
+                    24.5,
+                    22.747869519999995,
+                    24.5
+                  ]
+                }
+              },
+              {
+                "name": "all WASD keys move the live player",
+                "passed": true,
+                "detail": {
+                  "w": 1.3852799999999874,
+                  "a": 1.3525199999999806,
+                  "s": 1.3571999999999846,
+                  "d": 1.3967199999999806
+                }
+              },
+              {
+                "name": "five hotbar keys select five distinct blocks",
+                "passed": true,
+                "detail": [
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ]
+              },
+              {
+                "name": "mouse look targets terrain and left click removes a real block",
+                "passed": true,
+                "detail": [
+                  24,
+                  21,
+                  24
+                ]
+              },
+              {
+                "name": "right click places one adjacent block",
+                "passed": true,
+                "detail": [
+                  27,
+                  21,
+                  27
+                ]
+              },
+              {
+                "name": "pointer unlock pauses and Play resumes twice",
+                "passed": true
+              },
+              {
+                "name": "Save and reload preserve edits, selection and position",
+                "passed": false,
+                "error": "Reload changed the saved player coordinates\n+ actual - expected\n\n  [\n    28.5,\n+   24.5,\n-   21,\n    28.5\n  ]\n"
+              }
+            ],
+            "errors": [],
+            "consoleErrors": [
+              "Failed to load resource: the server responded with a status of 404 (Not Found)"
+            ]
+          }
+        }
+      ],
+      "results": [
+        {
+          "name": "preview: startup exposes live game state without exceptions",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 28.5,
+              "y": 24.5,
+              "z": 28.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "preview: Play leaves the menu and acquires pointer lock",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 28.5,
+              "y": 21,
+              "z": 28.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "preview: the game canvas renders terrain beyond the menu",
+          "passed": true,
+          "detail": {
+            "width": 519,
+            "height": 819,
+            "colors": 18,
+            "largestColorFraction": 0.46514675052410903
+          }
+        },
+        {
+          "name": "preview: playing shows crosshair, FPS and five hotbar slots",
+          "passed": true,
+          "detail": {
+            "fps": "127 FPS",
+            "slots": 5
+          }
+        },
+        {
+          "name": "preview: rendered voxel triangles match their surface normals",
+          "passed": true,
+          "detail": {
+            "triangles": 32604,
+            "invalid": 0,
+            "examples": []
+          }
+        },
+        {
+          "name": "preview: gravity lands on terrain and a grounded jump rises",
+          "passed": true,
+          "detail": {
+            "a": [
+              24.5,
+              22,
+              24.5
+            ],
+            "b": [
+              24.5,
+              22.78722904,
+              24.5
+            ]
+          }
+        },
+        {
+          "name": "preview: all WASD keys move the live player",
+          "passed": true,
+          "detail": {
+            "w": 1.385799999999989,
+            "a": 1.3509599999999828,
+            "s": 1.355639999999994,
+            "d": 1.3873599999999904
+          }
+        },
+        {
+          "name": "preview: five hotbar keys select five distinct blocks",
+          "passed": true,
+          "detail": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "name": "preview: mouse look targets terrain and left click removes a real block",
+          "passed": true,
+          "detail": [
+            24,
+            21,
+            24
+          ]
+        },
+        {
+          "name": "preview: right click places one adjacent block",
+          "passed": true,
+          "detail": [
+            26,
+            21,
+            28
+          ]
+        },
+        {
+          "name": "preview: pointer unlock pauses and Play resumes twice",
+          "passed": true
+        },
+        {
+          "name": "preview: Save and reload preserve edits, selection and position",
+          "passed": true,
+          "detail": {
+            "a": {
+              "player": {
+                "x": 28.5,
+                "y": 21,
+                "z": 28.5
+              },
+              "selected": 5,
+              "targeted": {
+                "x": 26,
+                "y": 21,
+                "z": 28
+              },
+              "editCount": 2
+            },
+            "b": {
+              "player": {
+                "x": 28.5,
+                "y": 21,
+                "z": 28.5
+              },
+              "selected": 5,
+              "targeted": null,
+              "editCount": 2
+            },
+            "resumed": {
+              "player": {
+                "x": 28.5,
+                "y": 21,
+                "z": 28.5
+              },
+              "selected": 5,
+              "targeted": null,
+              "editCount": 2
+            }
+          }
+        },
+        {
+          "name": "preview: New World confirmation can be declined and accepted",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 28.5,
+              "y": 23.5,
+              "z": 28.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "preview: no browser exceptions during the lifecycle",
+          "passed": true
+        },
+        {
+          "name": "direct: startup exposes live game state without exceptions",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 28.5,
+              "y": 24.5,
+              "z": 28.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "direct: Play leaves the menu and acquires pointer lock",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 28.5,
+              "y": 21,
+              "z": 28.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "direct: the game canvas renders terrain beyond the menu",
+          "passed": true,
+          "detail": {
+            "width": 1440,
+            "height": 900,
+            "colors": 27,
+            "largestColorFraction": 0.44760900140646975
+          }
+        },
+        {
+          "name": "direct: playing shows crosshair, FPS and five hotbar slots",
+          "passed": true,
+          "detail": {
+            "fps": "127 FPS",
+            "slots": 5
+          }
+        },
+        {
+          "name": "direct: rendered voxel triangles match their surface normals",
+          "passed": true,
+          "detail": {
+            "triangles": 32604,
+            "invalid": 0,
+            "examples": []
+          }
+        },
+        {
+          "name": "direct: gravity lands on terrain and a grounded jump rises",
+          "passed": true,
+          "detail": {
+            "a": [
+              24.5,
+              22,
+              24.5
+            ],
+            "b": [
+              24.5,
+              22.747869519999995,
+              24.5
+            ]
+          }
+        },
+        {
+          "name": "direct: all WASD keys move the live player",
+          "passed": true,
+          "detail": {
+            "w": 1.3852799999999874,
+            "a": 1.3525199999999806,
+            "s": 1.3571999999999846,
+            "d": 1.3967199999999806
+          }
+        },
+        {
+          "name": "direct: five hotbar keys select five distinct blocks",
+          "passed": true,
+          "detail": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "name": "direct: mouse look targets terrain and left click removes a real block",
+          "passed": true,
+          "detail": [
+            24,
+            21,
+            24
+          ]
+        },
+        {
+          "name": "direct: right click places one adjacent block",
+          "passed": true,
+          "detail": [
+            27,
+            21,
+            27
+          ]
+        },
+        {
+          "name": "direct: pointer unlock pauses and Play resumes twice",
+          "passed": true
+        },
+        {
+          "name": "direct: Save and reload preserve edits, selection and position",
+          "passed": false,
+          "error": "Reload changed the saved player coordinates\n+ actual - expected\n\n  [\n    28.5,\n+   24.5,\n-   21,\n    28.5\n  ]\n"
+        }
+      ],
+      "errors": [],
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ]
+    }
+  },
+  "renderedWorldRegression": {
+    "workspace": "playground/unattended-lm-verified-v9",
+    "reason": "All 28 earlier state/geometry-quality checks passed, but Play replaced the live world without updating the renderer. The strengthened gate requires actual drawn geometry to change when mining and placing.",
+    "liveObjectComparison": {
+      "before": {
+        "sameWorld": true,
+        "liveSeed": 423933794,
+        "renderedSeed": 423933794,
+        "differingCells": 0
+      },
+      "after": {
+        "sameWorld": false,
+        "liveSeed": 113874277,
+        "renderedSeed": 423933794,
+        "differingCells": 13414
+      }
+    },
+    "report": {
+      "url": "http://127.0.0.1:49992",
+      "checkerHash": "47c44269cd0c133754a3ae7b45063b8d4e525560d6b4643a6f58a1033033f022",
+      "passed": false,
+      "views": [
+        {
+          "name": "preview",
+          "report": {
+            "url": "http://127.0.0.1:49992",
+            "preview": true,
+            "checkerHash": "47c44269cd0c133754a3ae7b45063b8d4e525560d6b4643a6f58a1033033f022",
+            "passed": false,
+            "results": [
+              {
+                "name": "startup exposes live game state without exceptions",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 32.5,
+                    "y": 16.5,
+                    "z": 32.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "Play leaves the menu and acquires pointer lock",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 32.5,
+                    "y": 24.0001,
+                    "z": 32.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "the game canvas renders terrain beyond the menu",
+                "passed": true,
+                "detail": {
+                  "width": 519,
+                  "height": 819,
+                  "colors": 15,
+                  "largestColorFraction": 0.7914046121593291
+                }
+              },
+              {
+                "name": "playing shows crosshair, FPS and five hotbar slots",
+                "passed": true,
+                "detail": {
+                  "fps": "127",
+                  "slots": 5
+                }
+              },
+              {
+                "name": "rendered voxel triangles match their surface normals",
+                "passed": true,
+                "detail": {
+                  "triangles": 14988,
+                  "invalid": 0,
+                  "examples": [],
+                  "geometryChanges": 8
+                }
+              },
+              {
+                "name": "gravity lands on terrain and a grounded jump rises",
+                "passed": true,
+                "detail": {
+                  "a": [
+                    24.5,
+                    17.0001,
+                    24.5
+                  ],
+                  "b": [
+                    24.5,
+                    17.742747760063878,
+                    24.5
+                  ]
+                }
+              },
+              {
+                "name": "all WASD keys move the live player",
+                "passed": true,
+                "detail": {
+                  "w": 1.3561600000619691,
+                  "a": 1.3665600000619875,
+                  "s": 1.3977600000619752,
+                  "d": 1.388399999999983
+                }
+              },
+              {
+                "name": "five hotbar keys select five distinct blocks",
+                "passed": true,
+                "detail": [
+                  1,
+                  2,
+                  3,
+                  4,
+                  5
+                ]
+              },
+              {
+                "name": "mouse look targets terrain and left click removes a real block",
+                "passed": false,
+                "error": "Mining changed live block [24,16,24] to air, but the actual rendered geometry did not change. Check that the renderer uses the same world as collision and editing after Play, reload and New World, and rebuilds the edited chunk. Identical uploads do not count as a visual change (10 -> 10)."
+              }
+            ],
+            "errors": [],
+            "consoleErrors": []
+          }
+        }
+      ],
+      "results": [
+        {
+          "name": "preview: startup exposes live game state without exceptions",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 32.5,
+              "y": 16.5,
+              "z": 32.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "preview: Play leaves the menu and acquires pointer lock",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 32.5,
+              "y": 24.0001,
+              "z": 32.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "preview: the game canvas renders terrain beyond the menu",
+          "passed": true,
+          "detail": {
+            "width": 519,
+            "height": 819,
+            "colors": 15,
+            "largestColorFraction": 0.7914046121593291
+          }
+        },
+        {
+          "name": "preview: playing shows crosshair, FPS and five hotbar slots",
+          "passed": true,
+          "detail": {
+            "fps": "127",
+            "slots": 5
+          }
+        },
+        {
+          "name": "preview: rendered voxel triangles match their surface normals",
+          "passed": true,
+          "detail": {
+            "triangles": 14988,
+            "invalid": 0,
+            "examples": [],
+            "geometryChanges": 8
+          }
+        },
+        {
+          "name": "preview: gravity lands on terrain and a grounded jump rises",
+          "passed": true,
+          "detail": {
+            "a": [
+              24.5,
+              17.0001,
+              24.5
+            ],
+            "b": [
+              24.5,
+              17.742747760063878,
+              24.5
+            ]
+          }
+        },
+        {
+          "name": "preview: all WASD keys move the live player",
+          "passed": true,
+          "detail": {
+            "w": 1.3561600000619691,
+            "a": 1.3665600000619875,
+            "s": 1.3977600000619752,
+            "d": 1.388399999999983
+          }
+        },
+        {
+          "name": "preview: five hotbar keys select five distinct blocks",
+          "passed": true,
+          "detail": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "name": "preview: mouse look targets terrain and left click removes a real block",
+          "passed": false,
+          "error": "Mining changed live block [24,16,24] to air, but the actual rendered geometry did not change. Check that the renderer uses the same world as collision and editing after Play, reload and New World, and rebuilds the edited chunk. Identical uploads do not count as a visual change (10 -> 10)."
+        }
+      ],
+      "errors": [],
+      "consoleErrors": []
+    }
+  },
+  "renderUpdateFixtures": {
+    "passed": 6,
+    "checks": [
+      "unchanged frame rejected",
+      "identical rebuilt data rejected",
+      "changed positions",
+      "changed indices",
+      "changed instance transforms",
+      "changed instance count"
+    ]
+  },
+  "movementRegression": {
+    "workspace": "playground/unattended-lm-verified-v10",
+    "reason": "All 28 earlier checks passed, but turned-camera strafing had an incorrect sine sign. The three-heading check rejects it.",
+    "direct": {
+      "passed": false,
+      "error": "Strafing must stay perpendicular to forward movement after turning. Check both sine signs in the camera-relative movement basis. Actual W/S/A/D displacements: {\"w\":[-0.27412701835048026,-0.9014824432069126],\"s\":[0.277001418653267,0.9109350736820438],\"a\":[-0.9094425530807051,-0.2765475659738783],\"d\":[0.8984974020042387,0.2732193129916958]}"
+    },
+    "report": {
+      "url": "http://127.0.0.1:52843",
+      "checkerHash": "5f6a25709cb0f7fd79fe310bff4f8fab2f05af4191571ca8f98f008dd5f86635",
+      "passed": false,
+      "views": [
+        {
+          "name": "preview",
+          "report": {
+            "url": "http://127.0.0.1:52843",
+            "preview": true,
+            "checkerHash": "5f6a25709cb0f7fd79fe310bff4f8fab2f05af4191571ca8f98f008dd5f86635",
+            "passed": false,
+            "results": [
+              {
+                "name": "startup exposes live game state without exceptions",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 32.5,
+                    "y": 29,
+                    "z": 32.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "Play leaves the menu and acquires pointer lock",
+                "passed": true,
+                "detail": {
+                  "player": {
+                    "x": 32.5,
+                    "y": 27,
+                    "z": 32.5
+                  },
+                  "selected": 1,
+                  "targeted": null,
+                  "editCount": 0
+                }
+              },
+              {
+                "name": "the game canvas renders terrain beyond the menu",
+                "passed": true,
+                "detail": {
+                  "width": 519,
+                  "height": 819,
+                  "colors": 22,
+                  "largestColorFraction": 0.5505765199161425
+                }
+              },
+              {
+                "name": "playing shows crosshair, FPS and five hotbar slots",
+                "passed": true,
+                "detail": {
+                  "fps": "127 FPS",
+                  "slots": 5
+                }
+              },
+              {
+                "name": "rendered voxel triangles match their surface normals",
+                "passed": true,
+                "detail": {
+                  "triangles": 17624,
+                  "invalid": 0,
+                  "examples": [],
+                  "geometryChanges": 1
+                }
+              },
+              {
+                "name": "gravity lands on terrain and a grounded jump rises",
+                "passed": true,
+                "detail": {
+                  "a": [
+                    24.5,
+                    18,
+                    24.5
+                  ],
+                  "b": [
+                    24.5,
+                    18.815999020000007,
+                    24.5
+                  ]
+                }
+              },
+              {
+                "name": "WASD stays opposite and perpendicular at three headings",
+                "passed": false,
+                "error": "Strafing must stay perpendicular to forward movement after turning. Check both sine signs in the camera-relative movement basis. Actual W/S/A/D displacements: {\"w\":[-0.9298103539343536,-0.15883911393743233],\"s\":[0.9677408755391852,0.16531876908151233],\"a\":[-0.16330482221239606,-0.9559516593647182],\"d\":[0.16347994802710986,0.9569768085972825]}"
+              }
+            ],
+            "errors": [],
+            "consoleErrors": []
+          }
+        }
+      ],
+      "results": [
+        {
+          "name": "preview: startup exposes live game state without exceptions",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 32.5,
+              "y": 29,
+              "z": 32.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "preview: Play leaves the menu and acquires pointer lock",
+          "passed": true,
+          "detail": {
+            "player": {
+              "x": 32.5,
+              "y": 27,
+              "z": 32.5
+            },
+            "selected": 1,
+            "targeted": null,
+            "editCount": 0
+          }
+        },
+        {
+          "name": "preview: the game canvas renders terrain beyond the menu",
+          "passed": true,
+          "detail": {
+            "width": 519,
+            "height": 819,
+            "colors": 22,
+            "largestColorFraction": 0.5505765199161425
+          }
+        },
+        {
+          "name": "preview: playing shows crosshair, FPS and five hotbar slots",
+          "passed": true,
+          "detail": {
+            "fps": "127 FPS",
+            "slots": 5
+          }
+        },
+        {
+          "name": "preview: rendered voxel triangles match their surface normals",
+          "passed": true,
+          "detail": {
+            "triangles": 17624,
+            "invalid": 0,
+            "examples": [],
+            "geometryChanges": 1
+          }
+        },
+        {
+          "name": "preview: gravity lands on terrain and a grounded jump rises",
+          "passed": true,
+          "detail": {
+            "a": [
+              24.5,
+              18,
+              24.5
+            ],
+            "b": [
+              24.5,
+              18.815999020000007,
+              24.5
+            ]
+          }
+        },
+        {
+          "name": "preview: WASD stays opposite and perpendicular at three headings",
+          "passed": false,
+          "error": "Strafing must stay perpendicular to forward movement after turning. Check both sine signs in the camera-relative movement basis. Actual W/S/A/D displacements: {\"w\":[-0.9298103539343536,-0.15883911393743233],\"s\":[0.9677408755391852,0.16531876908151233],\"a\":[-0.16330482221239606,-0.9559516593647182],\"d\":[0.16347994802710986,0.9569768085972825]}"
+        }
+      ],
+      "errors": [],
+      "consoleErrors": []
+    }
+  },
+  "movementFixtures": {
+    "passed": true,
+    "checks": [
+      "three valid headings",
+      "wrong strafe sine rejected",
+      "same-direction W/S rejected"
+    ]
+  },
+  "diagnosticsRevision": "Ollama v9 completed with fourteen embedded-preview groups, then passed independent direct checks. LM v11 requires fifteen groups in both views within each acceptance attempt, including actual rendered edits, three movement headings and invalid saved data. Both final artifacts pass an independent repeat of the same combined 30-check gate. Original checker hashes differ; harness and prompt hashes match.",
+  "installedCLI": {
+    "compiledFilesMatched": 35,
+    "installation": "Local tested tarball, not a public npm release",
+    "runs": [
+      {
+        "backend": "lmstudio",
+        "stats": {
+          "backend": "lmstudio",
+          "outcome": "completed",
+          "verification": {
+            "attempts": 1,
+            "passed": true
+          },
+          "model": "qwen/qwen3.8-27b",
+          "durationMs": 17132,
+          "modelCalls": 19,
+          "toolCalls": 18,
+          "generatedTokens": 1416,
+          "thinkingTokensEst": 0,
+          "genTokPerSec": 134,
+          "promptTokensLast": 2498,
+          "contextWindow": 4096,
+          "planDone": "6/6"
+        },
+        "compactions": 3,
+        "nativeLoadedContextObserved": 4096,
+        "independentArithmeticChecks": 30,
+        "log": "docs/evidence/installed-cli-lmstudio.txt",
+        "sha256": "ab9ea3c0b6c570465ae6b5dda9813d8590085d5970ad76290077fa7924ee8107"
+      },
+      {
+        "backend": "ollama",
+        "stats": {
+          "backend": "ollama",
+          "outcome": "completed",
+          "verification": {
+            "attempts": 1,
+            "passed": true
+          },
+          "model": "qwen3.8:latest",
+          "durationMs": 17145,
+          "modelCalls": 12,
+          "toolCalls": 17,
+          "generatedTokens": 1536,
+          "thinkingTokensEst": 0,
+          "genTokPerSec": 186,
+          "promptTokensLast": 2157,
+          "contextWindow": 4096,
+          "planDone": "5/5"
+        },
+        "compactions": 2,
+        "nativeLoadedContextObserved": 4096,
+        "independentArithmeticChecks": 30,
+        "log": "docs/evidence/installed-cli-ollama.txt",
+        "sha256": "a0dda6ed92ffafc184c401847cd47be1e749809a4b4e72668d044c2ffe8afdd1"
+      }
+    ]
+  }
+}

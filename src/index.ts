@@ -47,6 +47,8 @@ interface CliArgs {
   model?: string;
   ctx?: number;
   print?: string;
+  verify?: string;
+  verifyAttempts?: number;
   effort?: Effort | null; // null = explicit "default"
   web?: boolean;
   webPort?: number;
@@ -87,6 +89,12 @@ function parseArgs(argv: string[]): CliArgs {
         console.error(`Unknown effort "${v}". Use off, low, medium, high, or default.`);
         process.exit(1);
       }
+    } else if (a === "--verify") {
+      args.verify = argv[++i];
+      if (!args.verify?.trim()) throw new Error('--verify needs an acceptance command');
+    } else if (a === "--verify-attempts") {
+      args.verifyAttempts = Number(argv[++i]);
+      if (!Number.isSafeInteger(args.verifyAttempts) || args.verifyAttempts < 1) throw new Error('--verify-attempts must be a positive whole number');
     } else if (a === "--print" || a === "-p") args.print = argv[++i];
     else if (a === "--web") {
       args.web = true;
@@ -116,6 +124,8 @@ ${c.bold("Options:")}
                                outside it asks y/n. bypass: no approvals at all.
   --model <name>               pick a model by (partial) name
   --ctx <tokens>               force a context window (Ollama: sends num_ctx)
+  --verify <command>           headless acceptance gate; automatically repair failures
+  --verify-attempts <count>     maximum acceptance checks (default 6; requires --verify)
   --effort <level>             reasoning effort: off, low, medium, high, default
   --web [port]                 browser UI (default port ${DEFAULT_WEB_PORT}): a sidebar of your
                                workspaces and sessions, an embedded browser and
@@ -180,6 +190,8 @@ async function main(): Promise<void> {
     console.log(VERSION);
     return;
   }
+  if (args.verify && (!args.print || args.web)) throw new Error('--verify requires a headless -p run');
+  if (args.verifyAttempts !== undefined && !args.verify) throw new Error('--verify-attempts requires --verify');
   if (!fs.existsSync(args.workspace) || !fs.statSync(args.workspace).isDirectory()) {
     console.error(`Workspace folder does not exist: ${args.workspace}`);
     process.exit(1);
@@ -219,7 +231,8 @@ async function runHeadless(args: CliArgs): Promise<void> {
   const agentsMd = loadAgentsMd(args.workspace);
   if (agentsMd) ui.status(`· AGENTS.md loaded (${agentsMd.split("\n").length} lines)`);
   const systemPrompt = buildSystemPrompt({ workspace: args.workspace, mode, shellLabel: shell.label, agentsMd });
-  const agent = new Agent(provider, mode, systemPrompt, toolCtx, ctxMgr, bus, ui, false, 1000);
+  const agent = new Agent(provider, mode, systemPrompt, toolCtx, ctxMgr, bus, ui, false, 1000,
+    args.verify ? { command: args.verify, maxAttempts: args.verifyAttempts } : undefined);
   reportCompactions(bus, ui);
   process.on("exit", () => taskManager.killAll());
   installSignalCleanup(() => taskManager.killAll());
@@ -244,6 +257,7 @@ async function runHeadless(args: CliArgs): Promise<void> {
       `[stats] ${JSON.stringify({
         backend: chosen.backend,
         outcome: agent.outcome,
+        verification: agent.verificationResult ? { attempts: agent.verificationResult.attempts, passed: agent.verificationResult.passed } : null,
         model: chosen.id,
         durationMs: st.durationMs,
         modelCalls: st.modelCalls,

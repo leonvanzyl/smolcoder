@@ -23,6 +23,8 @@ export interface Msg {
   /** Set on a synthesized compaction-note message so a later compaction can
    * strip it instead of stacking notes. */
   compactNote?: boolean;
+  /** Harness-owned records of earlier tools, never a user turn or assistant answer. */
+  historyNote?: boolean;
 }
 
 export interface ToolSpec {
@@ -148,7 +150,7 @@ export function estimateReplayTokens(content: string, toolCalls: ToolCall[]): nu
  * is the biggest single saving on a long tool loop with a thinking model. */
 export function lastUserIndex(messages: Msg[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user" && !messages[i].compactNote) return i;
+    if (messages[i].role === "user" && !messages[i].compactNote && !messages[i].historyNote) return i;
   }
   return -1;
 }

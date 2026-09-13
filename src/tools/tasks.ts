@@ -5,7 +5,7 @@
 // visibility. All tasks are killed when smolcoder exits.
 
 import { ChildProcess, spawn } from "child_process";
-import { pickShell, killTree } from "./shell";
+import { pickShell, killTree, managedCommand } from "./shell";
 
 interface Task {
   id: string;
@@ -28,7 +28,7 @@ export class TaskManager {
   start(command: string): string {
     const shell = pickShell();
     const id = `t${++this.counter}`;
-    const proc = spawn(shell.exe, shell.argsFor(command), {
+    const proc = spawn(shell.exe, shell.argsFor(managedCommand(shell, command)), {
       cwd: this.cwd,
       env: process.env,
       detached: process.platform !== "win32",
@@ -95,6 +95,8 @@ export class TaskManager {
     if (task.status !== "running") return `Task ${taskId} already ${task.status}.`;
     task.status = "stopped";
     killTree(task.proc.pid!);
+    task.proc.stdout?.destroy();
+    task.proc.stderr?.destroy();
     return `Task ${taskId} stopped. (${task.command})`;
   }
 
@@ -138,6 +140,8 @@ export class TaskManager {
         t.status = "stopped";
         try {
           killTree(t.proc.pid!);
+          t.proc.stdout?.destroy();
+          t.proc.stderr?.destroy();
         } catch {
           /* ignore */
         }

@@ -1,0 +1,2 @@
+# Preserve exported evidence bytes so recorded hashes survive any checkout.
+docs/evidence/* -text

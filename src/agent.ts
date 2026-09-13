@@ -20,6 +20,15 @@ import { commandEscapesWorkspace } from "./sandbox";
 import { abortableDelay } from "./providers/transport";
 import { truncateMiddle } from "./util";
 import { createHash } from "crypto";
+import { runCommand } from "./tools/shell";
+import { failureSignature, projectVerification } from "./verification";
+
+/** Supplied by the caller, never generated or changed by a model tool. */
+export interface Verification {
+  command: string;
+  maxAttempts?: number;
+  source?: "project";
+}
 
 const TRANSIENT_ERROR = /fetch failed|econn|socket|network|timed?.?out|429|50[0-4]|stream ended|malformed JSON|stream error/i;
 const CONTEXT_ERROR = /context.{0,50}(exceed|overflow|full|length)|too (many|long).{0,30}tokens|prompt.{0,30}(too long|exceed)/i;
@@ -51,6 +60,11 @@ export class Agent {
   lastTurnStats: TurnStats | null = null;
   outcome: "idle" | "running" | "completed" | "cancelled" | "error" = "idle";
   lastError: string | null = null;
+  verificationResult: { attempts: number; passed: boolean; output: string } | null = null;
+  private verification?: Verification;
+  private progressFailure = "";
+  private sameVerificationFailures = 0;
+  private canRefreshVerification = false;
 
   constructor(
     public provider: Provider,
@@ -62,8 +76,11 @@ export class Agent {
     private ui: AgentUI,
     private interactive: boolean,
     /** Tool-call budget per user turn. Headless runs get a much larger one. */
-    private maxSteps = 30
+    private maxSteps = 30,
+    private callerVerification?: Verification
   ) {
+    this.verification = callerVerification;
+    if (callerVerification && (!callerVerification.command.trim() || (callerVerification.maxAttempts !== undefined && (!Number.isSafeInteger(callerVerification.maxAttempts) || callerVerification.maxAttempts < 1)))) throw new Error("Verification needs a command and a positive attempt limit.");
     this.messages = [{ role: "system", content: systemPrompt }];
     this.tools = buildToolSpecs(mode);
     this.ctxMgr.setReplayThinking(provider.replaysThinking !== false);
@@ -91,6 +108,10 @@ export class Agent {
     this.planNudged = false;
     this.outcome = "idle";
     this.lastError = null;
+    this.verificationResult = null;
+    this.verification = this.callerVerification;
+    this.progressFailure = "";
+    this.sameVerificationFailures = 0;
     // Session facts feed the compaction state note — stale ones from a
     // cleared conversation would assert work the new task never did.
     this.toolCtx.filesTouched.clear();
@@ -126,7 +147,78 @@ export class Agent {
   contextBudget() { return this.ctxMgr.budget(this.messages, this.tools); }
 
   private compactState() {
-    return { originalRequest: this.originalRequest, currentRequest: this.currentRequest, filesTouched: this.toolCtx.filesTouched, commandsRun: this.toolCtx.commandsRun, planLine: this.toolCtx.plan.compactLine() };
+    const failure = this.verificationResult && !this.verificationResult.passed
+      ? `\nLast acceptance failure (actual command output; resolve before completion):\n${truncateMiddle(this.verificationResult.output, 1800)}` : "";
+    const progress = this.progressFailure ? `\nLast project check failure (may predate subsequent edits):\n${truncateMiddle(this.progressFailure, 1800)}` : "";
+    return { originalRequest: this.originalRequest, currentRequest: this.currentRequest, verificationLine: this.verificationInstruction() + failure + progress, filesTouched: this.toolCtx.filesTouched, commandsRun: this.toolCtx.commandsRun, planLine: this.toolCtx.plan.compactLine() };
+  }
+
+  private async checkProgress(signal: AbortSignal): Promise<boolean> {
+    const command = projectVerification(this.toolCtx.workspace);
+    if (!command) return false;
+    this.ui.status("· checking implementation progress");
+    this.ui.toolCall("verification", { command });
+    this.ctxMgr.prepareBackground(this.messages, this.tools, this.provider, this.compactState());
+    const output = await runCommand(command, this.toolCtx.workspace, signal);
+    if (signal.aborted) throw abortError();
+    const passed = !output.startsWith("Error") && /\[exit code 0 in [^\]]+\]\s*$/.test(output);
+    this.progressFailure = passed ? "" : output;
+    this.ui.toolResult(output);
+    await this.bus.emit("post_progress_check", { command, passed, output });
+    this.messages.push({ role: "user", content: passed
+      ? `[Project checks passed: ${command}. Continue the remaining work in the original request.]`
+      : `[Progress checks failed. Fix the first concrete failure before further investigation. Continue the same task.\nCommand: ${command}\n${truncateMiddle(output, this.ctxMgr.toolResultCharLimit())}]` });
+    return true;
+  }
+
+  private verificationInstruction(): string {
+    return this.verification ? `\n${this.verification.source === "project" ? `Project checks (${this.verification.command})` : "Caller-owned acceptance checks"} must pass before completion. The harness runs them automatically and returns failures for repair. Use project files and returned failures to fix the application. Do not weaken or bypass acceptance checks.` : "";
+  }
+
+  private discoverVerification(wroteThisTurn: boolean): void {
+    if ((!this.verification || this.verification.source === "project") && wroteThisTurn && this.mode !== "ro") {
+      const command = projectVerification(this.toolCtx.workspace);
+      if (command) {
+        // Include scripts added during repairs, while retaining checks already
+        // required earlier in this turn (deleting one must not bypass it).
+        const commands = new Set([...(this.verification?.command.split(" && ") ?? []), ...command.split(" && ")]);
+        this.verification = { command: [...commands].join(" && "), source: "project" };
+      }
+    }
+  }
+
+  private async verify(signal: AbortSignal): Promise<boolean> {
+    if (this.mode === "ro") throw new Error("Acceptance commands are unavailable in read-only mode.");
+    const check = this.verification!;
+    const attempts = (this.verificationResult?.attempts ?? 0) + 1;
+    if (attempts > (check.maxAttempts ?? 6)) throw new Error("Acceptance attempt limit reached before the agent finished. The task is incomplete.");
+    this.ui.status(`· checking acceptance (${attempts}/${check.maxAttempts ?? 6})`);
+    this.ui.toolCall("verification", { command: check.command });
+    const output = await runCommand(check.command, this.toolCtx.workspace, signal);
+    if (signal.aborted) throw abortError();
+    const passed = !output.startsWith("Error") && /\[exit code 0 in [^\]]+\]\s*$/.test(output);
+    this.sameVerificationFailures = passed ? 0
+      : this.verificationResult && !this.verificationResult.passed && failureSignature(this.verificationResult.output) === failureSignature(output)
+        ? this.sameVerificationFailures + 1 : 1;
+    this.verificationResult = { attempts, passed, output };
+    this.ui.toolResult(output);
+    await this.bus.emit("post_verify", this.verificationResult);
+    if (passed) { this.ui.status("· acceptance checks passed"); return true; }
+    if (attempts >= (check.maxAttempts ?? 6)) throw new Error(`Acceptance checks still fail after ${attempts} attempts. The task is incomplete.\n${truncateMiddle(output, 1600)}`);
+    this.ui.status("· acceptance failed — continuing repairs automatically");
+    this.messages.push({ role: "user", content: `[Acceptance failed; the task is not complete. Repair the first failing behavior. The harness will rerun acceptance automatically. Do not skip tests or report success.${check.source === "project" ? `\nCommand: ${check.command}` : ""}\n${truncateMiddle(output, this.ctxMgr.toolResultCharLimit())}]` });
+    if (this.sameVerificationFailures === 2 && this.canRefreshVerification) {
+      this.ui.status("· same check failed again — refreshing working context");
+      // Repeating an unchanged hypothesis in a larger transcript is not
+      // progress. Keep the task, plan/checkpoint and actual failure, but drop
+      // old model-written narratives before a facts-only handover. Current
+      // files remain untouched and can be reread; no additional inference.
+      this.ctxMgr.cancelBackground(true);
+      this.messages = this.messages.filter(message => !message.compactNote);
+      this.ctxMgr.resetAnchor();
+      await this.compactNow(true, true);
+    }
+    return false;
   }
 
   async compactNow(force = true, deterministic = false): Promise<void> {
@@ -155,9 +247,16 @@ export class Agent {
     this.outcome = "running";
     this.ctxMgr.resetAnchor(); // prior-turn reasoning no longer travels on the wire
     this.lastError = null;
+    this.verificationResult = null;
+    this.verification = this.callerVerification;
+    this.progressFailure = "";
+    this.sameVerificationFailures = 0;
+    // Earlier user decisions may exist only in a previous turn's summary.
+    // Only a fresh conversation can safely discard every old narrative.
+    this.canRefreshVerification = !this.originalRequest && this.messages.length === 1;
     if (!this.originalRequest) this.originalRequest = userInput;
     this.currentRequest = userInput; // the task compaction must never lose
-    this.messages.push({ role: "user", content: userInput });
+    this.messages.push({ role: "user", content: userInput + this.verificationInstruction() });
     this.abort = new AbortController();
     const signal = this.abort.signal;
 
@@ -166,13 +265,25 @@ export class Agent {
     let steps = 0;
     let nudges = 0;
     let toolCallsThisTurn = 0;
+    let lastVerifiedToolCalls = -1;
+    const runAcceptance = async () => {
+      if (signal.aborted) throw abortError();
+      // A summary after a successful check does not need to run it twice.
+      if (this.verificationResult?.passed && lastVerifiedToolCalls === toolCallsThisTurn) return true;
+      const passed = await this.verify(signal);
+      lastVerifiedToolCalls = toolCallsThisTurn;
+      return passed;
+    };
     let sincePlanUpdate = 0;
     let repeatKey = "";
     let repeats = 0;
     let failedCalls = 0;
-    const repeatedReads = new Map<string, number>();
+    const repeatedReads = new Map<string, { count: number; receipt?: Msg }>();
     let readsSinceAction = 0;
-    let actionOnlyNext = false;
+    let actionOnlyCalls = 0;
+    let reasoningExhaustions = 0;
+    let wroteThisTurn = false;
+    let lastProgressCheck = 0;
     const stats: TurnStats = {
       modelCalls: 0,
       toolCalls: 0,
@@ -185,7 +296,7 @@ export class Agent {
     this.lastTurnStats = stats;
     try {
       await this.refreshLoadedWindow();
-      while (steps++ < this.maxSteps) {
+      agentLoop: while (steps++ < this.maxSteps) {
         // Context management before every request.
         await this.bus.emit("pre_request");
         if (this.ctxMgr.needsAttention(this.messages, this.tools)) {
@@ -197,8 +308,8 @@ export class Agent {
         this.ui.startSpinner("thinking");
         let result: ChatResult;
         try {
-          result = await this.chatWithRetry(signal, actionOnlyNext);
-          actionOnlyNext = false;
+          result = await this.chatWithRetry(signal, actionOnlyCalls > 0);
+          if (actionOnlyCalls > 0) actionOnlyCalls--;
         } finally {
           this.ui.stopSpinner();
         }
@@ -245,8 +356,9 @@ export class Agent {
             const noContent = !result.content.trim();
             const burnedByThinking = noContent && !!result.thinking?.trim();
             if (burnedByThinking) {
-              actionOnlyNext = true;
-              this.ui.status("· reasoning exhausted the reply budget — trying the next response with thinking off");
+              reasoningExhaustions++;
+              actionOnlyCalls = reasoningExhaustions === 1 ? 1 : Math.min(8, 2 ** Math.min(reasoningExhaustions, 3));
+              this.ui.status(`· reasoning exhausted the reply budget — ${actionOnlyCalls} response${actionOnlyCalls === 1 ? "" : "s"} with thinking off, then restore the selected effort`);
             }
             const nudgeText = burnedByThinking
               ? `[Your reasoning used the entire output limit (${this.provider.maxOutputTokens} tokens) and produced no answer. Do not re-derive everything — reply now with your next tool call or a brief answer.]`
@@ -282,6 +394,11 @@ export class Agent {
             continue;
           }
           if (result.truncated || !result.content.trim()) throw new Error("The model repeatedly returned an empty or cut-off reply. Progress is kept. Try /effort off, switch models with /models, or say continue.");
+          this.discoverVerification(wroteThisTurn);
+          if (this.verification && !(await runAcceptance())) {
+            repeatedReads.clear(); repeats = 0; failedCalls = 0; readsSinceAction = 0; lastProgressCheck = toolCallsThisTurn;
+            continue;
+          }
           completed = true;
           this.outcome = "completed";
           return; // plain answer — turn over
@@ -324,6 +441,7 @@ export class Agent {
             // Tier-0 context hygiene: a full overwrite makes every earlier
             // read of that file wrong. Stub them out right away.
             if ((call.name === "write_file" || call.name === "edit_file") && !output.startsWith("Error") && typeof call.args?.path === "string") {
+              wroteThisTurn = true;
               this.ctxMgr.evictStaleReads(this.messages, call.args.path);
               repeatedReads.clear();
               readsSinceAction = 0;
@@ -348,13 +466,19 @@ export class Agent {
           failedCalls = output.startsWith("Error") ? failedCalls + 1 : 0;
           if (repeats === 3 || failedCalls === 3) output += "\n[Repeated attempts are not making progress. Inspect the error or relevant file and change your approach before trying again.]";
           let readRepeats = 0;
+          let readKey = "";
           if (["read_file", "search", "list_files"].includes(call.name) && !output.startsWith("Error")) {
             if (++readsSinceAction % 12 === 0 && this.mode !== "ro") output += "\n[Investigation checkpoint: record the exact APIs, unresolved error and next small edit with plan checkpoint. Then make and verify that edit before inspecting more modules.]";
             // Match both the request and file/output contents: rereading an
             // edited file or a different line range is legitimate progress.
-            const key = createHash("sha256").update(call.name + JSON.stringify(call.args) + (observedOutput ?? output)).digest("hex");
-            readRepeats = (repeatedReads.get(key) ?? 0) + 1;
-            repeatedReads.set(key, readRepeats);
+            readKey = createHash("sha256").update(call.name + JSON.stringify(call.args) + (observedOutput ?? output)).digest("hex");
+            const previous = repeatedReads.get(readKey);
+            // Refetching evidence that WE removed is legitimate. Count only
+            // repeated observations the model can still see in its context.
+            const retained = previous?.receipt && !previous.receipt.evicted && this.messages.includes(previous.receipt);
+            readRepeats = retained ? previous!.count + 1 : 1;
+            if (!retained) repeats = 1; // the generic consecutive-call guard must agree
+            repeatedReads.set(readKey, { count: readRepeats });
             if (readRepeats >= 3) output += "\n[This unchanged result has already been read repeatedly. Do not restart the same reads after compaction. Use a different small line range or narrow search if needed, then implement the next step.]";
           }
           const outputCap = this.ctxMgr.toolResultCharLimit();
@@ -366,7 +490,7 @@ export class Agent {
           if (
             call.name === "plan" &&
             !output.startsWith("Error") &&
-            ["set", "done", "add"].includes(String(call.args?.action))
+            ["set", "done", "add"].includes(String(call.args?.action ?? (typeof call.args?.steps === "string" ? "set" : undefined)))
           ) {
             this.ui.planUpdated(this.toolCtx.plan);
           } else {
@@ -378,13 +502,56 @@ export class Agent {
             toolCallId: call.id,
             toolName: call.name,
           });
+          if (readKey) repeatedReads.get(readKey)!.receipt = this.messages[this.messages.length - 1];
           await this.bus.emit("post_tool", { name: call.name, args: call.args });
           await this.bus.emit("context_update");
           // A cancel during tool execution ends the turn now, with the
           // (cancelled) result already recorded so the transcript stays valid.
           if (signal.aborted) throw abortError();
+          // Individual rereads after eviction are legitimate, but a long
+          // investigation with no edit must still return to executable evidence.
+          // Preserve this counter across compaction; only an edit or check
+          // resets it. Read-only investigations never execute commands.
+          const needsEvidence = readRepeats >= 5 || repeats >= 6 || failedCalls >= 6 ||
+            (wroteThisTurn && readsSinceAction >= 24 && this.mode !== "ro");
+          if (needsEvidence) this.discoverVerification(wroteThisTurn);
+          if (this.verification && needsEvidence) {
+            this.repairTranscript("[Not executed: the harness switched to executable checks after repeated attempts.]");
+            this.ctxMgr.resetAnchor();
+            // During implementation, known failing project checks are already
+            // the actionable evidence. Tool-recovery checks must not spend the
+            // caller's final acceptance budget before acceptance has started.
+            if (!this.verificationResult && this.progressFailure && await this.checkProgress(signal)) {
+              repeatedReads.clear(); repeats = 0; failedCalls = 0; readsSinceAction = 0; lastProgressCheck = toolCallsThisTurn;
+              continue agentLoop;
+            }
+            if (!(await runAcceptance())) {
+              repeatedReads.clear(); repeats = 0; failedCalls = 0; readsSinceAction = 0; lastProgressCheck = toolCallsThisTurn;
+              continue agentLoop;
+            }
+            // Passing acceptance does not authorize dropping the remaining
+            // task: ask for a final requirements review before completion.
+            this.messages.push({role:"user",content:"[Acceptance passed. Review the original request, finish any remaining work, and summarize the verified result.]"});
+            repeatedReads.clear(); repeats = 0; failedCalls = 0; readsSinceAction = 0; lastProgressCheck = toolCallsThisTurn;
+            continue agentLoop;
+          }
           if (readRepeats >= 5) throw new Error("Paused after repeatedly reading the same unchanged data without an edit. Progress is kept. Ask for a specific next change, read a different range, or use a larger context window.");
           if (repeats >= 6 || failedCalls >= 6) throw new Error("Paused after repeated tool attempts made no progress. Progress is kept; inspect the error, change the request or model, then continue.");
+        }
+        // A model can cycle through different reads and small API edits forever
+        // without triggering an identical-call guard. Periodic executable
+        // feedback grounds that investigation before a proposed completion.
+        if (wroteThisTurn && this.mode !== "ro" && toolCallsThisTurn - lastProgressCheck >= 24) {
+          lastProgressCheck = toolCallsThisTurn;
+          this.discoverVerification(wroteThisTurn);
+          if (this.verification && this.verificationResult) {
+            // Once acceptance has found a real failure, keep checking THAT
+            // behavior. Passing a weaker build check cannot resolve it.
+            if (await runAcceptance()) this.messages.push({role:"user",content:"[Acceptance checks passed. Finish your response with the verified result.]"});
+            readsSinceAction = 0; repeatedReads.clear(); repeats = 0; failedCalls = 0;
+          } else if (await this.checkProgress(signal)) {
+            readsSinceAction = 0; repeatedReads.clear(); repeats = 0; failedCalls = 0;
+          }
         }
       }
       throw new Error(`Paused after ${this.maxSteps} model steps. Progress is kept. Say "continue" to keep going.`);
