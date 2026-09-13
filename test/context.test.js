@@ -5,7 +5,67 @@ const assert = require("node:assert/strict");
 const { ContextManager, renderForDigest } = require("../dist/context");
 const { describeStats } = require("../dist/agent");
 
+test("compaction keeps a fresh tool result that fits the hard budget above the soft target", async () => {
+  const cm = new ContextManager(4096, 1024);
+  const latest = 'critical '.repeat(800);
+  const input = [{ role: 'system', content: 'sys '.repeat(600) },
+    { role: 'user', content: 'build' },
+    { role: 'assistant', content: 'old '.repeat(2000) },
+    { role: 'assistant', content: '', toolCalls: [{ id: 'fresh', name: 'read_file', args: { path: 'module.js' } }] },
+    { role: 'tool', content: latest, toolCallId: 'fresh', toolName: 'read_file' }];
+  const result = await cm.manage(input, [], { chat: async () => { throw Error('no inference'); } },
+    { originalRequest: 'build', filesTouched: new Set(), commandsRun: [] }, { force: true, deterministic: true });
+  assert.ok(result.report.after > cm.usableWindow() * 0.8);
+  cm.assertFits(result.messages, []);
+  assert.equal(result.messages.at(-1).content, latest);
+  assert.equal(result.messages.at(-2).toolCalls[0].id, 'fresh');
+  assert.equal(cm.needsAttention(result.messages, []), false, 'do not summarize away the same result again');
+});
+
 const tools = [{ name: "t", description: "d", parameters: { type: "object", properties: {} } }];
+
+test('context pressure drops older reasoning before evicting recent source', async () => {
+  const cm = new ContextManager(8192, 2048);
+  const input = [{role:'system',content:'sys'}, {role:'user',content:'repair'},
+    {...readCall('a','a.js'),thinking:'old analysis '.repeat(1700)}, toolResult('a','read_file','export function actualAPI() {}'),
+    {...readCall('b','b.js'),thinking:'next edit'}, toolResult('b','read_file','import { wrongAPI } from "./a.js"')];
+  const result = await cm.manage(input,[],{chat:async()=>{throw Error('unnecessary summary');}},
+    {originalRequest:'repair',filesTouched:new Set(),commandsRun:[]});
+  assert.equal(result.report.action,'evicted');
+  assert.equal(result.messages[2].thinking,undefined);
+  assert.equal(result.messages[4].thinking,'next edit');
+  assert.match(result.messages[3].content,/actualAPI/);
+  assert.match(result.messages[5].content,/wrongAPI/);
+});
+
+test("old successful write payloads are evicted without summarizing or changing the newest tool group", async () => {
+  const cm = new ContextManager(4096,1024);
+  const body = 'saved code '.repeat(650);
+  const originalCall = {id:'w',name:'write_file',args:{path:'a.js',content:body}};
+  const input = [{role:'system',content:'sys'},{role:'user',content:'build'},
+    {role:'assistant',content:'',toolCalls:[originalCall]},
+    {role:'tool',toolCallId:'w',content:'Created a.js (100 lines).'},
+    {role:'assistant',content:'',toolCalls:[{id:'r',name:'read_file',args:{path:'b.js'}}]},
+    {role:'tool',toolCallId:'r',content:'fresh reference '.repeat(200)}];
+  const result = await cm.manage(input,[],{chat:async()=>{throw Error('must not summarize');}},
+    {originalRequest:'build',filesTouched:new Set(['a.js']),commandsRun:[]});
+  assert.equal(result.report.action,'evicted');
+  assert.match(result.messages[2].toolCalls[0].args.content,/already applied to a.js/);
+  assert.equal(originalCall.args.content,body,'UI/audit references keep their original call');
+  assert.equal(result.messages.at(-1).content,'fresh reference '.repeat(200));
+});
+
+test("handover command records retain recent outcomes without copying whole inline programs", async () => {
+  const cm = new ContextManager(8192,2048);
+  const commands = Array.from({length:9},(_,i)=>`node -e "${'inline code '.repeat(600)}" check-${i} -> [exit code ${i%2}]`);
+  const result = await cm.manage([{role:'system',content:'sys'},{role:'user',content:'build'}],[],{},
+    {originalRequest:'build',filesTouched:new Set(),commandsRun:commands}, {force:true,deterministic:true});
+  const note = result.messages[1].content;
+  assert.match(note,/check-8 -> \[exit code 0\]/);
+  assert.match(note,/check-7 -> \[exit code 1\]/);
+  assert.doesNotMatch(note,/check-0/);
+  assert.ok(note.length < 1600);
+});
 
 function readCall(id, path) {
   return { role: "assistant", content: "", toolCalls: [{ id, name: "read_file", args: { path } }] };
@@ -97,7 +157,7 @@ test("manage: tier 1 evicts old tool output, summarizer runs with thinking off",
   assert.equal(r2.messages[0].content, "sys");
   assert.equal(r2.messages[1].compactNote, true);
   assert.match(r2.messages[1].content, /Hand-over notes/);
-  assert.match(r2.messages[1].content, /Commands run so far: npm test/);
+  assert.match(r2.messages[1].content, /Recent commands: npm test/);
   assert.match(r2.messages[1].content, /Current request \(what you are working on NOW\): more/);
   // A second compaction must not stack notes.
   const r3 = await cm2.manage([r2.messages[0], r2.messages[1], ...msgs2.slice(1)], tools, provider, {

@@ -1,8 +1,8 @@
-// Stylesheet for the web page. One dark, monospace theme shared with the TUI.
+// Compact workspace chrome, with monospace reserved for code and commands.
 
 export const STYLES = String.raw`
   :root {
-    --bg: #0b0d0e; --fg: #d6dbde; --dim: #6b7480; --gray: #4a525c;
+    --bg: #111416; --fg: #e1e5e7; --dim: #a0a8ae; --gray: #79838b;
     --accent: #35bfd4; --yellow: #e0af68; --red: #f7768e; --green: #9ece6a;
     --magenta: #bb9af7; --box: #14181a; --sel: #1a7f94; --line: #232a2f; --side: #0e1113;
   }
@@ -20,7 +20,7 @@ export const STYLES = String.raw`
   html, body { height: 100%; }
   body {
     margin: 0; background: var(--bg); color: var(--fg); display: flex; overflow: hidden;
-    font: 14px/1.5 ui-monospace, "Cascadia Code", Consolas, monospace;
+    font: 14px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   button { font: inherit; }
   a { color: var(--accent); }
@@ -217,4 +217,81 @@ export const STYLES = String.raw`
   .fsitem.up { color: var(--dim); }
   .dlgfoot { display: flex; align-items: center; gap: 14px; padding: 10px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--dim); }
   .dlgfoot label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+  /* The working surface: quieter navigation and a single compact control row. */
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  #side { width: 248px; }
+  .sidehdr { padding: 22px 18px 18px; }
+  .brand { font-size: 18px; letter-spacing: -.6px; }
+  .brand .coder { color: var(--fg); }
+  #openfolder { margin: 0 14px 20px; padding: 8px 10px; background: transparent; }
+  .wshdr { padding: 8px; }
+  .wsname { max-width: 78%; font-weight: 600; }
+  .sess { padding: 8px 8px 8px 12px; border-radius: 6px; }
+  .sess.active { background: #20292d; }
+  .stitle.untitled { font-style: normal; }
+  .stime { display: none; }
+  .sess:hover .stime { display: inline; }
+  .sidefoot { align-items: center; padding: 12px 18px; }
+  #top { min-height: 60px; padding: 12px 20px; }
+  #crumb .ws { font-weight: 500; color: var(--dim); }
+  #crumb .title { color: var(--fg); font-weight: 600; }
+  #logs, #busywrap { max-width: 860px; padding-left: 32px; padding-right: 32px; }
+  #welcome { max-width: 660px; padding-top: clamp(48px, 16vh, 180px); }
+  #welcome h1 { font-size: clamp(26px, 3vw, 38px); letter-spacing: -1.2px; font-weight: 500; margin: 16px 0 24px; }
+  .welcome-mark { font-size: 34px; color: var(--accent); font-weight: 700; }
+  .primary { padding: 9px 18px; border-radius: 7px; }
+  .recent-label { font-size: 12px; margin-top: 30px; margin-bottom: 6px; color: var(--gray); }
+  .wsbtn { width: 100%; padding: 9px 0; }
+  .wsbtn .dim { float: right; }
+  .log:empty::before { content: "What are we building?"; display: block; margin-top: 18vh; color: var(--dim); font-size: 26px; letter-spacing: -.7px; }
+  .user { border: 1px solid var(--line); border-radius: 10px; background: #1b2125; padding: 14px 18px; margin: 24px 0; font-weight: 400; }
+  .md { line-height: 1.8; }
+  .md p { margin: 12px 0; }
+  .md code, .md pre, .tool, .tabbody.term, .plan { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12.5px; }
+  .tool { margin: 3px 0; border-radius: 5px; }
+  .tool summary { cursor: pointer; display: flex; align-items: baseline; gap: 10px; padding: 4px 0; list-style: none; }
+  .tool summary::before { content: "›"; color: var(--gray); }
+  .tool[open] summary::before { content: "⌄"; }
+  .tool .name { color: var(--dim); font-weight: 400; white-space: nowrap; }
+  .tool .tool-args { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; color: var(--gray); }
+  .tool.finished .name { color: #b9c6c7; }
+  .tool.failed .name, .tool.failed summary::before { color: var(--red); }
+  .result { margin: 4px 0 12px 16px; border: 1px solid var(--line); border-radius: 6px; background: #0e1214; padding: 12px; max-height: 280px; overflow: auto; white-space: pre-wrap; }
+  .plan { border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; background: transparent; line-height: 1.9; }
+  .thought, .turnend { font-size: 12px; }
+  .turnend { margin-top: 20px; margin-bottom: 20px; }
+  #bottom { padding: 16px 32px 24px; }
+  #bottom .inner { max-width: 796px; }
+  #inputbox { border: 1px solid #354149; border-radius: 12px; padding: 14px 16px 10px; background: #1b2125; box-shadow: 0 8px 30px #0002; }
+  #inputbox:focus-within { border-color: #55737b; }
+  #input { min-height: 50px; line-height: 1.6; }
+  #input::placeholder { color: var(--gray); }
+  #actionbtn { border-radius: 6px; padding: 5px 12px; color: var(--fg); }
+  #status { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 11px; margin-top: 12px; }
+  .statusbtn { background: transparent; color: var(--dim); border: 0; border-radius: 4px; cursor: pointer; padding: 3px 4px; font: inherit; }
+  .statusbtn:hover { background: #293138; color: var(--fg); }
+  .modelpick { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #status .mode { font-weight: 500; }
+  #status .eff { color: var(--dim); }
+  .context-chip { display: flex; align-items: center; gap: 6px; }
+  .context-chip.pressure { color: var(--yellow); }
+  meter { width: 35px; height: 8px; appearance: none; border: none; background: #364047; border-radius: 9px; overflow: hidden; }
+  meter::-webkit-meter-bar { background: #364047; border: none; }
+  meter::-webkit-meter-optimum-value { background: #7dabad; }
+  meter::-moz-meter-bar { background: #7dabad; }
+  .task-chip, .plan-chip { white-space: nowrap; }
+  #busywrap { padding-top: 8px; }
+  #busy { font-size: 12px; }
+  #panel { background: #101416; }
+  .shortcut-list { line-height: 2; padding: 16px 24px; }
+  @media (max-width: 600px) {
+    #top { min-height: 48px; padding: 8px 12px; }
+    #logs, #busywrap { padding-left: 16px; padding-right: 16px; }
+    #bottom { padding: 12px; }
+    #welcome { padding: 48px 24px; }
+    #panel { position: absolute; inset: 48px 0 0; width: 100% !important; max-width: 100%; z-index: 15; }
+    .modelpick { max-width: 150px; }
+    .wshdr .iconbtn, .sess .iconbtn { visibility: visible; }
+  }
 `;

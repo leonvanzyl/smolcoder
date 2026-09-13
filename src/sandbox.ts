@@ -25,7 +25,11 @@ export function resolveInWorkspace(root: string, userPath: string): string {
 
   // realpath the deepest existing ancestor to defeat symlink escapes
   let existing = abs;
-  while (!fs.existsSync(existing)) {
+  for (;;) {
+    try { fs.lstatSync(existing); break; }
+    catch (err: any) {
+      if (err?.code !== "ENOENT" && err?.code !== "ENOTDIR") throw new SandboxError(`cannot inspect path "${userPath}".`);
+    }
     const parent = path.dirname(existing);
     if (parent === existing) break;
     existing = parent;

@@ -72,7 +72,13 @@ function parseArgs(argv: string[]): CliArgs {
       }
     } else if (a === "--bypass" || a === "--bypass-permissions" || a === "--yolo") args.mode = "bypass";
     else if (a === "--model") args.model = argv[++i];
-    else if (a === "--ctx") args.ctx = Number(argv[++i]) || undefined;
+    else if (a === "--ctx") {
+      args.ctx = Number(argv[++i]);
+      if (!Number.isSafeInteger(args.ctx) || args.ctx < 1024) {
+        console.error("--ctx must be a whole number of at least 1024 tokens.");
+        process.exit(1);
+      }
+    }
     else if (a === "--effort") {
       const v = argv[++i];
       if (v === "off" || v === "low" || v === "medium" || v === "high") args.effort = v;
@@ -154,27 +160,8 @@ function installSignalCleanup(cleanup: () => void): void {
   process.on("SIGINT", () => run(130));
 }
 
-const LOGO_ROWS = [
-  "███████╗ ███╗   ███╗  ██████╗  ██╗     ",
-  "██╔════╝ ████╗ ████║ ██╔═══██╗ ██║     ",
-  "███████╗ ██╔████╔██║ ██║   ██║ ██║     ",
-  "╚════██║ ██║╚██╔╝██║ ██║   ██║ ██║     ",
-  "███████║ ██║ ╚═╝ ██║ ╚██████╔╝ ███████╗",
-  "╚══════╝ ╚═╝     ╚═╝  ╚═════╝  ╚══════╝",
-];
-
 function printLogo(): void {
-  const cols = process.stdout.columns || 80;
-  if (cols >= 46) {
-    console.log();
-    LOGO_ROWS.forEach((row, i) => {
-      const tail = i === LOGO_ROWS.length - 1 ? "  " + c.dim(c.bold("coder") + " v" + VERSION) : "";
-      console.log(" " + c.cyan(row) + tail);
-    });
-    console.log();
-  } else {
-    console.log(`${c.bold("smol")}${c.dim(c.bold("coder"))} ${c.dim("v" + VERSION)}`);
-  }
+  console.log(`${c.cyan(c.bold("smolcoder"))} ${c.dim("v" + VERSION)}\n`);
 }
 
 function prefsOf(args: CliArgs): SessionPrefs {
@@ -245,6 +232,7 @@ async function runHeadless(args: CliArgs): Promise<void> {
   if (advice) ui.warn(`  ${advice}`);
   try {
     await agent.runTurn(args.print!);
+    if (agent.outcome !== "completed") process.exitCode = 1;
   } catch (err: any) {
     ui.error(`\n${err?.message ?? err}`);
     process.exitCode = 1;
@@ -255,6 +243,7 @@ async function runHeadless(args: CliArgs): Promise<void> {
     process.stderr.write(
       `[stats] ${JSON.stringify({
         backend: chosen.backend,
+        outcome: agent.outcome,
         model: chosen.id,
         durationMs: st.durationMs,
         modelCalls: st.modelCalls,

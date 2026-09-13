@@ -7,7 +7,7 @@
 // the agent runs, output streams plainly and scrolls naturally.
 
 import { Plan } from "../plan";
-import { renderPlan, SelectOption, SessionUI, SlashCommand, summarizeArgs } from "../ui";
+import { SelectOption, SessionUI, SlashCommand, summarizeArgs } from "../ui";
 import { c } from "../util";
 import { LineEditor, layoutBuffer } from "./editor";
 import { Key, KeyDecoder } from "./keys";
@@ -61,7 +61,7 @@ export class Tui implements SessionUI {
   onModeCycle: (() => void) | null = null;
   onCancel: (() => void) | null = null;
   onExit: (() => void) | null = null;
-  placeholder = 'Ask anything… "add a dark mode toggle"';
+  placeholder = "Describe a change…   / commands";
   /** Shown dim on the left of the hint row (the workspace path). */
   hintLeft = "";
 
@@ -406,7 +406,6 @@ export class Tui implements SessionUI {
         );
       }
       const inputW = w - 2;
-      lines.push(boxRow("", w)); // top padding
       if (this.ed.buffer.length === 0) {
         cursorRow = lines.length;
         cursorCol = 2;
@@ -417,19 +416,9 @@ export class Tui implements SessionUI {
         cursorCol = 2 + lay.curCol;
         for (const row of lay.rows) lines.push(boxRow(row, w));
       }
-      lines.push(boxRow("", w)); // spacer
       lines.push(boxRow(this.getStatus(), w));
-      lines.push(boxRow("", w)); // bottom padding
       if (this.notice) {
         lines.push(" " + c.yellow(this.notice));
-      } else {
-        const keys = "/ commands · shift+tab mode";
-        const left = this.hintLeft
-          ? this.hintLeft.length + keys.length + 5 > w
-            ? "…" + this.hintLeft.slice(-(w - keys.length - 6))
-            : this.hintLeft
-          : "";
-        lines.push(c.dim(` ${left}${left ? "   " : ""}${keys}`));
       }
     } else if (this.state === "select" && this.sel) {
       const s = this.sel;
@@ -562,8 +551,7 @@ export class Tui implements SessionUI {
   private endTicker(): void {
     if (!this.tickerOn) return;
     this.tickerOn = false;
-    const secs = ((Date.now() - this.thinkStart) / 1000).toFixed(1);
-    process.stdout.write("\r\x1b[2K" + c.gray(`✦ thought for ${secs}s`) + "\n");
+    process.stdout.write("\r\x1b[2K");
     this.thinkBuf = "";
     this.atLineStart = true;
   }
@@ -583,7 +571,13 @@ export class Tui implements SessionUI {
     const label = isError
       ? c.red(firstLine.slice(0, 120))
       : c.dim(firstLine.slice(0, 100) + (lineCount > 1 ? ` (+${lineCount - 1} lines)` : ""));
-    this.out(`  ${isError ? c.red("✗") : c.green("✓")} ${label}\n`);
+    if (isError) this.out(`  ${c.red("✗")} ${label}\n`);
+    else if (result.includes("Warning:")) this.out(`  ${c.yellow("! " + result.slice(result.indexOf("Warning:")).split("\n")[0])}\n`);
+  }
+
+  resetResponse(): void {
+    this.ensureLine();
+    this.out(c.dim("[Interrupted response discarded]\n"));
   }
 
   println(s = ""): void {
@@ -609,7 +603,8 @@ export class Tui implements SessionUI {
     this.stopSpinner();
     this.ensureLine();
     this.lastKind = null;
-    this.out(renderPlan(plan) + "\n");
+    const current = plan.currentIndex >= 0 ? plan.steps[plan.currentIndex].text : "complete";
+    this.out(c.dim(`  Plan ${plan.doneCount}/${plan.steps.length} · ${current}`) + "\n");
     this.atLineStart = true;
   }
 

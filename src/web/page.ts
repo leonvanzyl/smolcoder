@@ -5,13 +5,6 @@
 import { CLIENT_JS } from "./client";
 import { STYLES } from "./styles";
 
-const LOGO = `███████╗ ███╗   ███╗  ██████╗  ██╗
-██╔════╝ ████╗ ████║ ██╔═══██╗ ██║
-███████╗ ██╔████╔██║ ██║   ██║ ██║
-╚════██║ ██║╚██╔╝██║ ██║   ██║ ██║
-███████║ ██║ ╚═╝ ██║ ╚██████╔╝ ███████╗
-╚══════╝ ╚═╝     ╚═╝  ╚═════╝  ╚══════╝`;
-
 const FAVICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b0d0e'/%3E%3Ctext x='16' y='23' font-size='19' font-family='monospace' font-weight='700' text-anchor='middle' fill='%2335bfd4'%3ES%3C/text%3E%3C/svg%3E";
 
@@ -21,7 +14,7 @@ const ICON_TERMINAL =
   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
 
 export const PAGE_HTML = `<!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -38,7 +31,7 @@ export const PAGE_HTML = `<!doctype html>
   </div>
   <button id="openfolder" class="ghost">+ Open folder…</button>
   <div id="wslist"></div>
-  <div class="sidefoot"><span id="ver"></span><span class="grow"></span><span title="keyboard: ctrl+b sidebar · ctrl+\` terminal · shift+tab mode · esc cancel">keys ?</span></div>
+  <div class="sidefoot"><span id="ver"></span><span class="grow"></span><button class="iconbtn" id="keys" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">?</button></div>
 </aside>
 <div id="main">
   <div id="top">
@@ -49,9 +42,9 @@ export const PAGE_HTML = `<!doctype html>
   </div>
   <div id="logwrap">
     <div id="welcome" hidden>
-      <div id="logo">${LOGO}   <span class="coder">coder — web</span></div>
-      <p>Pick a session in the sidebar, or open a folder to start one. Each workspace keeps its own sessions; you can run several at once and switch between them while they work.</p>
-      <div class="row"><button class="primary" id="welcomeopen">Open a folder…</button></div>
+      <div class="welcome-mark" aria-hidden="true">s.</div>
+      <h1>What are we building?</h1>
+      <div class="row"><button class="primary" id="welcomeopen">Open a folder</button></div>
       <div id="recent"></div>
     </div>
     <div id="logs"></div>
@@ -61,12 +54,12 @@ export const PAGE_HTML = `<!doctype html>
     <div id="menu"></div>
     <div id="inputbox">
       <div class="inputrow">
-        <textarea id="input" rows="1" placeholder='Ask anything… "/" for commands'></textarea>
+        <textarea id="input" aria-label="Message" rows="2" placeholder="Describe a change…" title="Enter to send · Shift+Enter for a new line · / for commands"></textarea>
         <button id="actionbtn" title="send (enter)">send</button>
       </div>
       <div id="status">connecting…</div>
     </div>
-    <div id="hintrow"><span id="ws"></span> &nbsp; / commands · shift+tab mode · enter send · esc cancel · ctrl+b sidebar · ctrl+\` terminal</div>
+    <span id="ws" hidden></span>
   </div></div>
 </div>
 <div id="panel" hidden>
@@ -76,7 +69,7 @@ export const PAGE_HTML = `<!doctype html>
 </div>
 <div id="modal" hidden>
   <div class="dlg">
-    <div class="dlghdr">Open a folder as a workspace<span class="grow"></span><button class="iconbtn" id="fsclose" title="close">×</button></div>
+    <div class="dlghdr">Open folder<span class="grow"></span><button class="iconbtn" id="fsclose" title="close">×</button></div>
     <div class="pathrow"><input id="fspath" spellcheck="false" placeholder="type or paste a path"><button class="ghost" id="fsgo">go</button></div>
     <div id="fsroots"></div>
     <div id="fslist"></div>
@@ -84,7 +77,6 @@ export const PAGE_HTML = `<!doctype html>
       <button class="primary" id="fsopen">Open this folder</button>
       <label><input type="checkbox" id="fsstart" checked> start a session</label>
       <span class="grow"></span>
-      <span>✦ looks like a project · double-click a folder to open it</span>
     </div>
   </div>
 </div>

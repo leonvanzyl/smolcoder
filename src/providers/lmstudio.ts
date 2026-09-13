@@ -25,6 +25,9 @@ import {
   ToolCall,
   ToolSpec,
 } from "./types";
+import { responseLines, streamJson, withDeadline } from "./transport";
+import { scheduleInference } from "./scheduler";
+import { tryFetchJson } from "../util";
 
 export interface ReasoningInfo {
   /** Levels the loaded model supports, as reported by LM Studio. */
@@ -88,6 +91,7 @@ export function mapEffort(effort: Effort | null, info: ReasoningInfo | undefined
 }
 
 export class LmStudioProvider implements Provider {
+  readonly replaysThinking = false;
   readonly label: string;
   readonly maxOutputTokens: number;
   private effort: Effort | null = null;
@@ -109,6 +113,16 @@ export class LmStudioProvider implements Provider {
     this.effortUnsupported = false;
   }
 
+  async loadedContextWindow(): Promise<number | undefined> {
+    const data = await tryFetchJson(`${this.baseUrl}/api/v1/models`, undefined, 1500);
+    for (const model of data?.models ?? []) {
+      const instances = model.loaded_instances ?? [];
+      const instance = instances.find((m: any) => m.id === this.modelId) ?? (model.key === this.modelId ? instances[0] : undefined);
+      if (typeof instance?.config?.context_length === "number") return instance.config.context_length;
+    }
+    return undefined;
+  }
+
   effortLabel(): string | null {
     if (this.effortUnsupported) return this.effort ? `${this.effort} (ignored by this server)` : null;
     if (this.effort === null) {
@@ -120,6 +134,10 @@ export class LmStudioProvider implements Provider {
   }
 
   async chat(messages: Msg[], tools: ToolSpec[], opts: ChatOptions = {}): Promise<ChatResult> {
+    return scheduleInference(this.baseUrl, opts, (scheduled) => this.chatScheduled(messages, tools, scheduled));
+  }
+
+  private async chatScheduled(messages: Msg[], tools: ToolSpec[], opts: ChatOptions): Promise<ChatResult> {
     const effort = opts.effortOverride ?? this.effort;
     let wireMessages = messages;
     const base: any = {
@@ -189,6 +207,10 @@ export class LmStudioProvider implements Provider {
   }
 
   private async request(body: any, opts: ChatOptions, started?: { streaming: boolean }): Promise<ChatResult> {
+    return withDeadline(opts, (signal, activity) => this.readResponse(body, { ...opts, signal }, activity, started));
+  }
+
+  private async readResponse(body: any, opts: ChatOptions, activity: () => void, started?: { streaming: boolean }): Promise<ChatResult> {
     const t0 = Date.now();
     const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: "POST",
@@ -203,6 +225,7 @@ export class LmStudioProvider implements Provider {
 
     if (body.stream === false) {
       const data: any = await res.json();
+      if (data.error || !data.choices?.[0]?.message) throw new Error(`LM Studio returned an invalid completion: ${data.error?.message ?? "missing message"}`);
       const msg = data.choices?.[0]?.message ?? {};
       const toolCalls: ToolCall[] = (msg.tool_calls ?? []).map((tc: any) => ({
         id: tc.id || nextCallId(),
@@ -231,6 +254,7 @@ export class LmStudioProvider implements Provider {
     let promptTokens: number | undefined;
     let completionTokens: number | undefined;
     let truncated = false;
+    let finished = false;
     let firstTokAt = 0;
     let lastTokAt = 0;
 
@@ -239,18 +263,14 @@ export class LmStudioProvider implements Provider {
       if (!line.startsWith("data:")) return;
       const payload = line.slice(5).trim();
       if (payload === "[DONE]") return;
-      let chunk: any;
-      try {
-        chunk = JSON.parse(payload);
-      } catch {
-        return;
-      }
+      const chunk = streamJson(payload);
       if (started) started.streaming = true; // committed — no safe re-request now
       if (chunk.usage) {
         promptTokens = chunk.usage.prompt_tokens ?? promptTokens;
         completionTokens = chunk.usage.completion_tokens ?? completionTokens;
       }
       if (chunk.choices?.[0]?.finish_reason === "length") truncated = true;
+      if (chunk.choices?.[0]?.finish_reason) finished = true;
       const delta = chunk.choices?.[0]?.delta;
       if (!delta) return;
       const reasoning = delta.reasoning_content ?? delta.reasoning;
@@ -283,23 +303,8 @@ export class LmStudioProvider implements Provider {
       }
     };
 
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      let nl: number;
-      while ((nl = buffer.indexOf("\n")) >= 0) {
-        const line = buffer.slice(0, nl);
-        buffer = buffer.slice(nl + 1);
-        handleLine(line);
-      }
-    }
-    // Flush a final line with no trailing newline (may carry usage /
-    // finish_reason:"length" — losing it silently drops the anchor / truncation).
-    if (buffer.trim()) handleLine(buffer);
+    for await (const line of responseLines(res, activity)) handleLine(line);
+    if (!finished) throw new Error("LM Studio stream ended before completion; the response was discarded");
 
     const toolCalls: ToolCall[] = [...partials.entries()]
       .sort((a, b) => a[0] - b[0])

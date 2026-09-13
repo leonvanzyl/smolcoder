@@ -17,8 +17,12 @@ import {
 import { AgentUI } from "./ui";
 import { c, fmtDuration } from "./util";
 import { commandEscapesWorkspace } from "./sandbox";
+import { abortableDelay } from "./providers/transport";
+import { truncateMiddle } from "./util";
+import { createHash } from "crypto";
 
-const TRANSIENT_ERROR = /fetch failed|econn|socket|network|timed?.?out|50[0234]/i;
+const TRANSIENT_ERROR = /fetch failed|econn|socket|network|timed?.?out|429|50[0-4]|stream ended|malformed JSON|stream error/i;
+const CONTEXT_ERROR = /context.{0,50}(exceed|overflow|full|length)|too (many|long).{0,30}tokens|prompt.{0,30}(too long|exceed)/i;
 
 /** Shell metacharacters that let one "allowed program" smuggle in others.
  * Auto-approval via always-allow only applies to commands without them. */
@@ -45,6 +49,8 @@ export class Agent {
   /** Speed/size figures for the last completed turn (for the turn-end label
    * and headless stats). */
   lastTurnStats: TurnStats | null = null;
+  outcome: "idle" | "running" | "completed" | "cancelled" | "error" = "idle";
+  lastError: string | null = null;
 
   constructor(
     public provider: Provider,
@@ -60,23 +66,31 @@ export class Agent {
   ) {
     this.messages = [{ role: "system", content: systemPrompt }];
     this.tools = buildToolSpecs(mode);
+    this.ctxMgr.setReplayThinking(provider.replaysThinking !== false);
   }
 
   setMode(mode: Mode, systemPrompt: string): void {
+    this.ctxMgr.cancelBackground(true);
+    this.ctxMgr.resetAnchor();
     this.mode = mode;
     this.tools = buildToolSpecs(mode);
     this.messages[0] = { role: "system", content: systemPrompt };
   }
 
   setProvider(provider: Provider): void {
+    this.ctxMgr.cancelBackground(true);
     this.provider = provider;
+    this.ctxMgr.setReplayThinking(provider.replaysThinking !== false);
   }
 
   resetTranscript(): void {
+    this.ctxMgr.cancelBackground(true);
     this.messages = [this.messages[0]];
     this.originalRequest = "";
     this.currentRequest = "";
     this.planNudged = false;
+    this.outcome = "idle";
+    this.lastError = null;
     // Session facts feed the compaction state note — stale ones from a
     // cleared conversation would assert work the new task never did.
     this.toolCtx.filesTouched.clear();
@@ -87,15 +101,18 @@ export class Agent {
   /** Resume a saved session: the transcript (without its system message) and
    * the two requests the compaction note is built around. */
   restoreTranscript(messages: Msg[], originalRequest: string, currentRequest: string): void {
+    this.ctxMgr.cancelBackground(true);
     this.messages = [this.messages[0], ...messages];
     this.originalRequest = originalRequest;
     this.currentRequest = currentRequest;
     this.planNudged = false;
     this.ctxMgr.resetAnchor();
+    this.repairTranscript("[Tool execution was interrupted by a restart. Its outcome is unknown. Inspect files or command state before retrying; do not assume it failed or rerun it blindly.]");
   }
 
   cancel(): void {
     this.abort?.abort();
+    this.ctxMgr.cancelBackground(true);
   }
 
   contextPercent(): number {
@@ -106,25 +123,38 @@ export class Agent {
     return this.ctxMgr.estimatePrompt(this.messages, this.tools);
   }
 
-  async compactNow(): Promise<void> {
-    await this.bus.emit("pre_compact");
-    const { messages, report } = await this.ctxMgr.manage(
-      this.messages,
-      this.tools,
-      this.provider,
-      {
-        originalRequest: this.originalRequest,
-        currentRequest: this.currentRequest,
-        filesTouched: this.toolCtx.filesTouched,
-        commandsRun: this.toolCtx.commandsRun,
-        planLine: this.toolCtx.plan.compactLine(),
-      }
-    );
-    this.messages = messages;
-    await this.bus.emit("post_compact", report);
+  contextBudget() { return this.ctxMgr.budget(this.messages, this.tools); }
+
+  private compactState() {
+    return { originalRequest: this.originalRequest, currentRequest: this.currentRequest, filesTouched: this.toolCtx.filesTouched, commandsRun: this.toolCtx.commandsRun, planLine: this.toolCtx.plan.compactLine() };
+  }
+
+  async compactNow(force = true, deterministic = false): Promise<void> {
+    this.ui.startSpinner("organizing context");
+    try {
+      await this.ctxMgr.foreground();
+      await this.bus.emit("pre_compact");
+      const { messages, report } = await this.ctxMgr.manage(
+        this.messages,
+        this.tools,
+        this.provider,
+        this.compactState(),
+        { force, deterministic, signal: this.abort?.signal }
+      );
+      this.messages = messages;
+      await this.bus.emit("post_compact", report);
+      await this.bus.emit("context_update");
+    } finally {
+      this.ui.stopSpinner();
+    }
   }
 
   async runTurn(userInput: string): Promise<void> {
+    await this.ctxMgr.foreground();
+    this.ctxMgr.cancelBackground(true);
+    this.outcome = "running";
+    this.ctxMgr.resetAnchor(); // prior-turn reasoning no longer travels on the wire
+    this.lastError = null;
     if (!this.originalRequest) this.originalRequest = userInput;
     this.currentRequest = userInput; // the task compaction must never lose
     this.messages.push({ role: "user", content: userInput });
@@ -137,6 +167,12 @@ export class Agent {
     let nudges = 0;
     let toolCallsThisTurn = 0;
     let sincePlanUpdate = 0;
+    let repeatKey = "";
+    let repeats = 0;
+    let failedCalls = 0;
+    const repeatedReads = new Map<string, number>();
+    let readsSinceAction = 0;
+    let actionOnlyNext = false;
     const stats: TurnStats = {
       modelCalls: 0,
       toolCalls: 0,
@@ -148,21 +184,25 @@ export class Agent {
     };
     this.lastTurnStats = stats;
     try {
+      await this.refreshLoadedWindow();
       while (steps++ < this.maxSteps) {
         // Context management before every request.
         await this.bus.emit("pre_request");
         if (this.ctxMgr.needsAttention(this.messages, this.tools)) {
-          this.ui.status("· context is getting full — compacting…");
-          await this.compactNow();
+          await this.compactNow(false);
         }
+        await this.ctxMgr.foreground();
+        this.ctxMgr.assertFits(this.messages, this.tools);
 
         this.ui.startSpinner("thinking");
         let result: ChatResult;
         try {
-          result = await this.chatWithRetry(signal);
+          result = await this.chatWithRetry(signal, actionOnlyNext);
+          actionOnlyNext = false;
         } finally {
           this.ui.stopSpinner();
         }
+        this.ctxMgr.calibrate(result.promptTokens, this.messages, this.tools);
         this.messages.push({
           role: "assistant",
           content: result.content,
@@ -177,6 +217,8 @@ export class Agent {
           result.completionTokens,
           this.messages.length
         );
+        if (stats.modelCalls === 0) await this.refreshLoadedWindow();
+        await this.bus.emit("context_update");
         stats.modelCalls++;
         if (result.generatedTokens) {
           stats.generatedTokens += result.generatedTokens;
@@ -202,6 +244,10 @@ export class Agent {
             // work. Name the cap and coach the split explicitly.
             const noContent = !result.content.trim();
             const burnedByThinking = noContent && !!result.thinking?.trim();
+            if (burnedByThinking) {
+              actionOnlyNext = true;
+              this.ui.status("· reasoning exhausted the reply budget — trying the next response with thinking off");
+            }
             const nudgeText = burnedByThinking
               ? `[Your reasoning used the entire output limit (${this.provider.maxOutputTokens} tokens) and produced no answer. Do not re-derive everything — reply now with your next tool call or a brief answer.]`
               : noContent
@@ -235,7 +281,9 @@ export class Agent {
             });
             continue;
           }
+          if (result.truncated || !result.content.trim()) throw new Error("The model repeatedly returned an empty or cut-off reply. Progress is kept. Try /effort off, switch models with /models, or say continue.");
           completed = true;
+          this.outcome = "completed";
           return; // plain answer — turn over
         }
         nudges = 0;
@@ -248,25 +296,37 @@ export class Agent {
           );
 
           let output: string;
+          let observedOutput: string | undefined;
           if (call.parseError) {
             // LM Studio streams the partial arguments of a cut-off call, so
             // the overflow surfaces here as unparseable JSON.
             output = result.truncated
               ? `Error: ${this.truncatedCallHint()}`
               : `Error: your tool call arguments could not be parsed (${call.parseError}). Send the arguments as a single JSON object, e.g. {"path": "src/app.js"}.`;
+          } else if (result.truncated) {
+            output = `Error: ${this.truncatedCallHint()}`;
           } else if (!this.tools.some((t) => t.name === call.name)) {
             // HARD mode enforcement. The schemas sent to the model are only
             // advisory — a hallucinated or injected write_file/run_command in
             // read-only mode must be rejected here, at execution time.
             output = `Error: the tool "${call.name}" is not available in ${MODE_LABELS[this.mode]} mode. Available tools: ${this.tools.map((t) => t.name).join(", ")}.`;
           } else {
+            this.toolCtx.resultCharLimit = this.ctxMgr.toolResultCharLimit();
+            if (call.name === "run_command") {
+              let end = this.messages.length - 1;
+              while (this.messages[end]?.role === "tool") end--;
+              this.ctxMgr.prepareBackground(this.messages.slice(0, end), this.tools, this.provider, this.compactState());
+            }
             output = await this.gateAndExecute(call.name, call.args, signal);
+            observedOutput = output; // fingerprint real evidence before coaching/reminders
             toolCallsThisTurn++;
             stats.toolCalls++;
             // Tier-0 context hygiene: a full overwrite makes every earlier
             // read of that file wrong. Stub them out right away.
-            if (call.name === "write_file" && !output.startsWith("Error") && typeof call.args?.path === "string") {
+            if ((call.name === "write_file" || call.name === "edit_file") && !output.startsWith("Error") && typeof call.args?.path === "string") {
               this.ctxMgr.evictStaleReads(this.messages, call.args.path);
+              repeatedReads.clear();
+              readsSinceAction = 0;
             }
             // Keep the plan honest: small models forget to mark steps done
             // mid-flow, leaving the checklist stale for minutes. A periodic
@@ -274,13 +334,33 @@ export class Agent {
             const plan = this.toolCtx.plan;
             if (call.name === "plan") {
               sincePlanUpdate = 0;
-              if (!output.startsWith("Error")) this.planNudged = false; // plan changed — re-arm
+              if (!output.startsWith("Error") && ["set", "done", "add"].includes(String(call.args?.action))) this.planNudged = false;
             } else if (plan.exists && plan.currentIndex >= 0 && ++sincePlanUpdate >= 4) {
               sincePlanUpdate = 0;
               const cur = plan.steps[plan.currentIndex];
               output += `\n[Reminder: the plan still shows step ${plan.currentIndex + 1} "${cur.text}" as current. If you have finished steps, mark each with plan {"action": "done"} now.]`;
             }
           }
+
+          const key = JSON.stringify([call.name, call.args, observedOutput ?? output]);
+          repeats = key === repeatKey ? repeats + 1 : 1;
+          repeatKey = key;
+          failedCalls = output.startsWith("Error") ? failedCalls + 1 : 0;
+          if (repeats === 3 || failedCalls === 3) output += "\n[Repeated attempts are not making progress. Inspect the error or relevant file and change your approach before trying again.]";
+          let readRepeats = 0;
+          if (["read_file", "search", "list_files"].includes(call.name) && !output.startsWith("Error")) {
+            if (++readsSinceAction % 12 === 0 && this.mode !== "ro") output += "\n[Investigation checkpoint: record the exact APIs, unresolved error and next small edit with plan checkpoint. Then make and verify that edit before inspecting more modules.]";
+            // Match both the request and file/output contents: rereading an
+            // edited file or a different line range is legitimate progress.
+            const key = createHash("sha256").update(call.name + JSON.stringify(call.args) + (observedOutput ?? output)).digest("hex");
+            readRepeats = (repeatedReads.get(key) ?? 0) + 1;
+            repeatedReads.set(key, readRepeats);
+            if (readRepeats >= 3) output += "\n[This unchanged result has already been read repeatedly. Do not restart the same reads after compaction. Use a different small line range or narrow search if needed, then implement the next step.]";
+          }
+          const outputCap = this.ctxMgr.toolResultCharLimit();
+          // read_file already paginates on complete lines. Never middle-cut
+          // that page while its trailer claims a contiguous line range.
+          if (output.length > outputCap && call.name !== "read_file") output = truncateMiddle(output, outputCap) + "\n[Output capped for this context window. Read a smaller line range or narrow the search.]";
 
           // Plan changes render as the visual checklist instead of a ✓ line.
           if (
@@ -299,29 +379,34 @@ export class Agent {
             toolName: call.name,
           });
           await this.bus.emit("post_tool", { name: call.name, args: call.args });
+          await this.bus.emit("context_update");
           // A cancel during tool execution ends the turn now, with the
           // (cancelled) result already recorded so the transcript stays valid.
           if (signal.aborted) throw abortError();
+          if (readRepeats >= 5) throw new Error("Paused after repeatedly reading the same unchanged data without an edit. Progress is kept. Ask for a specific next change, read a different range, or use a larger context window.");
+          if (repeats >= 6 || failedCalls >= 6) throw new Error("Paused after repeated tool attempts made no progress. Progress is kept; inspect the error, change the request or model, then continue.");
         }
       }
-      this.ui.warn(
-        `Stopped after ${this.maxSteps} tool calls in one turn. Say "continue" to keep going.`
-      );
-      completed = true;
+      throw new Error(`Paused after ${this.maxSteps} model steps. Progress is kept. Say "continue" to keep going.`);
     } catch (err: any) {
       if (err?.name === "AbortError" || signal.aborted) {
         this.ui.println();
         this.ui.status("· cancelled");
+        this.outcome = "cancelled";
         this.sanitizeAfterCancel();
         return;
       }
+      this.outcome = "error";
+      this.lastError = String(err?.message ?? err);
+      this.repairTranscript("[Tool did not run because the turn stopped after an error. Inspect the preceding error before continuing.]");
       throw err;
     } finally {
+      await this.ctxMgr.foreground();
       this.abort = null;
       stats.durationMs = Date.now() - t0;
       if (completed) {
         this.ui.turnEnd(
-          `${MODE_LABELS[this.mode]} · ${this.provider.modelId} · ${fmtDuration(stats.durationMs)}${describeStats(stats)}`
+          `${fmtDuration(stats.durationMs)}${describeStats(stats)}`
         );
       }
     }
@@ -343,24 +428,45 @@ export class Agent {
   /** One model call, with bounded retries on transient backend failures
    * (Ollama/LM Studio hiccups, dropped sockets, 5xx). The transcript is
    * unchanged between attempts, so a retry is always safe. */
-  private async chatWithRetry(signal: AbortSignal): Promise<ChatResult> {
+  private async chatWithRetry(signal: AbortSignal, actionOnly = false): Promise<ChatResult> {
     let lastErr: any;
+    let recoveredContext = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
+      let streamed = false;
       try {
         return await this.provider.chat(this.messages, this.tools, {
           signal,
-          onToken: (t) => this.ui.token(t),
-          onThinking: (t) => this.ui.thinking(t),
+          ...(actionOnly ? { effortOverride: "off" as const } : {}),
+          maxTokens: Math.min(this.provider.maxOutputTokens, this.contextBudget().reserve),
+          onToken: (t) => { streamed = true; this.ui.token(t); },
+          onThinking: (t) => { streamed = true; this.ui.thinking(t); },
         });
       } catch (err: any) {
         if (err?.name === "AbortError" || signal.aborted) throw err;
         lastErr = err;
+        if (streamed) this.ui.resetResponse?.();
+        if (!recoveredContext && CONTEXT_ERROR.test(String(err?.message ?? err))) {
+          recoveredContext = true;
+          this.ui.status("· backend context limit — reducing history and retrying");
+          await this.compactNow(true, true);
+          this.ctxMgr.assertFits(this.messages, this.tools);
+          continue;
+        }
         if (attempt === 3 || !TRANSIENT_ERROR.test(String(err?.message ?? err))) throw err;
         this.ui.warn(`· backend error (${String(err?.message ?? err).slice(0, 80)}) — retrying in ${attempt * 3}s`);
-        await new Promise((r) => setTimeout(r, attempt * 3000));
+        await abortableDelay(attempt * 3000, signal);
       }
     }
     throw lastErr;
+  }
+
+  private async refreshLoadedWindow(): Promise<void> {
+    const actual = await this.provider.loadedContextWindow?.();
+    if (actual && Number.isSafeInteger(actual) && actual < this.contextBudget().window) {
+      this.ctxMgr.setWindow(actual, Math.min(this.provider.maxOutputTokens, Math.floor(actual / 4)));
+      this.ui.status(`· loaded model context changed to ${actual.toLocaleString()} tokens; budget adjusted`);
+      await this.bus.emit("context_update");
+    }
   }
 
   private async gateAndExecute(
@@ -390,7 +496,23 @@ export class Agent {
         }
       }
     }
+    if (signal?.aborted) throw signal.reason;
+    if (!this.tools.some((t) => t.name === name)) return `Error: ${name} is no longer available in ${MODE_LABELS[this.mode]} mode.`;
     return executeTool(name, args, this.toolCtx, signal);
+  }
+
+  private repairTranscript(reason: string): void {
+    const repaired: Msg[] = [];
+    for (let i = 0; i < this.messages.length; i++) {
+      const m = this.messages[i];
+      if (m.role === "tool") continue; // consumed with its assistant, or orphaned
+      repaired.push(m);
+      if (!m.toolCalls?.length) continue;
+      const results = new Map<string | undefined, Msg>();
+      while (this.messages[i + 1]?.role === "tool") { const t = this.messages[++i]; results.set(t.toolCallId, t); }
+      for (const call of m.toolCalls) repaired.push(results.get(call.id) ?? { role: "tool", toolCallId: call.id, toolName: call.name, content: reason });
+    }
+    this.messages = repaired;
   }
 
   /**
@@ -400,24 +522,7 @@ export class Agent {
    * behind the already-pushed tool results, so walk back past them.
    */
   private sanitizeAfterCancel(): void {
-    let i = this.messages.length - 1;
-    while (i >= 0 && this.messages[i].role === "tool") i--;
-    const anchor = this.messages[i];
-    if (anchor?.role === "assistant" && anchor.toolCalls?.length) {
-      for (const tc of anchor.toolCalls) {
-        const answered = this.messages.some(
-          (m) => m.role === "tool" && m.toolCallId === tc.id
-        );
-        if (!answered) {
-          this.messages.push({
-            role: "tool",
-            content: "[cancelled by the user before this tool ran]",
-            toolCallId: tc.id,
-            toolName: tc.name,
-          });
-        }
-      }
-    }
+    this.repairTranscript("[cancelled by the user before this tool ran]");
   }
 
   statusLine(): string {

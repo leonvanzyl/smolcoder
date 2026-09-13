@@ -1,4 +1,5 @@
 // One internal message/tool shape; each provider adapts it to its wire format.
+import { randomBytes } from "crypto";
 
 export interface ToolCall {
   id: string;
@@ -69,6 +70,11 @@ export interface ChatOptions {
   effortOverride?: Effort;
   /** Cap the reply for this one call (summaries stay short by construction). */
   maxTokens?: number;
+  /** Whole-request deadline and maximum silence between network chunks. */
+  timeoutMs?: number;
+  idleTimeoutMs?: number;
+  /** Optional maintenance yields to foreground coding on the same server. */
+  background?: boolean;
 }
 
 /** Reasoning effort. "off" disables thinking where the backend supports it
@@ -90,6 +96,7 @@ export const EFFORT_RANK: Record<string, number> = {
 };
 
 export interface Provider {
+  readonly replaysThinking?: boolean;
   readonly label: string;
   readonly modelId: string;
   readonly contextWindow: number;
@@ -100,28 +107,31 @@ export interface Provider {
    * shown in the status line so "default" is never a mystery. null = nothing
    * worth saying (the plain effort name is enough). */
   effortLabel(): string | null;
+  /** Native loaded-instance context, when the server exposes it. */
+  loadedContextWindow?(): Promise<number | undefined>;
   chat(messages: Msg[], tools: ToolSpec[], opts?: ChatOptions): Promise<ChatResult>;
 }
 
 export const MAX_OUTPUT_TOKENS = 2048;
 
 let callCounter = 0;
+const callPrefix = randomBytes(6).toString("hex");
 export function nextCallId(): string {
-  return `call_${++callCounter}`;
+  return `call_${callPrefix}_${++callCounter}`;
 }
 
 export function parseArgs(raw: unknown): Pick<ToolCall, "args" | "rawArgs" | "parseError"> {
-  if (raw && typeof raw === "object") return { args: raw as Record<string, any> };
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) return { args: raw as Record<string, any> };
   if (typeof raw === "string") {
     try {
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") return { args: parsed, rawArgs: raw };
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return { args: parsed, rawArgs: raw };
       return { args: {}, rawArgs: raw, parseError: "arguments were not a JSON object" };
     } catch (e: any) {
       return { args: {}, rawArgs: raw, parseError: `invalid JSON: ${e.message}` };
     }
   }
-  return { args: {} };
+  return raw === undefined ? { args: {} } : { args: {}, parseError: "arguments were not a JSON object" };
 }
 
 /** Tokens the visible reply + tool-call JSON will occupy when replayed in the

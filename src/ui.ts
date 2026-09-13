@@ -9,6 +9,8 @@ import { c } from "./util";
 /** What the agent loop needs from a UI — implemented by the plain UI (used in
  * -p / non-TTY mode) and by the interactive Tui. */
 export interface AgentUI {
+  /** Discard an interrupted streamed response before a safe retry. */
+  resetResponse?(): void;
   token(text: string): void;
   thinking(text: string): void;
   toolCall(name: string, args: Record<string, any>): void;

@@ -27,7 +27,7 @@ export function pickShell(): ShellInfo {
     ];
     for (const p of candidates) {
       if (p && fs.existsSync(p)) {
-        cached = { exe: p, argsFor: (cmd) => ["-lc", cmd], label: "bash (Git Bash)" };
+        cached = { exe: p, argsFor: (cmd) => ["-o", "pipefail", "-lc", cmd], label: "bash (Git Bash)" };
         return cached;
       }
     }
@@ -39,7 +39,7 @@ export function pickShell(): ShellInfo {
         .map((s) => s.trim())
         .find((p) => p && !p.toLowerCase().includes("system32"));
       if (found) {
-        cached = { exe: found, argsFor: (cmd) => ["-lc", cmd], label: "bash (Git Bash)" };
+        cached = { exe: found, argsFor: (cmd) => ["-o", "pipefail", "-lc", cmd], label: "bash (Git Bash)" };
         return cached;
       }
     }
@@ -51,7 +51,7 @@ export function pickShell(): ShellInfo {
     return cached;
   }
   const sh = fs.existsSync("/bin/bash") ? "/bin/bash" : "/bin/sh";
-  cached = { exe: sh, argsFor: (cmd) => ["-lc", cmd], label: path.basename(sh) };
+  cached = { exe: sh, argsFor: (cmd) => sh.endsWith("/bash") ? ["-o", "pipefail", "-lc", cmd] : ["-lc", cmd], label: path.basename(sh) };
   return cached;
 }
 
@@ -75,6 +75,7 @@ const OUTPUT_CAP = 8000;
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 export function runCommand(command: string, cwd: string, signal?: AbortSignal): Promise<string> {
+  if (signal?.aborted) return Promise.resolve("Error: command cancelled before starting");
   return new Promise((resolve) => {
     const shell = pickShell();
     let output = "";
@@ -90,7 +91,10 @@ export function runCommand(command: string, cwd: string, signal?: AbortSignal): 
     });
 
     const append = (chunk: Buffer) => {
-      if (output.length < OUTPUT_CAP * 4) output += chunk.toString("utf8");
+      // Keep the end of a long build/test log: failures usually appear there.
+      // Dropping all output after 32k hid the actual failure from the model.
+      output += chunk.toString("utf8");
+      if (output.length > OUTPUT_CAP * 4) output = truncateMiddle(output, OUTPUT_CAP * 4);
     };
     proc.stdout.on("data", append);
     proc.stderr.on("data", append);
@@ -100,6 +104,7 @@ export function runCommand(command: string, cwd: string, signal?: AbortSignal): 
       if (finished) return;
       finished = true;
       clearTimeout(timer);
+      cleanup();
       killTree(proc.pid!);
       resolve(
         (output.trim() ? truncateMiddle(output, OUTPUT_CAP) + "\n" : "") +
@@ -115,7 +120,7 @@ export function runCommand(command: string, cwd: string, signal?: AbortSignal): 
       cleanup();
       killTree(proc.pid!);
       resolve(
-        truncateMiddle(output, OUTPUT_CAP) +
+        "Error: " + truncateMiddle(output, OUTPUT_CAP) +
           `\n[command timed out after ${DEFAULT_TIMEOUT_MS / 1000}s and was killed. For long-running commands like dev servers, use the task tool with {"action": "start"} instead.]`
       );
     }, DEFAULT_TIMEOUT_MS);
@@ -135,7 +140,7 @@ export function runCommand(command: string, cwd: string, signal?: AbortSignal): 
       cleanup();
       const secs = ((Date.now() - started) / 1000).toFixed(1);
       const body = output.trim() ? truncateMiddle(output, OUTPUT_CAP) : "(no output)";
-      resolve(`${body}\n[exit code ${code ?? "?"} in ${secs}s]`);
+      resolve(`${code !== 0 ? `Error: command exited with code ${code ?? "?"}\n` : ""}${body}\n[exit code ${code ?? "?"} in ${secs}s]`);
     });
 
     if (signal?.aborted) onAbort();

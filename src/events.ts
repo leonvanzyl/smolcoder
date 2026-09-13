@@ -7,6 +7,7 @@ export type LifecycleEvent =
   | "session_start"
   | "pre_request"
   | "post_tool"
+  | "context_update"
   | "pre_compact"
   | "post_compact"
   | "session_end";

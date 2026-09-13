@@ -156,7 +156,7 @@ function getView(sid) {
   if (!v) {
     v = {
       sid, logEl: el("div", "log"), state: { commands: [] }, curText: null, curThought: null, thoughtBuf: "", thoughtStart: 0,
-      busyLabel: null, busyStart: 0, unread: false, draft: "", scrollTop: null, asks: new Map(),
+      busyLabel: null, busyStart: 0, unread: false, draft: "", scrollTop: null, asks: new Map(), curTool: null, planEl: null,
       terms: new Map(), tabs: [], activeTab: null, panelOpen: false, panelEl: el("div", "panelview"),
     };
     v.logEl.hidden = true; logsEl.appendChild(v.logEl);
@@ -225,18 +225,27 @@ function renderState(v) {
   const st = $("status");
   st.innerHTML = "";
   if (!s.mode) { st.textContent = "starting…"; renderCrumb(); return; }
-  const mode = el("span", "mode " + s.mode, s.mode === "ro" ? "read-only" : s.mode === "bypass" ? "bypass permissions" : s.mode);
+  const command = (name) => post("/msg", { sid: v.sid, text: "/" + name });
+  const mode = el("button", "statusbtn mode " + s.mode, s.mode === "ro" ? "Read-only" : s.mode === "bypass" ? "Bypass" : "Edit");
+  mode.title = "Permission mode"; mode.onclick = () => command("mode");
   st.appendChild(mode);
-  st.appendChild(document.createTextNode(" · " + s.model + " (" + s.backend + ")"));
-  if (s.effort) { st.appendChild(document.createTextNode(" · ")); st.appendChild(el("span", "eff", s.effort)); }
-  const kt = s.ctxTokens < 1000 ? s.ctxTokens : (s.ctxTokens / 1000).toFixed(1) + "k";
-  st.appendChild(document.createTextNode(" · " + kt + " (" + s.ctxPct + "%)"));
+  const model = el("button", "statusbtn modelpick", s.model + " ▾"); model.title = s.backend + " · Switch model"; model.onclick = () => command("models"); st.appendChild(model);
+  const effort = el("button", "statusbtn eff", s.effort || "Auto"); effort.title = "Reasoning effort"; effort.onclick = () => command("effort"); st.appendChild(effort);
+  st.appendChild(el("span", "grow"));
+  const ctx = el("button", "statusbtn context-chip" + (s.ctxPct >= 75 ? " pressure" : ""));
+  const meter = document.createElement("meter"); meter.min = 0; meter.max = 100; meter.value = s.ctxPct || 0; meter.setAttribute("aria-label", "Context used");
+  ctx.appendChild(meter); ctx.appendChild(document.createTextNode((s.ctxPct || 0) + "%"));
+  const b = s.context; ctx.title = b ? b.prompt.toLocaleString() + " / " + b.window.toLocaleString() + " tokens · " + b.reserve.toLocaleString() + " reserved for reply · " + b.source : "Context usage";
+  ctx.onclick = () => command("context"); st.appendChild(ctx);
   if (s.plan) {
-    st.appendChild(document.createTextNode(" · "));
     const done = s.plan.steps.filter((x) => x.done).length;
     st.appendChild(el("span", "plan-chip" + (s.plan.current < 0 ? " done" : ""), "plan " + done + "/" + s.plan.steps.length));
   }
-  if (s.tasks) st.appendChild(document.createTextNode(" · " + s.tasks + " task" + (s.tasks > 1 ? "s" : "")));
+  if (s.tasks) st.appendChild(el("span", "task-chip", s.tasks + " running"));
+  if (s.outcome === "error" || s.outcome === "cancelled") {
+    const paused = el("span", s.outcome === "error" ? "line-warn" : "task-chip", s.outcome === "error" ? "Paused" : "Stopped");
+    paused.title = s.lastError || "Turn cancelled; progress is kept"; st.appendChild(paused);
+  }
   $("ws").textContent = shortPath(s.workspace || "");
   renderCrumb();
 }
@@ -252,7 +261,8 @@ function renderPlan(v, p) {
     const mark = s.done ? "✔ " : i === p.current ? "▶ " : "○ ";
     box.appendChild(el("div", cls, mark + s.text));
   });
-  add(v, box);
+  if (v.planEl && v.planEl.isConnected) v.planEl.replaceWith(box); else add(v, box);
+  v.planEl = box;
 }
 
 // ---- event handling -------------------------------------------------------
@@ -266,7 +276,11 @@ function handle(m) {
       v.state = Object.assign(v.state, m.s);
       if (m.s && "busy" in m.s) setBusy(v, m.s.busy);
       renderState(v); break;
-    case "user": endThought(v); v.curText = null; add(v, el("div", "user", m.s)); break;
+    case "user": endThought(v); v.curText = null; v.curTool = null; v.planEl = null; add(v, el("div", "user", m.s)); break;
+    case "response_reset":
+      if (v.curText) v.curText.remove();
+      if (v.curThought) v.curThought.remove();
+      v.curText = null; v.curThought = null; v.thoughtBuf = ""; break;
     case "token":
       endThought(v);
       if (!v.curText) { v.curText = add(v, el("div", "md")); v.curText._raw = ""; }
@@ -280,10 +294,17 @@ function handle(m) {
       if (v === active) stick(); break;
     case "tool": {
       endThought(v); v.curText = null;
-      const d = el("div", "tool"); d.appendChild(el("span", "name", "→ " + m.name)); d.appendChild(document.createTextNode(" " + (m.summary || "")));
-      add(v, d); break;
+      const d = el("details", "tool");
+      const summary = el("summary"); summary.appendChild(el("span", "name", m.name.replace(/_/g, " "))); summary.appendChild(el("span", "tool-args", m.summary || ""));
+      d.appendChild(summary); v.curTool = d; add(v, d); break;
     }
-    case "result": endThought(v); v.curText = null; add(v, el("div", "result" + (m.err ? " err" : ""), (m.err ? "✗ " : "✓ ") + m.line + (m.extra ? " (+" + m.extra + " lines)" : ""))); break;
+    case "result": {
+      endThought(v); v.curText = null;
+      const body = el("pre", "result" + (m.err ? " err" : ""), m.body || m.line);
+      if (v.curTool) { v.curTool.classList.add(m.err ? "failed" : "finished"); v.curTool.appendChild(body); if (m.err) v.curTool.open = true; v.curTool = null; }
+      else add(v, body);
+      break;
+    }
     case "plan": endThought(v); v.curText = null; renderPlan(v, m); break;
     case "line": endThought(v); v.curText = null; add(v, el("div", "line-" + m.kind, m.s)); break;
     case "turnend":
@@ -388,11 +409,11 @@ function newSession(path) {
 function renderSidebar() {
   const list = $("wslist");
   list.innerHTML = "";
-  if (!hub.workspaces.length) { list.appendChild(el("div", "sidehint", "No workspaces yet. Open a folder to start your first session.")); return; }
+  if (!hub.workspaces.length) return;
   for (const w of hub.workspaces) {
     const box = el("div", "ws");
     const hdr = el("div", "wshdr"); hdr.title = w.path;
-    hdr.appendChild(el("span", "wsname", w.name)); hdr.appendChild(el("span", "wspath", w.display));
+    hdr.appendChild(el("span", "wsname", w.name)); hdr.appendChild(el("span", "grow"));
     const plus = el("button", "iconbtn", "+"); plus.title = "new session in " + w.name;
     plus.onclick = (e) => { e.stopPropagation(); newSession(w.path); };
     const rm = el("button", "iconbtn", "×"); rm.title = "remove " + w.name + " from the list";
@@ -438,7 +459,6 @@ function renderCrumb() {
   c.appendChild(el("span", "ws", info ? info.wsname : ""));
   c.appendChild(el("span", "sep", "›"));
   c.appendChild(el("span", "title", active.state.title || (info && info.title) || "new session"));
-  if (active.state.model) c.appendChild(el("span", "model", active.state.model));
   c.title = info ? info.workspace : "";
 }
 function renderTitle() {
@@ -455,7 +475,7 @@ function renderWelcome() {
   r.innerHTML = "";
   const ws = hub.workspaces.slice(0, 8);
   if (!ws.length) return;
-  r.appendChild(el("div", "hint", "Start a session in a recent workspace:"));
+  r.appendChild(el("div", "recent-label", "Recent"));
   for (const x of ws) {
     const b = el("button", "wsbtn");
     b.appendChild(el("span", "", x.name)); b.appendChild(el("span", "dim", "  " + x.display));
@@ -619,10 +639,11 @@ function buildBrowserTab(v, t) {
   bar.appendChild(reload); bar.appendChild(urlIn); bar.appendChild(dl); bar.appendChild(go); bar.appendChild(ext);
   const empty = el("div", "empty");
   empty.appendChild(el("div", "", "Enter a URL to preview it here."));
-  empty.appendChild(el("div", "hint", "Sites that refuse to be embedded still open with ↗."));
   const urlsEl = el("div", "urls"); empty.appendChild(urlsEl);
   const frame = document.createElement("iframe"); frame.hidden = true;
-  frame.setAttribute("allow", "clipboard-read; clipboard-write; fullscreen");
+  frame.setAttribute("sandbox", "allow-scripts allow-forms allow-same-origin allow-popups");
+  frame.referrerPolicy = "no-referrer";
+  frame.title = "App preview";
   body.appendChild(bar); body.appendChild(empty); body.appendChild(frame);
   v.panelEl.appendChild(body);
   t.el = body; t.frame = frame; t.urlIn = urlIn; t.dl = dl; t.urlsEl = urlsEl;
@@ -630,6 +651,12 @@ function buildBrowserTab(v, t) {
     u = (u || "").trim();
     if (!u) return;
     if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) u = "http://" + u;
+    let parsed;
+    try { parsed = new URL(u); } catch { urlIn.setCustomValidity("Enter a valid http or https URL"); urlIn.reportValidity(); return; }
+    if (!["http:", "https:"].includes(parsed.protocol) || parsed.origin === location.origin || (["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname) && parsed.port === location.port)) {
+      urlIn.setCustomValidity("Preview a separate app using http or https"); urlIn.reportValidity(); return;
+    }
+    urlIn.setCustomValidity(""); u = parsed.href;
     t.url = u; urlIn.value = u; ext.href = u;
     frame.src = u; frame.hidden = false; empty.hidden = true;
     savePanel(v); renderPanel();
@@ -651,7 +678,7 @@ function ensureTermTab(v, tid, cwd) {
   const row = el("div", "trow");
   const prompt = el("span", "prompt");
   const inp = document.createElement("input");
-  inp.placeholder = "command… enter runs · ctrl+c interrupts · ctrl+l clears"; inp.spellcheck = false; inp.autocomplete = "off";
+  inp.placeholder = "Run a command…"; inp.title = "Enter to run · Ctrl+C to interrupt · Ctrl+L to clear"; inp.setAttribute("aria-label", "Terminal command"); inp.spellcheck = false; inp.autocomplete = "off";
   inp.onkeydown = (e) => {
     if (e.key === "Enter") {
       const text = inp.value;
@@ -791,6 +818,13 @@ input.addEventListener("keydown", (e) => {
 actionBtn.onclick = () => { if (!active) return; if (active.busyLabel) post("/cancel", { sid: active.sid }); else submit(); };
 
 // ---- global keys ----------------------------------------------------------
+$("keys").onclick = () => {
+  const dialog = document.createElement("dialog"); dialog.className = "dlg";
+  const list = el("div", "shortcut-list");
+  ["/  Commands", "Enter  Send", "Shift+Enter  New line", "Shift+Tab  Permission mode", "Esc  Cancel", "Ctrl+B  Sidebar", "Ctrl+\`  Terminal"].forEach((s) => list.appendChild(el("div", "", s)));
+  const close = el("button", "ghost", "Close"); close.onclick = () => dialog.close(); list.appendChild(close);
+  dialog.appendChild(list); document.body.appendChild(dialog); dialog.onclose = () => dialog.remove(); dialog.showModal();
+};
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && document.activeElement !== input) {
     if (!$("modal").hidden) closeDialog();

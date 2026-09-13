@@ -7,6 +7,8 @@
 export interface PlanStep {
   text: string;
   done: boolean;
+  /** Model-authored working notes, kept verbatim instead of re-summarized. */
+  note?: string;
 }
 
 export class Plan {
@@ -74,11 +76,20 @@ export class Plan {
     return `Added step ${this.steps.length}: ${text.trim()}`;
   }
 
+  checkpoint(text: string): string {
+    const idx = this.currentIndex;
+    if (idx < 0) return 'Error: create a plan with an unfinished step before recording a checkpoint.';
+    if (!text.trim() || text.length > 1000) return 'Error: checkpoint text must be 1–1000 characters. Keep exact APIs, the unresolved error and the next small edit.';
+    this.steps[idx].note = text.trim();
+    return `Checkpoint saved for step ${idx + 1}: ${text.trim()}`;
+  }
+
   /** Compact model-facing checklist (used by action "show" and after compaction). */
   modelView(): string {
     if (!this.exists) return "No plan set.";
     return this.steps
-      .map((s, i) => `${i + 1}.[${s.done ? "x" : i === this.currentIndex ? ">" : " "}] ${s.text}`)
+      .map((s, i) => `${i + 1}.[${s.done ? "x" : i === this.currentIndex ? ">" : " "}] ${s.text}` +
+        (s.note && i === this.currentIndex ? `\nWorking checkpoint (agent notes; verify against files): ${s.note}` : ""))
       .join("\n");
   }
 

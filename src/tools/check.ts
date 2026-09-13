@@ -20,7 +20,7 @@ function findPython(): string | null {
   if (pythonExe !== undefined) return pythonExe;
   pythonExe = null;
   for (const exe of process.platform === "win32" ? ["python", "py"] : ["python3", "python"]) {
-    const r = spawnSync(exe, ["-c", "print(1)"], { encoding: "utf8", timeout: 5000, windowsHide: true });
+    const r = spawnSync(exe, ["-I", "-c", "print(1)"], { encoding: "utf8", timeout: 5000, windowsHide: true });
     if (r.status === 0 && r.stdout.trim() === "1") {
       pythonExe = exe;
       break;
@@ -104,7 +104,7 @@ function checkHtml(source: string): string | null {
 function checkPython(abs: string): string | null {
   const py = findPython();
   if (!py) return null;
-  const r = spawnSync(py, ["-m", "py_compile", abs], {
+  const r = spawnSync(py, ["-I", "-c", "import sys; compile(open(sys.argv[1], 'rb').read(), sys.argv[1], 'exec')", abs], {
     encoding: "utf8",
     timeout: CHECK_TIMEOUT_MS,
     windowsHide: true,

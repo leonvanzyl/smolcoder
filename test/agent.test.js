@@ -44,6 +44,29 @@ function makeAgent(provider, ui, mode = "bypass", interactive = false) {
   return new Agent(provider, mode, "sys", toolCtx, new ContextManager(8000, 2000), new EventBus(), ui, interactive, 20);
 }
 
+test("alternating unchanged reads stop with a recoverable error before the model-step limit", async () => {
+  const replies = Array.from({length:12}, (_, i) => ({ content:'', toolCalls:[{id:`r${i}`, name:'read_file', args:{path:i%2?'b.txt':'a.txt'}}] }));
+  const agent = makeAgent(scriptedProvider(replies), fakeUi());
+  fs.writeFileSync(path.join(agent.toolCtx.workspace,'a.txt'),'first module');
+  fs.writeFileSync(path.join(agent.toolCtx.workspace,'b.txt'),'second module');
+  await assert.rejects(agent.runTurn('implement the next module'), /same unchanged data/);
+  assert.equal(agent.outcome, 'error');
+  assert.equal(agent.lastTurnStats.toolCalls, 9);
+  assert.match(agent.messages.at(-1).content, /Do not restart the same reads/);
+});
+
+test("showing a plan does not re-arm its premature-completion nudge", async () => {
+  const provider = scriptedProvider([
+    {toolCalls:[{id:'p1',name:'plan',args:{action:'set',steps:'Implement\nTest'}}]},
+    {content:'paused'},
+    {toolCalls:[{id:'p2',name:'plan',args:{action:'show'}}]},
+    {content:'blocked and needs clarification'},
+  ]);
+  const agent = makeAgent(provider, fakeUi());
+  await agent.runTurn('build');
+  assert.equal(provider.seen.length, 4);
+});
+
 test("a cut-off tool call (empty, truncated, no thinking) is coached to split the file", async () => {
   const provider = scriptedProvider([
     { content: "", toolCalls: [], truncated: true },
@@ -67,6 +90,25 @@ test("an empty truncated reply WITH thinking is blamed on reasoning", async () =
   const agent = makeAgent(provider, fakeUi());
   await agent.runTurn("think");
   assert.match(provider.seen[1].at(-1).content, /reasoning used the entire output limit \(2000 tokens\)/);
+});
+
+test('reasoning exhaustion uses one action-only retry without changing session effort',async()=>{
+  const options=[];
+  const provider=scriptedProvider([
+    {thinking:'long reasoning',truncated:true},
+    {toolCalls:[{id:'read',name:'list_files',args:{}}]},
+    {content:'done'}
+  ]);
+  const chat=provider.chat.bind(provider);
+  provider.chat=(messages,tools,opts)=>{options.push(opts);return chat(messages);};
+  provider.setEffort=()=>{throw Error('must not mutate preference');};
+  const ui=fakeUi();const agent=makeAgent(provider,ui);
+  await agent.runTurn('make progress');
+  assert.equal(agent.outcome,'completed');
+  assert.equal(options[0].effortOverride,undefined);
+  assert.equal(options[1].effortOverride,'off');
+  assert.equal(options[2].effortOverride,undefined);
+  assert.ok(ui.lines.some(s=>s.includes('thinking off')));
 });
 
 test("a truncated call that arrives as unparseable JSON (LM Studio) gets the same coaching", async () => {

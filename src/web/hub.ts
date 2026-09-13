@@ -56,6 +56,7 @@ interface Live {
   titleTries: number;
   /** The user renamed it by hand: never overwrite that. */
   titleByUser: boolean;
+  saveFailed?: boolean;
 }
 
 // ---- the running-hub record -----------------------------------------------
@@ -313,7 +314,7 @@ export class WebHub {
     const live = this.makeLive(id, meta);
     live.channel.title = meta.title;
     if (body) {
-      live.channel.replay = body.events.slice(-2000);
+      live.channel.restoreReplay(body.events);
       for (const ev of live.channel.replay) this.send(ev);
     }
     this.workspaces.add(meta.workspace);
@@ -439,7 +440,7 @@ export class WebHub {
       // A saved bypass mode is not inherited silently, same as the config:
       // the user re-enables it per session.
       const mode = restore.mode === "bypass" ? "edit" : restore.mode ?? prefs.mode;
-      prefs = { ...prefs, mode, model: restore.model ?? prefs.model, effort: restore.effort !== undefined ? restore.effort : prefs.effort };
+      prefs = { ...prefs, mode, backend: restore.backend, model: restore.model ?? prefs.model, effort: restore.effort !== undefined ? restore.effort : prefs.effort };
     }
     try {
       const session = await this.factory(live.channel, live.workspace, prefs);
@@ -530,8 +531,12 @@ export class WebHub {
       this.metas.set(live.id, live.meta);
       this.store.saveMeta(live.meta);
       await this.store.saveBody(live.id, { snapshot: live.session.snapshot(), events: live.channel.replay });
-    } catch {
-      /* disk trouble is not worth interrupting the session for */
+      live.saveFailed = false;
+    } catch (err: any) {
+      if (!live.saveFailed) {
+        live.saveFailed = true;
+        live.channel.warn(`Session could not be saved: ${err?.message ?? err}. Keep this session open and check free disk space and permissions.`);
+      }
     }
     live.saving = false;
     if (live.dirty) this.scheduleSave(live);
@@ -641,6 +646,10 @@ export class WebHub {
   // ---- http ---------------------------------------------------------------------
 
   private route(req: http.IncomingMessage, res: http.ServerResponse): void {
+    res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Cache-Control", "no-store");
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${this.port}`);
     const origin = req.headers.origin;
     const sameOrigin =

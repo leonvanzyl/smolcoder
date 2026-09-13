@@ -233,6 +233,7 @@ export async function resolveContextWindow(
   model: DetectedModel,
   ctxOverride?: number
 ): Promise<DetectedModel> {
+  if (ctxOverride !== undefined && (!Number.isSafeInteger(ctxOverride) || ctxOverride < 1024)) throw new Error("Context window must be a whole number of at least 1024 tokens.");
   if (model.backend === "ollama") {
     const info = await tryFetchJson(`${model.baseUrl}/api/show`, {
       method: "POST",
@@ -291,7 +292,20 @@ export async function resolveContextWindow(
       note: `older Ollama — setting the context to ${window.toLocaleString()} explicitly (adjust with --ctx).`,
     };
   }
-  // LM Studio: window was read during detection; an override can only shrink our budget
+  if (model.loaded === false && ctxOverride) {
+    const desired = Math.min(ctxOverride, model.maxContext ?? ctxOverride);
+    const response = await fetch(`${model.baseUrl}/api/v1/models/load`, {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ model: model.id, context_length: desired, echo_load_config: true }),
+      signal: AbortSignal.timeout(180_000),
+    });
+    if (!response.ok) throw new Error(`LM Studio could not load ${model.id} with ${desired} context tokens (${response.status}). Load the model in LM Studio or reduce --ctx.`);
+    const loaded: any = await response.json();
+    const actual = loaded.load_config?.context_length;
+    if (!Number.isSafeInteger(actual) || actual < 1024 || !loaded.instance_id) throw new Error("LM Studio did not confirm the loaded context. Load the model in LM Studio and select it again.");
+    return { ...model, id: loaded.instance_id, loaded: true, contextWindow: Math.min(desired, actual), note: undefined };
+  }
+  // LM Studio: an already-loaded model stays resident; an override only shrinks our budget
   // (we cannot change what LM Studio allocated).
   if (ctxOverride && ctxOverride < model.contextWindow) {
     return { ...model, contextWindow: ctxOverride };

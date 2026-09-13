@@ -17,7 +17,7 @@ import { Effort, Msg, Provider } from "./providers/types";
 import { Mode, MODE_LABELS, ToolContext } from "./tools/index";
 import { pickShell } from "./tools/shell";
 import { TaskManager } from "./tools/tasks";
-import { SessionUI, SlashCommand } from "./ui";
+import { renderPlan, SessionUI, SlashCommand } from "./ui";
 import { c, truncateEnd } from "./util";
 
 /** Per-session preferences from the command line. `effort: null` means an
@@ -25,6 +25,7 @@ import { c, truncateEnd } from "./util";
 export interface SessionPrefs {
   mode?: Mode;
   model?: string;
+  backend?: string;
   ctx?: number;
   effort?: Effort | null;
 }
@@ -52,7 +53,7 @@ export const MODE_ORDER: Mode[] = ["ro", "edit", "bypass"];
  * writes (a single write_file's JSON must fit in the output), tiny windows
  * must stay conservative. */
 export function outputBudget(window: number): number {
-  return Math.max(1024, Math.min(16384, Math.floor(window / 4)));
+  return Math.max(128, Math.min(8192, Math.floor(window / 4)));
 }
 
 export function makeProvider(m: DetectedModel): Provider {
@@ -79,7 +80,7 @@ export function effortAdvice(m: DetectedModel, effort: Effort | null): string | 
 export function reportCompactions(bus: EventBus, ui: { status: (s: string) => void; warn: (s: string) => void }): void {
   bus.on("post_compact", (report: any) => {
     const delta = `${report?.before} → ${report?.after} tokens est.`;
-    if (report?.action === "evicted") ui.status(`· freed context by dropping old tool output (${delta})`);
+    if (report?.action === "evicted") ui.status(`· pruned context (${delta})`);
     else if (report?.action === "compacted") ui.status(`· compacted the conversation into hand-over notes (${delta})`);
     else if (report?.action === "floor")
       ui.warn(`· context is at its floor: system prompt + tools + the working tail no longer fit comfortably (${delta}). Consider a bigger context window.`);
@@ -96,6 +97,7 @@ export function autoPickModel(
       models.find((m) => m.id === wanted) ??
       models.find((m) => m.id.toLowerCase().includes(wanted.toLowerCase()));
     if (hit) return hit;
+    throw new Error(`Model "${wanted}" was not found on the selected backend. Use /models to choose an available local model.`);
   }
   return (
     models.find((m) => m.id === remembered) ??
@@ -140,7 +142,7 @@ export async function prepareModel(
   progress?: (label: string) => void
 ): Promise<DetectedModel | null> {
   progress?.("looking for Ollama and LM Studio");
-  const models = await detectAll();
+  const models = (await detectAll()).filter((m) => !prefs.backend || m.backend === prefs.backend);
   if (models.length === 0) return null;
   const chosen = autoPickModel(models, prefs.model, cfg.lastModel);
   progress?.(`loading ${chosen.id}`);
@@ -173,7 +175,7 @@ export async function suggestTitle(messages: Msg[], provider: Provider): Promise
         },
       ],
       [],
-      { effortOverride: "off", maxTokens: 30 }
+      { effortOverride: "off", maxTokens: 30, timeoutMs: 15_000, background: true }
     );
     return cleanTitle(res.content);
   } catch {
@@ -284,6 +286,7 @@ export class Session {
     ui.onCancel = () => this.agent.cancel();
     ui.onExit = () => void this.shutdown();
     reportCompactions(this.bus, ui);
+    this.bus.on("context_update", () => ui.refresh());
     this.persist();
   }
 
@@ -327,6 +330,9 @@ export class Session {
       effort: this.agent.provider.effortLabel() ?? this.effort,
       ctxTokens: this.agent.contextTokens(),
       ctxPct: this.agent.contextPercent(),
+      context: this.agent.contextBudget(),
+      outcome: this.agent.outcome,
+      lastError: this.agent.lastError,
       plan: plan.exists ? { steps: plan.steps, current: plan.currentIndex } : null,
       tasks: this.taskManager.runningSummary().length,
       workspace: this.workspace,
@@ -338,10 +344,7 @@ export class Session {
   /** The opening lines: backend · model · mode, workspace, AGENTS.md, advice. */
   announce(): void {
     const ui = this.ui;
-    ui.println(sessionLine(this.chosen, this.agent.mode));
     if (this.chosen.note) ui.warn(`  ${this.chosen.note}`);
-    ui.status(`  workspace ${this.workspace} · shell ${this.shell.label}`);
-    if (this.agentsMd) ui.status(`  AGENTS.md loaded (${this.agentsMd.split("\n").length} lines)`);
     const advice = effortAdvice(this.chosen, this.effort);
     if (advice) ui.warn(`  ${advice}`);
   }
@@ -370,7 +373,8 @@ export class Session {
    * current mode/workspace; approvals are deliberately not restored). */
   restore(s: SessionSnapshot): void {
     this.agent.restoreTranscript(s.messages ?? [], s.originalRequest ?? "", s.currentRequest ?? "");
-    this.toolCtx.plan.steps = (s.plan ?? []).map((p) => ({ text: String(p.text), done: !!p.done }));
+    this.toolCtx.plan.steps = (s.plan ?? []).map((p) => ({ text: String(p.text), done: !!p.done,
+      ...(typeof p.note === "string" ? { note: p.note.slice(0, 1000) } : {}) }));
     for (const f of s.filesTouched ?? []) this.toolCtx.filesTouched.add(f);
     this.toolCtx.commandsRun.push(...(s.commandsRun ?? []));
   }
@@ -406,7 +410,7 @@ export class Session {
             await this.setEffort(arg);
             break;
           case "plan":
-            if (toolCtx.plan.exists) ui.planUpdated(toolCtx.plan);
+            if (toolCtx.plan.exists) ui.println(renderPlan(toolCtx.plan));
             else ui.status("· no plan yet — the agent creates one when it starts a multi-step task");
             break;
           case "tasks":
@@ -420,13 +424,14 @@ export class Session {
             break;
           case "compact":
             ui.startSpinner("compacting");
-            await agent.compactNow();
-            ui.stopSpinner();
-            ui.status(`· compacted — ctx now ${agent.contextPercent()}%`);
+            try { await agent.compactNow(); }
+            catch (err: any) { ui.error(String(err?.message ?? err)); }
+            finally { ui.stopSpinner(); }
             break;
           case "context":
+            const budget = agent.contextBudget();
             ui.status(
-              `· ctx ${agent.contextPercent()}% of ${this.chosen.contextWindow.toLocaleString()} tokens · ${agent.messages.length} messages`
+              `Context ${budget.prompt.toLocaleString()} / ${budget.window.toLocaleString()} tokens (${budget.source})\nReply reserve ${budget.reserve.toLocaleString()} · available ${budget.available.toLocaleString()} · ${agent.messages.length} messages · ${agent.tools.length} tools`
             );
             break;
           case "clear":
@@ -460,6 +465,7 @@ export class Session {
   async shutdown(): Promise<void> {
     if (this.ended) return;
     this.ended = true;
+    this.agent.cancel();
     try {
       await this.bus.emit("session_end");
     } catch {

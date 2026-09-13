@@ -20,6 +20,9 @@ import {
   ToolCall,
   ToolSpec,
 } from "./types";
+import { responseLines, streamJson, withDeadline } from "./transport";
+import { scheduleInference } from "./scheduler";
+import { tryFetchJson } from "../util";
 
 /** Exported for tests. */
 export function toWire(messages: Msg[]): any[] {
@@ -55,6 +58,7 @@ function toWireTools(tools: ToolSpec[]): any[] {
 const KEEP_ALIVE = process.env.SMOLCODER_KEEP_ALIVE || "30m";
 
 export class OllamaProvider implements Provider {
+  readonly replaysThinking = true;
   readonly label: string;
   readonly maxOutputTokens: number;
   private effort: Effort | null = null;
@@ -82,6 +86,13 @@ export class OllamaProvider implements Provider {
     this.thinkUnsupported = false;
   }
 
+  async loadedContextWindow(): Promise<number | undefined> {
+    if (this.numCtx) return this.numCtx;
+    const ps = await tryFetchJson(`${this.baseUrl}/api/ps`, undefined, 1500);
+    const model = ps?.models?.find((m: any) => m.name === this.modelId || m.model === this.modelId);
+    return typeof model?.context_length === "number" ? model.context_length : undefined;
+  }
+
   effortLabel(): string | null {
     if (this.effort === null || this.effort === "off") return null;
     if (this.thinkUnsupported) return `${this.effort} (model has no thinking switch)`;
@@ -97,6 +108,10 @@ export class OllamaProvider implements Provider {
   }
 
   async chat(messages: Msg[], tools: ToolSpec[], opts: ChatOptions = {}): Promise<ChatResult> {
+    return scheduleInference(this.baseUrl, opts, (scheduled) => this.chatScheduled(messages, tools, scheduled));
+  }
+
+  private async chatScheduled(messages: Msg[], tools: ToolSpec[], opts: ChatOptions): Promise<ChatResult> {
     const effort = opts.effortOverride ?? this.effort;
     const makeBody = (stream: boolean, think: boolean | string | undefined) => ({
       model: this.modelId,
@@ -151,6 +166,10 @@ export class OllamaProvider implements Provider {
   }
 
   private async request(body: any, opts: ChatOptions, started?: { streaming: boolean }): Promise<ChatResult> {
+    return withDeadline(opts, (signal, activity) => this.readResponse(body, { ...opts, signal }, activity, started));
+  }
+
+  private async readResponse(body: any, opts: ChatOptions, activity: () => void, started?: { streaming: boolean }): Promise<ChatResult> {
     const t0 = Date.now();
     const res = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
@@ -171,9 +190,11 @@ export class OllamaProvider implements Provider {
     let promptTokPerSec: number | undefined;
     let genTokPerSec: number | undefined;
     let truncated = false;
+    let finished = false;
     let firstTokAt = 0;
 
     const handleChunk = (chunk: any) => {
+      if (chunk.error) throw new Error(`Ollama stream error: ${chunk.error}`);
       if (started) started.streaming = true; // committed — no safe re-request now
       const msg = chunk.message;
       if (msg?.thinking) {
@@ -198,6 +219,7 @@ export class OllamaProvider implements Provider {
         }
       }
       if (chunk.done) {
+        finished = true;
         if (typeof chunk.prompt_eval_count === "number") promptTokens = chunk.prompt_eval_count;
         if (typeof chunk.eval_count === "number") completionTokens = chunk.eval_count;
         if (typeof chunk.prompt_eval_duration === "number" && chunk.prompt_eval_duration > 0 && promptTokens) {
@@ -213,34 +235,11 @@ export class OllamaProvider implements Provider {
     if (body.stream === false) {
       handleChunk(await res.json());
     } else {
-      // NDJSON stream: one JSON object per line.
-      const reader = res.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let nl: number;
-        while ((nl = buffer.indexOf("\n")) >= 0) {
-          const line = buffer.slice(0, nl).trim();
-          buffer = buffer.slice(nl + 1);
-          if (!line) continue;
-          try {
-            handleChunk(JSON.parse(line));
-          } catch {
-            /* partial/garbled line — skip */
-          }
-        }
-      }
-      if (buffer.trim()) {
-        try {
-          handleChunk(JSON.parse(buffer.trim()));
-        } catch {
-          /* ignore */
-        }
+      for await (const line of responseLines(res, activity)) {
+        if (line) handleChunk(streamJson(line));
       }
     }
+    if (!finished) throw new Error("Ollama stream ended before completion; the response was discarded");
 
     return {
       content,

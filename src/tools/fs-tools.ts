@@ -44,7 +44,8 @@ function isProbablyBinary(filePath: string): boolean {
   return false;
 }
 
-export function readFile(root: string, args: any): string {
+export function readFile(root: string, args: any, maxChars = READ_CHAR_LIMIT): string {
+  const charLimit = Math.max(128, Math.min(READ_CHAR_LIMIT, Math.floor(maxChars)));
   const abs = resolveInWorkspace(root, args.path);
   if (!fs.existsSync(abs)) {
     const dir = path.dirname(abs);
@@ -59,6 +60,7 @@ export function readFile(root: string, args: any): string {
   if (stat.isDirectory()) {
     return `Error: "${args.path}" is a folder, not a file. Use list_files with {"path": "${args.path}"} to see what is inside it.`;
   }
+  if (stat.size > 8 * 1024 * 1024) return `Error: "${args.path}" exceeds the 8 MB text-file limit. Use a command to extract a small relevant section into a workspace file, then read that file.`;
   if (isProbablyBinary(abs)) {
     return `Error: "${args.path}" looks like a binary file (${stat.size} bytes) and cannot be read as text.`;
   }
@@ -75,8 +77,8 @@ export function readFile(root: string, args: any): string {
   let body = slice.join("\n");
   let end = offset - 1 + slice.length;
   let charCut = false;
-  if (body.length > READ_CHAR_LIMIT) {
-    const kept = body.slice(0, READ_CHAR_LIMIT).split("\n");
+  if (body.length > charLimit) {
+    const kept = body.slice(0, charLimit).split("\n");
     if (kept.length > 1) {
       // Cut on a line boundary so the trailer never claims a partially-shown
       // line was read.
@@ -88,10 +90,10 @@ export function readFile(root: string, args: any): string {
       // A single line longer than the limit: there is no line boundary to
       // advance to, so a line-based "continue" would loop forever. Serve the
       // head and say so, without a continuation offset.
-      body = body.slice(0, READ_CHAR_LIMIT);
+      body = body.slice(0, charLimit);
       return (
         body +
-        `\n\n[line ${offset} of ${total} is very long; showing its first ${READ_CHAR_LIMIT} characters only.]`
+        `\n\n[line ${offset} of ${total} is very long; showing its first ${charLimit} characters only.]`
       );
     }
   }
@@ -139,9 +141,11 @@ function findTrimmedMatch(fileLines: string[], oldLines: string[]): number[] {
   return matches;
 }
 
-function closestSnippet(fileLines: string[], oldText: string): string {
-  const firstLine = oldText.split("\n").find((l) => l.trim().length > 0)?.trim() ?? "";
-  if (!firstLine) return "";
+function closestSnippet(fileLines: string[], oldText: string): { text: string; offset: number; limit: number } | null {
+  const candidates = oldText.split("\n").map((l) => l.trim());
+  // A bare closing brace is not a useful anchor for a failed method edit.
+  const firstLine = candidates.find((l) => /[a-zA-Z_$]/.test(l) && l.length > 6) ?? "";
+  if (!firstLine) return null;
   const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
   const target = norm(firstLine);
   let bestIdx = -1;
@@ -161,10 +165,10 @@ function closestSnippet(fileLines: string[], oldText: string): string {
       bestIdx = i;
     }
   }
-  if (bestIdx < 0 || bestScore < 6) return "";
+  if (bestIdx < 0 || bestScore < 6) return null;
   const start = Math.max(0, bestIdx - 2);
-  const end = Math.min(fileLines.length, bestIdx + 3);
-  return fileLines.slice(start, end).join("\n");
+  const end = Math.min(fileLines.length, start + Math.min(20, Math.max(8, candidates.length + 4)));
+  return { text: fileLines.slice(start, end).join("\n"), offset: start + 1, limit: end - start };
 }
 
 export function editFile(root: string, args: any): string {
@@ -223,7 +227,7 @@ export function editFile(root: string, args: any): string {
   const snippet = closestSnippet(fileLines, oldText);
   if (snippet) {
     return (
-      `Error: old_text was not found in ${args.path}. The closest matching part of the file is below — copy it EXACTLY (including spaces) as old_text and try again:\n---\n${truncateEnd(snippet, 1500)}\n---`
+      `Error: old_text was not found in ${args.path}. Closest source starts at line ${snippet.offset}. Read this range: ${JSON.stringify({path:args.path,offset:snippet.offset,limit:snippet.limit})}. Use a small exact replacement; this snippet is only a location hint, not the whole block you tried to replace.\n---\n${truncateEnd(snippet.text, 1500)}\n---`
     );
   }
   return `Error: old_text was not found in ${args.path}. Call read_file on it first and copy the exact text you want to change.`;
@@ -284,6 +288,8 @@ export function searchFiles(root: string, args: any): string {
   const start = resolveInWorkspace(root, startRel);
   if (!fs.existsSync(start)) return `Error: folder "${startRel}" does not exist.`;
 
+  const startIsFile = fs.statSync(start).isFile();
+
   let re: RegExp;
   try {
     re = new RegExp(pattern, "i");
@@ -312,6 +318,7 @@ export function searchFiles(root: string, args: any): string {
       // contents (e.g. creds -> ~/.ssh/id_rsa) into model context. Skip all.
       if (e.isSymbolicLink()) continue;
       const abs = path.join(dir, e.name);
+      if (startIsFile && abs !== start) continue;
       if (e.isDirectory()) {
         walk(abs, depth + 1);
         continue;
@@ -340,7 +347,6 @@ export function searchFiles(root: string, args: any): string {
     }
   };
 
-  const startIsFile = fs.statSync(start).isFile();
   if (startIsFile) {
     walk(path.dirname(start), 8); // degenerate case; just scan that dir shallowly
   } else {

@@ -36,8 +36,8 @@
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
     "build": "npm run clean && tsc",
     "dev": "tsc -w",
-    "prepublishOnly": "npm run build && node --test",
-    "test": "npm run build && node --test"
+    "prepublishOnly": "npm test",
+    "test": "npm run build && node scripts/test.cjs"
   },
   "engines": {
     "node": ">=18"

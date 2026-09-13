@@ -44,6 +44,11 @@ export class SessionChannel implements SessionUI {
   private pending = new Map<number, { resolve: (v: any) => void; kind: "confirm" | "select"; label: string }>();
   private askId = 0;
 
+  restoreReplay(events: Event[]): void {
+    this.replay = events.slice(-REPLAY_CAP).filter((e) => e.t !== "confirm" && e.t !== "select" && e.t !== "answered");
+    this.askId = Math.max(0, ...events.map((e) => typeof e.id === "number" ? e.id : 0));
+  }
+
   constructor(
     readonly id: string,
     private host: ChannelHost
@@ -141,7 +146,10 @@ export class SessionChannel implements SessionUI {
   private broadcast(ev: Event): void {
     ev.sid = this.id;
     if (ev.t !== "busy" && ev.t !== "state") {
-      this.replay.push(ev);
+      const prev = this.replay[this.replay.length - 1];
+      if ((ev.t === "token" || ev.t === "thinking") && prev?.t === ev.t && String(prev.s).length + String(ev.s).length < 100_000) {
+        prev.s += ev.s;
+      } else this.replay.push({ ...ev });
       if (this.replay.length > REPLAY_CAP) this.replay.shift();
       this.host.touched(this.id);
     }
@@ -201,6 +209,10 @@ export class SessionChannel implements SessionUI {
     this.broadcast({ t: "token", s: text });
   }
 
+  resetResponse(): void {
+    this.broadcast({ t: "response_reset" });
+  }
+
   thinking(text: string): void {
     this.broadcast({ t: "thinking", s: text });
   }
@@ -217,6 +229,7 @@ export class SessionChannel implements SessionUI {
       line: first.slice(0, 160),
       err: first.startsWith("Error"),
       extra: lines.length > 1 ? lines.length - 1 : 0,
+      body: result,
     });
   }
 

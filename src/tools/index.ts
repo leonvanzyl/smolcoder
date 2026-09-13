@@ -1,17 +1,17 @@
-// Tool registry. Seven tools, flat parameters only (strings and one enum — no
+// Tool registry. Eight tools with flat parameters — no
 // nested objects or arrays: small models mangle them), an example call inside
 // every description (small models imitate better than they infer), and the
-// mode decides which tools EXIST — the permission model is "which schemas were
-// sent", not a runtime policy engine.
+// mode decides which schemas are sent. The agent rechecks mode at execution.
 
 import { Plan } from "../plan";
 import { ToolSpec } from "../providers/types";
-import { editFile, listFiles, readFile, searchFiles, writeFile } from "./fs-tools";
+import { editFile, listFiles, readFile, writeFile } from "./fs-tools";
 import { syntaxCheck } from "./check";
 import { runCommand } from "./shell";
 import { TaskManager } from "./tasks";
 import { resolveInWorkspace, SandboxError } from "../sandbox";
 import { truncateMiddle } from "../util";
+import { searchFilesBounded } from "./search-worker";
 
 export type Mode = "ro" | "edit" | "bypass";
 
@@ -66,14 +66,14 @@ export function buildToolSpecs(mode: Mode): ToolSpec[] {
     {
       name: "plan",
       description:
-        'Your to-do list for multi-step tasks — shown to the user and kept for you across context compaction. Create it first: {"action": "set", "steps": "create index.html\\ncreate game.js\\ntest the page"} (one step per line). Mark the current step finished with {"action": "done"} (or {"action": "done", "step": 2}). Append with {"action": "add", "text": "..."}. {"action": "show"} displays it.',
+        'Plan runnable increments, kept across compaction. Create: {"action":"set","steps":"wire entry point\\nrun build\\nadd movement and test"}. Finish current step: {"action":"done"} (or supply step). Save exact APIs, error and next edit before a long investigation: {"action":"checkpoint","text":"..."} (max 1000 chars, replaces current step notes). Append: {"action":"add","text":"..."}. Show: {"action":"show"}.',
       parameters: {
         type: "object",
         properties: {
-          action: { type: "string", enum: ["set", "done", "add", "show"] },
+          action: { type: "string", enum: ["set", "done", "add", "show", "checkpoint"] },
           steps: { type: "string", description: 'The steps, one per line (only for "set")' },
           step: { type: "number", description: 'Step number to mark done (optional, for "done")' },
-          text: { type: "string", description: 'Step to append (only for "add")' },
+          text: { type: "string", description: 'Step to append or working checkpoint' },
         },
         required: ["action"],
       },
@@ -150,6 +150,8 @@ export interface ToolContext {
   /** Records for the compaction state note. */
   filesTouched: Set<string>;
   commandsRun: string[];
+  /** Internal per-request cap; never a model-supplied tool argument. */
+  resultCharLimit?: number;
 }
 
 export async function executeTool(
@@ -162,13 +164,13 @@ export async function executeTool(
     let result: string;
     switch (name) {
       case "read_file":
-        result = readFile(ctx.workspace, args);
+        result = readFile(ctx.workspace, args, ctx.resultCharLimit ? ctx.resultCharLimit - 256 : undefined);
         break;
       case "list_files":
         result = listFiles(ctx.workspace, args);
         break;
       case "search":
-        result = searchFiles(ctx.workspace, args);
+        result = await searchFilesBounded(ctx.workspace, args, signal);
         break;
       case "plan": {
         const action = args.action;
@@ -176,9 +178,10 @@ export async function executeTool(
         else if (action === "done")
           result = ctx.plan.markDone(args.step === undefined ? undefined : Number(args.step));
         else if (action === "add") result = ctx.plan.add(String(args.text ?? ""));
+        else if (action === "checkpoint") result = ctx.plan.checkpoint(String(args.text ?? ""));
         else if (action === "show") result = ctx.plan.modelView();
         else
-          return 'Error: action must be one of "set", "done", "add", "show". Example: {"action": "done"}';
+          return 'Error: action must be one of "set", "done", "add", "show", "checkpoint". Example: {"action": "done"}';
         break;
       }
       case "write_file":
@@ -199,8 +202,9 @@ export async function executeTool(
         if (typeof args.command !== "string" || !args.command.trim()) {
           return 'Error: command is required. Example: {"command": "npm test"}';
         }
-        ctx.commandsRun.push(args.command);
         result = await runCommand(args.command, ctx.workspace, signal);
+        ctx.commandsRun.push(`${args.command} → ${result.split("\n").at(-1)}`);
+        if (ctx.commandsRun.length > 50) ctx.commandsRun.splice(0, ctx.commandsRun.length - 50);
         break;
       case "task": {
         const action = args.action;
