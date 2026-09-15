@@ -45,8 +45,8 @@ export const STYLES = String.raw`
   #side { width: 272px; flex: none; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
   #side.collapsed { display: none; }
   .sidehdr { display: flex; align-items: center; gap: 8px; padding: 12px 10px 8px 14px; }
-  .brand { font-weight: 700; color: var(--accent); letter-spacing: .5px; }
-  .brand .coder { color: var(--dim); }
+  /* The SMOL block logo, sized so all 39 columns fit beside the collapse button. */
+  .brand { color: var(--accent); white-space: pre; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 7px; line-height: 1.15; }
   #openfolder { margin: 2px 10px 10px; text-align: left; }
   #wslist { flex: 1; overflow-y: auto; padding: 0 6px 10px; }
   .sidehint { color: var(--dim); font-size: 12px; padding: 8px 10px; }
@@ -228,8 +228,7 @@ export const STYLES = String.raw`
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   #side { width: 248px; }
   .sidehdr { padding: 22px 18px 18px; }
-  .brand { font-size: 18px; letter-spacing: -.6px; }
-  .brand .coder { color: var(--fg); }
+
   #openfolder { margin: 0 14px 20px; padding: 8px 10px; background: transparent; }
   .wshdr { padding: 8px; }
   .wsname { max-width: 78%; font-weight: 600; }

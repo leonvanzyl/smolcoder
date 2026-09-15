@@ -29,7 +29,7 @@ export const PAGE_HTML = `<!doctype html>
 <body>
 <aside id="side">
   <div class="sidehdr">
-    <span class="brand">smol<span class="coder">coder</span></span>
+    <div class="brand" role="img" aria-label="smolcoder">${LOGO_TEXT}</div>
     <span class="grow"></span>
     <button class="iconbtn" id="sidecollapse" title="hide sidebar (ctrl+b)">«</button>
   </div>

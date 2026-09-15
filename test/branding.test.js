@@ -33,10 +33,14 @@ test('terminal banner falls back to the plain name on a narrow terminal', () => 
   for (const r of LOGO_ROWS) assert.ok(!lines[0].includes(r.trimEnd()));
 });
 
-test('web welcome screen carries the logo', () => {
+test('web welcome screen and sidebar header carry the logo', () => {
   assert.ok(PAGE_HTML.includes('<div id="logo"'), 'welcome logo element missing');
   assert.ok(PAGE_HTML.includes(LOGO_TEXT), 'welcome logo text missing');
   assert.ok(PAGE_HTML.includes('coder — web'));
+  const side = PAGE_HTML.slice(PAGE_HTML.indexOf('<aside id="side">'), PAGE_HTML.indexOf('</aside>'));
+  assert.ok(side.includes(LOGO_TEXT), 'sidebar header logo missing');
+  assert.ok(side.includes('role="img" aria-label="smolcoder"'), 'sidebar logo needs an accessible name');
+  assert.ok(!side.includes('smol<span'), 'the old text wordmark should be gone');
 });
 
 test('a fresh, empty web session opens on the logo', () => {
