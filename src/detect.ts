@@ -31,6 +31,8 @@ export interface DetectedModel {
   loaded?: boolean;
   /** LM Studio only: reasoning levels the model supports and its default. */
   reasoning?: ReasoningInfo;
+  /** Whether the model accepts image input; undefined when the backend did not say. */
+  vision?: boolean;
   note?: string;
 }
 
@@ -134,6 +136,11 @@ export async function detectOllamaModels(): Promise<DetectedModel[]> {
 const NOT_LOADED_NOTE =
   "not loaded yet — LM Studio will load it on first use, likely at a small default context. For longer sessions, load it in LM Studio with a bigger context first.";
 
+/** LM Studio labels vision models "vlm" and text-only ones "llm". */
+function visionOf(type: unknown): boolean | undefined {
+  return type === "vlm" ? true : type === "llm" ? false : undefined;
+}
+
 /** Exported for tests: parse LM Studio's /api/v1/models listing. */
 export function parseLmStudioV1(data: any): DetectedModel[] | null {
   if (!data || !Array.isArray(data.models)) return null;
@@ -158,6 +165,7 @@ export function parseLmStudioV1(data: any): DetectedModel[] | null {
         maxContext: max,
         loaded,
         reasoning,
+        vision: visionOf(m.type),
         note: loaded && loadedCtx ? undefined : NOT_LOADED_NOTE,
       };
     });
@@ -194,6 +202,7 @@ export async function detectLmStudioModels(): Promise<DetectedModel[]> {
           contextWindow,
           maxContext: max,
           loaded,
+          vision: visionOf(m.type),
           note,
         };
       });
@@ -240,6 +249,8 @@ export async function resolveContextWindow(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: model.id }),
     });
+    // Newer Ollama lists what the model can do; "vision" means it takes images.
+    if (Array.isArray(info?.capabilities)) model = { ...model, vision: info.capabilities.includes("vision") };
     let max: number | undefined;
     const mi = info?.model_info;
     if (mi && typeof mi === "object") {

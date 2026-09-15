@@ -14,6 +14,9 @@ const ICON_BROWSER =
 const ICON_TERMINAL =
   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
 
+const ICON_ATTACH =
+  '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+
 export const PAGE_HTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -54,8 +57,11 @@ export const PAGE_HTML = `<!doctype html>
   <div id="bottom" hidden><div class="inner">
     <div id="menu"></div>
     <div id="inputbox">
+      <div id="attachrow" hidden></div>
       <div class="inputrow">
-        <textarea id="input" aria-label="Message" rows="2" placeholder="Describe a change…" title="Enter to send · Shift+Enter for a new line · / for commands"></textarea>
+        <textarea id="input" aria-label="Message" rows="2" placeholder="Describe a change…" title="Enter to send · Shift+Enter for a new line · / for commands · paste or drop files to attach"></textarea>
+        <button id="attachbtn" class="iconbtn" title="Attach a file or image — or paste / drop one" aria-label="Attach a file">${ICON_ATTACH}</button>
+        <input type="file" id="filepick" multiple hidden>
         <button id="actionbtn" title="send (enter)">send</button>
       </div>
       <div id="status">connecting…</div>

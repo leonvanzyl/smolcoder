@@ -3,6 +3,7 @@
 // and small helpers for status lines. No dependencies.
 
 import * as readline from "readline";
+import { UserInput } from "./attachments";
 import { Plan } from "./plan";
 import { c } from "./util";
 
@@ -51,7 +52,8 @@ export interface SessionUI extends AgentUI {
   onExit: (() => void) | null;
   start(): void;
   close(): void;
-  readInput(): Promise<string>;
+  /** The next user turn: plain text, or text plus attachments from the web UI. */
+  readInput(): Promise<string | UserInput>;
   select(title: string, options: SelectOption[]): Promise<number | null>;
   refresh(): void;
 }

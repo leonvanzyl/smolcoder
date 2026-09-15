@@ -27,6 +27,7 @@ import {
 } from "./types";
 import { responseLines, streamJson, withDeadline } from "./transport";
 import { scheduleInference } from "./scheduler";
+import { imageDataUrl } from "../attachments";
 import { tryFetchJson } from "../util";
 
 export interface ReasoningInfo {
@@ -36,7 +37,8 @@ export interface ReasoningInfo {
   default?: string;
 }
 
-function toWire(messages: Msg[]): any[] {
+/** Exported for tests. */
+export function toWire(messages: Msg[]): any[] {
   return messages.map((m) => {
     if (m.role === "assistant" && m.toolCalls?.length) {
       return {
@@ -51,6 +53,15 @@ function toWire(messages: Msg[]): any[] {
     }
     if (m.role === "tool") {
       return { role: "tool", tool_call_id: m.toolCallId, content: m.content };
+    }
+    if (m.role === "user" && m.images?.length) {
+      // OpenAI-style content parts: the text, then each image as a data URL.
+      const parts: any[] = [{ type: "text", text: m.content }];
+      for (const ref of m.images) {
+        const url = imageDataUrl(ref);
+        if (url) parts.push({ type: "image_url", image_url: { url } });
+      }
+      return { role: "user", content: parts.length > 1 ? parts : m.content };
     }
     return { role: m.role, content: m.content };
   });
@@ -102,7 +113,9 @@ export class LmStudioProvider implements Provider {
     public readonly modelId: string,
     public readonly contextWindow: number,
     maxOutputTokens = MAX_OUTPUT_TOKENS,
-    private reasoning?: ReasoningInfo
+    private reasoning?: ReasoningInfo,
+    /** Whether the model accepts images (LM Studio lists such models as "vlm"). */
+    public readonly vision?: boolean
   ) {
     this.label = `lmstudio · ${modelId}`;
     this.maxOutputTokens = maxOutputTokens;

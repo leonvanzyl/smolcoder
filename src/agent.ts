@@ -3,6 +3,7 @@
 // model emits several anyway, they simply run sequentially. Malformed calls
 // come back as coaching errors so the model can retry instead of derailing.
 
+import { Attachment, renderAttachmentsForModel } from "./attachments";
 import { ContextManager } from "./context";
 import { EventBus } from "./events";
 import { ChatResult, Msg, Provider, ToolSpec } from "./providers/types";
@@ -241,7 +242,7 @@ export class Agent {
     }
   }
 
-  async runTurn(userInput: string): Promise<void> {
+  async runTurn(userInput: string, attachments: Attachment[] = []): Promise<void> {
     await this.ctxMgr.foreground();
     this.ctxMgr.cancelBackground(true);
     this.outcome = "running";
@@ -254,9 +255,17 @@ export class Agent {
     // Earlier user decisions may exist only in a previous turn's summary.
     // Only a fresh conversation can safely discard every old narrative.
     this.canRefreshVerification = !this.originalRequest && this.messages.length === 1;
-    if (!this.originalRequest) this.originalRequest = userInput;
-    this.currentRequest = userInput; // the task compaction must never lose
-    this.messages.push({ role: "user", content: userInput + this.verificationInstruction() });
+    const rendered = renderAttachmentsForModel(attachments, this.provider.vision !== false);
+    const request = userInput || (attachments.length ? `See the attached ${attachments.length === 1 ? "file" : "files"}.` : "");
+    // Compaction keeps the request text, so the file names ride along with it.
+    const requestNote = attachments.length ? `${request} [attached: ${attachments.map((a) => a.name).join(", ")}]` : request;
+    if (!this.originalRequest) this.originalRequest = requestNote;
+    this.currentRequest = requestNote; // the task compaction must never lose
+    this.messages.push({
+      role: "user",
+      content: request + (rendered.text ? "\n\n" + rendered.text : "") + this.verificationInstruction(),
+      ...(rendered.images.length ? { images: rendered.images } : {}),
+    });
     this.abort = new AbortController();
     const signal = this.abort.signal;
 

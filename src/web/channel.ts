@@ -4,6 +4,7 @@
 // Keeps a replay buffer (so a page that connects later sees the transcript),
 // the pending input/approval promises, and a coarse status for the sidebar.
 
+import { Attachment, UserInput } from "../attachments";
 import { Plan } from "../plan";
 import { SelectOption, SessionUI, SlashCommand, summarizeArgs } from "../ui";
 
@@ -38,8 +39,8 @@ export class SessionChannel implements SessionUI {
   replay: Event[] = [];
   closed = false;
 
-  private pendingInput: ((s: string) => void) | null = null;
-  private inputQueue: string[] = [];
+  private pendingInput: ((s: string | UserInput) => void) | null = null;
+  private inputQueue: (string | UserInput)[] = [];
   private exitRequested = false;
   private pending = new Map<number, { resolve: (v: any) => void; kind: "confirm" | "select"; label: string }>();
   private askId = 0;
@@ -78,16 +79,18 @@ export class SessionChannel implements SessionUI {
 
   // ---- input from the page -------------------------------------------------
 
-  handleMessage(text: string): void {
+  /** A message from the page: text, attachments, or both. */
+  handleMessage(text: string, attachments: Attachment[] = []): void {
     text = text.trim();
-    if (!text || this.closed) return;
+    if ((!text && !attachments.length) || this.closed) return;
+    const input: string | UserInput = attachments.length ? { text, attachments } : text;
     if (this.pendingInput) {
       const resolve = this.pendingInput;
       this.pendingInput = null;
-      this.accept(text);
-      resolve(text);
+      this.accept(input);
+      resolve(input);
     } else {
-      this.inputQueue.push(text);
+      this.inputQueue.push(input);
     }
   }
 
@@ -126,11 +129,17 @@ export class SessionChannel implements SessionUI {
     p.resolve(value);
   }
 
-  private accept(text: string): void {
+  private accept(input: string | UserInput): void {
+    const text = typeof input === "string" ? input : input.text;
+    const files =
+      typeof input === "string"
+        ? []
+        : input.attachments.map((a) => ({ id: a.id, name: a.name, kind: a.kind, size: a.size, url: uploadUrl(this.id, a.id) }));
     this.setStatus("busy");
-    this.broadcast({ t: "user", s: text });
-    if (!this.title && !text.startsWith("/")) {
-      this.title = text.replace(/\s+/g, " ").slice(0, 60);
+    this.broadcast({ t: "user", s: text, ...(files.length ? { files } : {}) });
+    const label = text || files.map((f) => f.name).join(", ");
+    if (!this.title && !label.startsWith("/")) {
+      this.title = label.replace(/\s+/g, " ").slice(0, 60);
       this.host.changed(this.id);
     }
   }
@@ -170,7 +179,7 @@ export class SessionChannel implements SessionUI {
 
   // ---- SessionUI -----------------------------------------------------------
 
-  readInput(): Promise<string> {
+  readInput(): Promise<string | UserInput> {
     this.busyLabel = null;
     this.setStatus("idle");
     this.pushState();
@@ -268,6 +277,11 @@ export class SessionChannel implements SessionUI {
     this.busyLabel = null;
     this.broadcast({ t: "busy", label: null });
   }
+}
+
+/** Where the page fetches a stored upload (it appends its own key). */
+export function uploadUrl(sid: string, id: string): string {
+  return `/upload?sid=${sid}&id=${id}`;
 }
 
 export function stripAnsi(s: string): string {

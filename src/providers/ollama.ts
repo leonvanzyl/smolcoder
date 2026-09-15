@@ -22,6 +22,7 @@ import {
 } from "./types";
 import { responseLines, streamJson, withDeadline } from "./transport";
 import { scheduleInference } from "./scheduler";
+import { imageBase64 } from "../attachments";
 import { tryFetchJson } from "../util";
 
 /** Exported for tests. */
@@ -40,6 +41,10 @@ export function toWire(messages: Msg[]): any[] {
     }
     if (m.role === "tool") {
       return { role: "tool", content: m.content, tool_name: m.toolName };
+    }
+    if (m.role === "user" && m.images?.length) {
+      const images = m.images.map(imageBase64).filter((b): b is string => b !== null);
+      return { role: "user", content: m.content, ...(images.length ? { images } : {}) };
     }
     return { role: m.role, content: m.content };
   });
@@ -72,7 +77,9 @@ export class OllamaProvider implements Provider {
     public readonly contextWindow: number,
     /** Explicit num_ctx to send; undefined = respect the server's configured context. */
     private numCtx?: number,
-    maxOutputTokens = MAX_OUTPUT_TOKENS
+    maxOutputTokens = MAX_OUTPUT_TOKENS,
+    /** Whether the model accepts images (from /api/show capabilities). */
+    public readonly vision?: boolean
   ) {
     this.label = `ollama · ${modelId}`;
     this.maxOutputTokens = maxOutputTokens;

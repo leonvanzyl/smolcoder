@@ -29,6 +29,7 @@ import { lastUserIndex, Msg, Provider, ToolSpec } from "./providers/types";
 import { estimateTokens, truncateEnd, truncateMiddle } from "./util";
 import { abortableDelay } from "./providers/transport";
 import { isHistoryPlaceholder } from "./history";
+import { IMAGE_TOKENS } from "./attachments";
 
 const MSG_OVERHEAD_TOKENS = 8;
 const EVICT_KEEP_RECENT = 6; // never evict tool results in the last N messages
@@ -116,6 +117,7 @@ export class ContextManager {
     for (let i = 0; i < messages.length; i++) {
       const m = messages[i];
       total += estimateTokens(m.content ?? "") + MSG_OVERHEAD_TOKENS;
+      if (m.images?.length) total += m.images.length * IMAGE_TOKENS;
       if (this.replaysThinking && m.thinking && i > thinkingFrom) total += estimateTokens(m.thinking);
       if (m.toolCalls) {
         for (const tc of m.toolCalls) {

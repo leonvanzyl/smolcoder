@@ -18,12 +18,18 @@ import * as path from "path";
 import { DATA_DIR, loadConfig } from "../config";
 import { noBackendsMessage, prepareModel, Session, SessionPrefs, SessionSnapshot } from "../session";
 import { tryFetchJson } from "../util";
-import { Event, SessionChannel } from "./channel";
+import { Attachment, classifyUpload, extOf, MAX_UPLOAD_BYTES, mimeForExt, safeName } from "../attachments";
+import { Event, SessionChannel, uploadUrl } from "./channel";
 import { PAGE_HTML } from "./page";
 import { SessionMeta, SessionStore, WorkspaceStore, workspaceKey } from "./store";
 import { Terminal } from "./terminal";
 
 export type SessionFactory = (ui: SessionChannel, workspace: string, prefs: SessionPrefs) => Promise<Session>;
+
+/** Session ids are short hex and upload ids are 16 hex chars. Both end up in
+ * file paths under the data folder, so nothing else is accepted. */
+const SESSION_ID_RE = /^[a-z0-9_-]{1,64}$/i;
+const UPLOAD_ID_RE = /^[a-f0-9]{16}$/;
 
 export interface HubOptions {
   port: number;
@@ -47,6 +53,8 @@ interface Live {
   /** Snapshot to restore when a failed start is retried. */
   pendingRestore: SessionSnapshot | null;
   terminals: Map<string, Terminal>;
+  /** Files uploaded for the next message, by id, until that message is sent. */
+  uploads: Map<string, Attachment>;
   saveTimer: NodeJS.Timeout | null;
   saving: boolean;
   dirty: boolean;
@@ -345,6 +353,11 @@ export class WebHub {
     }
     this.store.delete(id);
     this.metas.delete(id);
+    try {
+      fs.rmSync(this.uploadsDir(id), { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
     this.changed();
   }
 
@@ -404,6 +417,7 @@ export class WebHub {
       error: null,
       pendingRestore: null,
       terminals: new Map(),
+      uploads: new Map(),
       saveTimer: null,
       saving: false,
       dirty: false,
@@ -679,6 +693,9 @@ export class WebHub {
         case "/fs":
           json(200, browseDir(url.searchParams.get("path")));
           return;
+        case "/upload":
+          this.serveUpload(res, url);
+          return;
         default:
           res.writeHead(404);
           res.end();
@@ -686,6 +703,10 @@ export class WebHub {
       }
     }
     if (req.method === "POST") {
+      if (url.pathname === "/upload") {
+        this.receiveUpload(req, res, url);
+        return;
+      }
       let body = "";
       req.on("data", (d) => {
         body += d;
@@ -730,6 +751,108 @@ export class WebHub {
     req.on("close", () => this.clients.delete(res));
   }
 
+  // ---- attachments ---------------------------------------------------------
+
+  private uploadsDir(sid: string): string {
+    return path.join(this.dataDir, "uploads", sid);
+  }
+
+  /** One file for a live session, sent as the raw request body with the name
+   * in the query string (a pasted screenshot has no name; the page makes one). */
+  private receiveUpload(req: http.IncomingMessage, res: http.ServerResponse, url: URL): void {
+    const reply = (code: number, body: any) => {
+      res.writeHead(code, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    const sid = String(url.searchParams.get("sid") ?? "");
+    const live = SESSION_ID_RE.test(sid) ? this.live.get(sid) : undefined;
+    if (!live) {
+      reply(404, { error: "no such session" });
+      req.resume();
+      return;
+    }
+    const name = safeName(url.searchParams.get("name"));
+    const mime = String(req.headers["content-type"] ?? "application/octet-stream").split(";")[0].trim().toLowerCase();
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let failed = false;
+    req.on("data", (d: Buffer) => {
+      if (failed) return;
+      size += d.length;
+      if (size > MAX_UPLOAD_BYTES) {
+        failed = true;
+        reply(413, { error: `"${name}" is larger than the ${MAX_UPLOAD_BYTES / 1024 / 1024} MB upload limit.` });
+        req.destroy();
+        return;
+      }
+      chunks.push(d);
+    });
+    req.on("end", () => {
+      if (failed) return;
+      const bytes = Buffer.concat(chunks);
+      const verdict = classifyUpload(name, mime, bytes);
+      if ("error" in verdict) {
+        reply(415, { error: verdict.error });
+        return;
+      }
+      const id = crypto.randomBytes(8).toString("hex");
+      const dir = this.uploadsDir(sid);
+      const file = path.join(dir, `${id}.${extOf(name, mime)}`);
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(file, bytes);
+      } catch (err: any) {
+        reply(500, { error: `could not store the upload: ${err?.message ?? err}` });
+        return;
+      }
+      const att: Attachment = { id, name, kind: verdict.kind, mime: verdict.mime, size: bytes.length, path: file };
+      live.uploads.set(id, att);
+      const model = live.session?.chosen;
+      const warning =
+        att.kind === "image" && model?.vision === false
+          ? `${model.id} cannot see images — switch to a vision-capable model with /models`
+          : undefined;
+      reply(200, { id, name, kind: att.kind, size: att.size, url: uploadUrl(sid, id), ...(warning ? { warning } : {}) });
+    });
+  }
+
+  /** A stored upload, for the page's thumbnails and "open" links. */
+  private serveUpload(res: http.ServerResponse, url: URL): void {
+    const sid = String(url.searchParams.get("sid") ?? "");
+    const id = String(url.searchParams.get("id") ?? "");
+    const file = SESSION_ID_RE.test(sid) && UPLOAD_ID_RE.test(id) ? this.findUpload(sid, id) : null;
+    if (!file) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    res.writeHead(200, { "content-type": mimeForExt(path.extname(file).slice(1)), "content-length": fs.statSync(file).size });
+    fs.createReadStream(file).pipe(res);
+  }
+
+  private findUpload(sid: string, id: string): string | null {
+    const dir = this.uploadsDir(sid);
+    try {
+      const entry = fs.readdirSync(dir).find((f) => f.startsWith(id + "."));
+      return entry ? path.join(dir, entry) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The user took a chip off the composer: forget the file. */
+  private removeUpload(live: Live, id: string): void {
+    const att = live.uploads.get(id);
+    live.uploads.delete(id);
+    const file = att?.path ?? (UPLOAD_ID_RE.test(id) ? this.findUpload(live.id, id) : null);
+    if (!file) return;
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      /* already gone */
+    }
+  }
+
   private checkDir(p: any): string {
     const s = String(p ?? "").trim();
     if (!s) throw new Error("path is required");
@@ -746,8 +869,17 @@ export class WebHub {
       return l;
     };
     switch (p) {
-      case "/msg":
-        live().channel.handleMessage(String(d.text ?? ""));
+      case "/msg": {
+        const l = live();
+        const ids: string[] = Array.isArray(d.attachments) ? d.attachments.map(String) : [];
+        const attachments = ids.map((id) => l.uploads.get(id));
+        if (attachments.some((a) => !a)) throw new Error("an attachment is no longer available — add it again");
+        for (const id of ids) l.uploads.delete(id);
+        l.channel.handleMessage(String(d.text ?? ""), attachments as Attachment[]);
+        return {};
+      }
+      case "/upload/remove":
+        this.removeUpload(live(), String(d.id ?? ""));
         return {};
       case "/confirm":
         live().channel.handleAnswer(Number(d.id), d.answer);

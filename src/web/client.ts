@@ -176,6 +176,27 @@ function dropView(sid) {
 function stick() { if (stickBottom) logwrap.scrollTop = logwrap.scrollHeight; }
 logwrap.addEventListener("scroll", () => { stickBottom = logwrap.scrollHeight - logwrap.scrollTop - logwrap.clientHeight < 120; });
 function add(v, e) { v.logEl.appendChild(e); if (v === active) stick(); return e; }
+function fmtSize(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(n < 10240 ? 1 : 0) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
+// A sent message: its text, then thumbnails for images and links for files.
+function userBubble(m) {
+  const d = el("div", "user", m.s || "");
+  if (m.files && m.files.length) {
+    const row = el("div", "files");
+    for (const f of m.files) {
+      const href = f.url + "&k=" + k;
+      if (f.kind === "image") {
+        const a = el("a"); a.href = href; a.target = "_blank"; a.rel = "noopener";
+        const img = el("img", "thumb"); img.src = href; img.alt = f.name; img.title = f.name; img.loading = "lazy";
+        a.appendChild(img); row.appendChild(a);
+      } else {
+        const a = el("a", "filechip", f.name + " · " + fmtSize(f.size)); a.href = href; a.target = "_blank"; a.rel = "noopener";
+        row.appendChild(a);
+      }
+    }
+    d.appendChild(row);
+  }
+  return d;
+}
 // Streaming: accumulate raw markdown on the element, re-render on a short
 // timer. NOT requestAnimationFrame: rAF never fires in background tabs, so a
 // response streamed while the tab is hidden would never render.
@@ -276,7 +297,7 @@ function handle(m) {
       v.state = Object.assign(v.state, m.s);
       if (m.s && "busy" in m.s) setBusy(v, m.s.busy);
       renderState(v); break;
-    case "user": endThought(v); v.curText = null; v.curTool = null; v.planEl = null; add(v, el("div", "user", m.s)); break;
+    case "user": endThought(v); v.curText = null; v.curTool = null; v.planEl = null; add(v, userBubble(m)); break;
     case "response_reset":
       if (v.curText) v.curText.remove();
       if (v.curThought) v.curThought.remove();
@@ -401,7 +422,7 @@ function show(sid) {
     if (location.hash) history.replaceState(null, "", location.pathname + location.search);
     $("status").textContent = "";
   }
-  renderPanel(); renderSidebar(); renderCrumb(); renderTitle(); renderWelcome();
+  renderPanel(); renderSidebar(); renderCrumb(); renderTitle(); renderWelcome(); renderAttachments();
 }
 function newSession(path) {
   post("/sessions/new", { workspace: path }).then((r) => { if (r.id) { pendingSelect = r.id; show(r.id); } else if (r.error) alert(r.error); });
@@ -801,10 +822,13 @@ function submit() {
   const items = menuItems();
   if (items.length) v = "/" + items[menuIdx].name;
   v = v.trim();
-  if (!v) return;
-  input.value = ""; active.draft = ""; renderMenu(); autoGrow();
+  const pending = pendingOf(active);
+  if (pending.some((a) => a.uploading)) return; // let the upload finish first
+  const files = pending.filter((a) => a.id).map((a) => a.id);
+  if (!v && !files.length) return;
+  input.value = ""; active.draft = ""; active.pending = []; renderMenu(); autoGrow(); renderAttachments();
   stickBottom = true;
-  post("/msg", { sid: active.sid, text: v });
+  post("/msg", { sid: active.sid, text: v, attachments: files }).then((r) => { if (r && r.error) alert(r.error); });
 }
 function autoGrow() { input.rows = Math.min(6, Math.max(1, input.value.split("\n").length)); }
 input.addEventListener("input", () => { menuIdx = 0; renderMenu(); autoGrow(); });
@@ -819,11 +843,72 @@ input.addEventListener("keydown", (e) => {
 });
 actionBtn.onclick = () => { if (!active) return; if (active.busyLabel) post("/cancel", { sid: active.sid }); else submit(); };
 
+// ---- attachments ----------------------------------------------------------
+// Paste a screenshot (ctrl+v or right-click → paste), drop files on the chat,
+// or pick them with the paperclip. Each file is uploaded right away and shown
+// as a chip; the ids go with the next message.
+const attachRow = $("attachrow"), filePick = $("filepick"), mainEl = $("main");
+function pendingOf(v) { if (!v.pending) v.pending = []; return v.pending; }
+function renderAttachments() {
+  attachRow.innerHTML = "";
+  const list = active ? pendingOf(active) : [];
+  attachRow.hidden = !list.length;
+  for (const a of list) {
+    const chip = el("span", "attach" + (a.uploading ? " uploading" : "") + (a.warning ? " warn" : ""));
+    if (a.kind === "image" && a.url) { const img = el("img", "attach-thumb"); img.src = a.url + "&k=" + k; img.alt = ""; chip.appendChild(img); }
+    chip.appendChild(el("span", "attach-name", a.name));
+    chip.appendChild(el("span", "dim", a.uploading ? "uploading…" : fmtSize(a.size)));
+    if (a.warning) { chip.title = a.warning; chip.appendChild(el("span", "note", "model can't see images")); }
+    const x = el("button", "attach-x", "×"); x.type = "button"; x.title = "remove"; x.onclick = () => removeAttachment(a);
+    chip.appendChild(x);
+    attachRow.appendChild(chip);
+  }
+}
+function addFiles(files) {
+  if (!active) return;
+  for (const f of files) upload(active, f);
+  input.focus();
+}
+async function upload(v, file) {
+  const type = file.type || "application/octet-stream";
+  const name = file.name || (type.startsWith("image/") ? "pasted-image." + (type.split("/")[1] || "png").replace("jpeg", "jpg") : "pasted.txt");
+  const entry = { id: null, name, size: file.size, kind: type.startsWith("image/") ? "image" : "text", uploading: true };
+  pendingOf(v).push(entry); renderAttachments();
+  try {
+    const r = await fetch("/upload?k=" + k + "&sid=" + v.sid + "&name=" + encodeURIComponent(name), { method: "POST", headers: { "content-type": type }, body: file });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.error) throw new Error(d.error || ("upload failed (" + r.status + ")"));
+    Object.assign(entry, d, { uploading: false });
+  } catch (err) {
+    const list = pendingOf(v); const i = list.indexOf(entry); if (i >= 0) list.splice(i, 1);
+    alert(String((err && err.message) || err));
+  }
+  renderAttachments();
+}
+function removeAttachment(a) {
+  if (!active) return;
+  const list = pendingOf(active); const i = list.indexOf(a); if (i >= 0) list.splice(i, 1);
+  if (a.id) post("/upload/remove", { sid: active.sid, id: a.id });
+  renderAttachments();
+}
+$("attachbtn").onclick = () => { if (active) filePick.click(); };
+filePick.onchange = () => { addFiles([...filePick.files]); filePick.value = ""; };
+input.addEventListener("paste", (e) => {
+  const files = e.clipboardData && e.clipboardData.files ? [...e.clipboardData.files] : [];
+  if (!files.length) return; // plain text pastes as usual
+  e.preventDefault();
+  addFiles(files);
+});
+function hasFiles(e) { return !!(e.dataTransfer && [...e.dataTransfer.types].includes("Files")); }
+mainEl.addEventListener("dragover", (e) => { if (!active || !hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; mainEl.classList.add("dragging"); });
+mainEl.addEventListener("dragleave", (e) => { if (e.relatedTarget && mainEl.contains(e.relatedTarget)) return; mainEl.classList.remove("dragging"); });
+mainEl.addEventListener("drop", (e) => { mainEl.classList.remove("dragging"); if (!active || !hasFiles(e)) return; e.preventDefault(); addFiles([...e.dataTransfer.files]); });
+
 // ---- global keys ----------------------------------------------------------
 $("keys").onclick = () => {
   const dialog = document.createElement("dialog"); dialog.className = "dlg";
   const list = el("div", "shortcut-list");
-  ["/  Commands", "Enter  Send", "Shift+Enter  New line", "Shift+Tab  Permission mode", "Esc  Cancel", "Ctrl+B  Sidebar", "Ctrl+\`  Terminal"].forEach((s) => list.appendChild(el("div", "", s)));
+  ["/  Commands", "Enter  Send", "Shift+Enter  New line", "Ctrl+V  Paste an image or a file", "Shift+Tab  Permission mode", "Esc  Cancel", "Ctrl+B  Sidebar", "Ctrl+\`  Terminal"].forEach((s) => list.appendChild(el("div", "", s)));
   const close = el("button", "ghost", "Close"); close.onclick = () => dialog.close(); list.appendChild(close);
   dialog.appendChild(list); document.body.appendChild(dialog); dialog.onclose = () => dialog.remove(); dialog.showModal();
 };

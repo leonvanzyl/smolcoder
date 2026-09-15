@@ -292,6 +292,23 @@ export const STYLES = String.raw`
   #busy { font-size: 12px; }
   #panel { background: #101416; }
   .shortcut-list { line-height: 2; padding: 16px 24px; }
+
+  /* Attachments: chips in the composer; thumbnails and file links in a sent message. */
+  #attachrow { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .attach { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px 4px 8px; background: #141a1d; font-size: 12px; color: var(--fg); }
+  .attach.uploading { opacity: .7; }
+  .attach.warn { border-color: var(--yellow); }
+  .attach-thumb { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; }
+  .attach-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attach .note { color: var(--yellow); }
+  .attach-x { background: transparent; border: 0; color: var(--dim); cursor: pointer; font: inherit; font-size: 15px; padding: 0 2px; line-height: 1; }
+  .attach-x:hover { color: var(--red); }
+  #attachbtn { flex: none; padding: 5px 7px; }
+  #main.dragging #inputbox { border-color: var(--accent); box-shadow: 0 0 0 3px #35bfd433; }
+  .user .files { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+  .user .thumb { display: block; max-width: min(320px, 100%); max-height: 240px; border-radius: 8px; border: 1px solid var(--line); }
+  .user .filechip { display: inline-block; border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: 12px; color: var(--fg); text-decoration: none; background: #141a1d; }
+  .user .filechip:hover { border-color: var(--accent); }
   @media (max-width: 600px) {
     #top { min-height: 48px; padding: 8px 12px; }
     #logs, #busywrap { padding-left: 16px; padding-right: 16px; }

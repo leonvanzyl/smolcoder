@@ -10,9 +10,19 @@ export interface ToolCall {
   parseError?: string;
 }
 
+/** An image attached to a user turn. The bytes stay on disk and are read into
+ * the request when it is sent, so transcripts and replays stay small. */
+export interface ImageRef {
+  path: string;
+  mime: string;
+  name: string;
+}
+
 export interface Msg {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  /** Images attached to a user turn (vision input). */
+  images?: ImageRef[];
   toolCalls?: ToolCall[];
   toolCallId?: string;
   toolName?: string;
@@ -104,6 +114,8 @@ export interface Provider {
   readonly contextWindow: number;
   /** Tokens reserved for the model's reply within the window. */
   readonly maxOutputTokens: number;
+  /** Whether the model accepts image input; undefined when the backend did not say. */
+  readonly vision?: boolean;
   setEffort(effort: Effort | null): void;
   /** What the current effort setting actually does on this backend/model —
    * shown in the status line so "default" is never a mystery. null = nothing

@@ -59,8 +59,8 @@ export function outputBudget(window: number): number {
 export function makeProvider(m: DetectedModel): Provider {
   const maxOut = outputBudget(m.contextWindow);
   return m.backend === "ollama"
-    ? new OllamaProvider(m.baseUrl, m.id, m.contextWindow, m.numCtx, maxOut)
-    : new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, m.reasoning);
+    ? new OllamaProvider(m.baseUrl, m.id, m.contextWindow, m.numCtx, maxOut, m.vision)
+    : new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, m.reasoning, m.vision);
 }
 
 /** One-line advice when the effective reasoning setting will be slow: LM
@@ -327,6 +327,7 @@ export class Session {
       mode: this.agent.mode,
       model: this.chosen.id,
       backend: this.chosen.backend,
+      vision: this.chosen.vision,
       effort: this.agent.provider.effortLabel() ?? this.effort,
       ctxTokens: this.agent.contextTokens(),
       ctxPct: this.agent.contextPercent(),
@@ -385,9 +386,11 @@ export class Session {
     const { ui, agent, toolCtx, taskManager } = this;
     await this.bus.emit("session_start");
     for (;;) {
-      const input = await ui.readInput();
+      const raw = await ui.readInput();
+      const input = typeof raw === "string" ? raw : raw.text;
+      const attachments = typeof raw === "string" ? [] : raw.attachments;
 
-      if (input.startsWith("/")) {
+      if (!attachments.length && input.startsWith("/")) {
         const [cmd, ...rest] = input.slice(1).split(/\s+/);
         const arg = rest[0];
         switch (cmd) {
@@ -447,7 +450,7 @@ export class Session {
       }
 
       try {
-        await agent.runTurn(input);
+        await agent.runTurn(input, attachments);
         this.onTurnDone?.();
       } catch (err: any) {
         ui.error(`\n${err?.message ?? err}`);
