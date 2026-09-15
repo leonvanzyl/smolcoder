@@ -10,10 +10,24 @@ const { Plan } = require('../dist/plan');
 const { TaskManager } = require('../dist/tools/tasks');
 const { projectVerification } = require('../dist/verification');
 
+/** Windows can hold a just-killed command's working directory open for a
+ * while, longer still under full-suite load. Wait it out, and if it never
+ * frees up, leave the temp folder behind rather than fail a passing test. */
+async function removeWorkspace(dir) {
+  for (let i = 0; i < 100; i++) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); return; }
+    catch (err) {
+      if (!/EPERM|EBUSY|ENOTEMPTY/.test(String(err && err.code))) throw err;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  console.warn('cleanup: leaving ' + dir + ' behind (still in use)');
+}
+
 function setup(t, chat, verification) {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'smol-verify-'));
   const ctx = {workspace,plan:new Plan(),taskManager:new TaskManager(workspace),filesTouched:new Set(),commandsRun:[]};
-  t.after(()=>{ctx.taskManager.killAll();fs.rmSync(workspace,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
+  t.after(async()=>{ctx.taskManager.killAll();await removeWorkspace(workspace);});
   const ui = {token(){},thinking(){},toolCall(){},toolResult(){},println(){},status(){},warn(){},error(){},startSpinner(){},stopSpinner(){},turnEnd(){},planUpdated(){}};
   const provider = {label:'fake',modelId:'fake',contextWindow:8000,maxOutputTokens:2000,setEffort(){},effortLabel(){return null;},chat};
   const bus=new EventBus(), manager=new ContextManager(8000,2000);
