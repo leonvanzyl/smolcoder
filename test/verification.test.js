@@ -13,7 +13,7 @@ const { projectVerification } = require('../dist/verification');
 function setup(t, chat, verification) {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'smol-verify-'));
   const ctx = {workspace,plan:new Plan(),taskManager:new TaskManager(workspace),filesTouched:new Set(),commandsRun:[]};
-  t.after(()=>{ctx.taskManager.killAll();fs.rmSync(workspace,{recursive:true,force:true});});
+  t.after(()=>{ctx.taskManager.killAll();fs.rmSync(workspace,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
   const ui = {token(){},thinking(){},toolCall(){},toolResult(){},println(){},status(){},warn(){},error(){},startSpinner(){},stopSpinner(){},turnEnd(){},planUpdated(){}};
   const provider = {label:'fake',modelId:'fake',contextWindow:8000,maxOutputTokens:2000,setEffort(){},effortLabel(){return null;},chat};
   const bus=new EventBus(), manager=new ContextManager(8000,2000);
