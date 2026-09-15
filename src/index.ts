@@ -15,6 +15,7 @@ import { Agent } from "./agent";
 import { loadConfig } from "./config";
 import { ContextManager } from "./context";
 import { EventBus } from "./events";
+import { terminalLogo } from "./logo";
 import { Plan } from "./plan";
 import { buildSystemPrompt, loadAgentsMd } from "./prompt";
 import { Effort } from "./providers/types";
@@ -170,8 +171,9 @@ function installSignalCleanup(cleanup: () => void): void {
   process.on("SIGINT", () => run(130));
 }
 
+/** The SMOL banner that opens every interactive session. */
 function printLogo(): void {
-  console.log(`${c.cyan(c.bold("smolcoder"))} ${c.dim("v" + VERSION)}\n`);
+  for (const line of terminalLogo(process.stdout.columns || 80, VERSION)) console.log(line);
 }
 
 function prefsOf(args: CliArgs): SessionPrefs {

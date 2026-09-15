@@ -1,5 +1,11 @@
 // Compact workspace chrome, with monospace reserved for code and commands.
 
+import { LOGO_ROWS } from "../logo";
+
+// The logo as a CSS string: "\A " is a newline whose trailing space is eaten
+// by the escape, so each row starts where it should.
+const LOGO_CSS = LOGO_ROWS.map((r) => r.trimEnd()).join("\\A ");
+
 export const STYLES = String.raw`
   :root {
     --bg: #111416; --fg: #e1e5e7; --dim: #a0a8ae; --gray: #79838b;
@@ -86,7 +92,7 @@ export const STYLES = String.raw`
   .wsbtn { background: transparent; border: 1px solid transparent; color: var(--fg); padding: 4px 8px; border-radius: 4px; cursor: pointer; text-align: left; }
   .wsbtn:hover { border-color: var(--line); background: #141a1d; }
   .wsbtn .dim { color: var(--gray); font-size: 12px; }
-  #logo { color: var(--accent); white-space: pre; font-size: 11px; line-height: 1.15; margin: 8px 0 12px; }
+  #logo { color: var(--accent); white-space: pre; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11px; line-height: 1.15; margin: 8px 0 12px; }
   #logo .coder { color: var(--dim); }
 
   .user { border-left: 3px solid var(--accent); background: var(--box); padding: 8px 12px; margin: 18px 0 10px; font-weight: 600; white-space: pre-wrap; }
@@ -239,12 +245,13 @@ export const STYLES = String.raw`
   #logs, #busywrap { max-width: 860px; padding-left: 32px; padding-right: 32px; }
   #welcome { max-width: 660px; padding-top: clamp(48px, 16vh, 180px); }
   #welcome h1 { font-size: clamp(26px, 3vw, 38px); letter-spacing: -1.2px; font-weight: 500; margin: 16px 0 24px; }
-  .welcome-mark { font-size: 34px; color: var(--accent); font-weight: 700; }
   .primary { padding: 9px 18px; border-radius: 7px; }
   .recent-label { font-size: 12px; margin-top: 30px; margin-bottom: 6px; color: var(--gray); }
   .wsbtn { width: 100%; padding: 9px 0; }
   .wsbtn .dim { float: right; }
-  .log:empty::before { content: "What are we building?"; display: block; margin-top: 18vh; color: var(--dim); font-size: 26px; letter-spacing: -.7px; }
+  /* A fresh session opens on the logo until the first message arrives. */
+  .log:empty::before { content: "${LOGO_CSS}"; display: block; margin-top: 14vh; color: var(--accent); white-space: pre; font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11px; line-height: 1.15; }
+  .log:empty::after { content: "What are we building?"; display: block; margin-top: 18px; color: var(--dim); font-size: 26px; letter-spacing: -.7px; }
   .user { border: 1px solid var(--line); border-radius: 10px; background: #1b2125; padding: 14px 18px; margin: 24px 0; font-weight: 400; }
   .md { line-height: 1.8; }
   .md p { margin: 12px 0; }

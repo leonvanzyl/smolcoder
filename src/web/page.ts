@@ -2,6 +2,7 @@
 // no dependencies) served by the hub. Structure only — the styling lives in
 // styles.ts and the behaviour in client.ts.
 
+import { LOGO_TEXT } from "../logo";
 import { CLIENT_JS } from "./client";
 import { STYLES } from "./styles";
 
@@ -42,7 +43,7 @@ export const PAGE_HTML = `<!doctype html>
   </div>
   <div id="logwrap">
     <div id="welcome" hidden>
-      <div class="welcome-mark" aria-hidden="true">s.</div>
+      <div id="logo" role="img" aria-label="smolcoder">${LOGO_TEXT}   <span class="coder">coder — web</span></div>
       <h1>What are we building?</h1>
       <div class="row"><button class="primary" id="welcomeopen">Open a folder</button></div>
       <div id="recent"></div>
