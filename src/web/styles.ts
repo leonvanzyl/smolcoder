@@ -80,7 +80,7 @@ export const STYLES = String.raw`
   #crumb .ws { color: var(--fg); font-weight: 700; }
   #crumb .sep { margin: 0 6px; color: var(--gray); }
   #crumb .model { color: var(--gray); margin-left: 10px; }
-  #logwrap { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+  #logwrap { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; overflow-anchor: none; }
   #logs, #busywrap { max-width: 920px; margin: 0 auto; padding: 16px 16px 0; }
   #logs { overflow-wrap: anywhere; }
   #wslist, #fslist, .tabbody.term .out { overflow-x: hidden; }
@@ -96,7 +96,17 @@ export const STYLES = String.raw`
   #logo .coder { color: var(--dim); }
 
   .user { border-left: 3px solid var(--accent); background: var(--box); padding: 8px 12px; margin: 18px 0 10px; font-weight: 600; white-space: pre-wrap; }
-  .thought { color: var(--gray); white-space: nowrap; overflow: hidden; margin-top: 4px; }
+  .thought { color: var(--gray); margin-top: 4px; }
+  .thought summary { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; list-style: none; }
+  .thought summary::-webkit-details-marker { display: none; }
+  .thought summary::before { content: "›"; flex: none; }
+  .thought[open] summary::before { content: "⌄"; }
+  .thought summary:hover { color: var(--fg); }
+  .thought-preview { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .thought-expand, .thought-collapse { flex: none; color: var(--dim); }
+  .thought-collapse, .thought[open] .thought-expand { display: none; }
+  .thought[open] .thought-collapse { display: inline; }
+  .thought-body { color: var(--dim); white-space: pre-wrap; overflow-wrap: anywhere; border-left: 2px solid var(--line); padding: 8px 12px; margin: 4px 0 12px 4px; line-height: 1.7; }
   .md { white-space: normal; }
   .md p { margin: 6px 0; }
   .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 14px 0 6px; line-height: 1.3; color: #eef3f5; }
@@ -138,6 +148,7 @@ export const STYLES = String.raw`
 
   #bottom { flex: none; padding: 8px 16px 12px; background: var(--bg); }
   #bottom .inner { max-width: 920px; margin: 0 auto; position: relative; }
+  #jumpbottom { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 4; border-radius: 20px; padding: 6px 14px; white-space: nowrap; box-shadow: 0 4px 16px #0006; font-size: 12px; }
   #menu { position: absolute; bottom: 100%; left: 0; right: 0; background: var(--box); border: 1px solid var(--line); display: none; z-index: 5; }
   #menu .item { padding: 4px 10px; cursor: pointer; }
   #menu .item .nm { font-weight: 700; } #menu .item .ds { color: var(--dim); margin-left: 10px; }

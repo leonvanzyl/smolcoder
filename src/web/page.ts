@@ -44,7 +44,7 @@ export const PAGE_HTML = `<!doctype html>
     <button class="iconbtn" id="btnbrowser" title="browser panel: preview a dev server next to the chat">${ICON_BROWSER}</button>
     <button class="iconbtn" id="btnterm" title="terminal panel (ctrl+\`)">${ICON_TERMINAL}</button>
   </div>
-  <div id="logwrap">
+  <div id="logwrap" tabindex="0" role="region" aria-label="Session messages">
     <div id="welcome" hidden>
       <div id="logo" role="img" aria-label="smolcoder">${LOGO_TEXT}   <span class="coder">coder — web</span></div>
       <h1>What are we building?</h1>
@@ -55,6 +55,7 @@ export const PAGE_HTML = `<!doctype html>
     <div id="busywrap"><div id="busy"><span class="spin">⠋</span> <span id="busylabel">thinking…</span> <span id="busysecs"></span></div></div>
   </div>
   <div id="bottom" hidden><div class="inner">
+    <button id="jumpbottom" class="ghost" type="button" aria-label="Scroll to bottom" title="Scroll to bottom" hidden>↓ Latest messages</button>
     <div id="menu"></div>
     <div id="inputbox">
       <div id="attachrow" hidden></div>

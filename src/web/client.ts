@@ -16,6 +16,7 @@ const ls = {
   set(key, v) { try { localStorage.setItem(key, v); } catch (e) {} },
 };
 const logwrap = $("logwrap"), logsEl = $("logs"), busyEl = $("busy"), actionBtn = $("actionbtn");
+const jumpBottom = $("jumpbottom");
 const input = $("input"), menu = $("menu"), sideEl = $("side"), panelEl = $("panel"), tabsEl = $("paneltabs");
 
 let hub = { workspaces: [], home: "", version: "" };
@@ -24,7 +25,6 @@ const views = new Map();      // sid -> per-session view state
 let active = null;
 let pendingSelect = null;
 let busyTimer = null;
-let stickBottom = true;
 let uidCounter = 0;
 const uid = () => "u" + (++uidCounter) + "_" + Date.now().toString(36);
 
@@ -156,7 +156,7 @@ function getView(sid) {
   if (!v) {
     v = {
       sid, logEl: el("div", "log"), state: { commands: [] }, curText: null, curThought: null, thoughtBuf: "", thoughtStart: 0,
-      busyLabel: null, busyStart: 0, unread: false, draft: "", scrollTop: null, asks: new Map(), curTool: null, planEl: null,
+      busyLabel: null, busyStart: 0, unread: false, draft: "", scrollTop: null, followBottom: true, asks: new Map(), curTool: null, planEl: null,
       terms: new Map(), tabs: [], activeTab: null, panelOpen: false, panelEl: el("div", "panelview"),
     };
     v.logEl.hidden = true; logsEl.appendChild(v.logEl);
@@ -173,8 +173,38 @@ function dropView(sid) {
   views.delete(sid);
   if (active === v) show(null);
 }
-function stick() { if (stickBottom) logwrap.scrollTop = logwrap.scrollHeight; }
-logwrap.addEventListener("scroll", () => { stickBottom = logwrap.scrollHeight - logwrap.scrollTop - logwrap.clientHeight < 120; });
+// Only follow while at the bottom. Keep this per session, so returning to a
+// transcript doesn't lose the place the user was reading.
+function atBottom() { return logwrap.scrollHeight - logwrap.scrollTop - logwrap.clientHeight <= 2; }
+function renderJumpBottom() { jumpBottom.hidden = !active || atBottom(); }
+function stick() {
+  if (active) {
+    // A token can arrive before the browser delivers a pending scroll event.
+    if (active.scrollTop !== null && logwrap.scrollTop < active.scrollTop && !atBottom()) active.followBottom = false;
+    if (active.followBottom) logwrap.scrollTop = logwrap.scrollHeight;
+    active.scrollTop = logwrap.scrollTop;
+  }
+  renderJumpBottom();
+}
+function scrollToBottom() {
+  if (!active) return;
+  active.followBottom = true;
+  logwrap.scrollTop = logwrap.scrollHeight;
+  active.scrollTop = logwrap.scrollTop;
+  renderJumpBottom();
+}
+logwrap.addEventListener("scroll", () => {
+  if (active) { active.followBottom = atBottom(); active.scrollTop = logwrap.scrollTop; }
+  renderJumpBottom();
+}, { passive: true });
+logwrap.addEventListener("wheel", (e) => {
+  if (active && e.deltaY < 0 && logwrap.scrollTop > 0) active.followBottom = false;
+}, { passive: true });
+jumpBottom.onclick = scrollToBottom;
+// Images, disclosure panels, and viewport/composer resizing can change the
+// transcript height without a new message event.
+const logResize = new ResizeObserver(stick);
+logResize.observe(logwrap); logResize.observe(logsEl); logResize.observe($("busywrap"));
 function add(v, e) { v.logEl.appendChild(e); if (v === active) stick(); return e; }
 function fmtSize(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(n < 10240 ? 1 : 0) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
 // A sent message: its text, then thumbnails for images and links for files.
@@ -207,9 +237,31 @@ function scheduleMd(v, target) {
 }
 function endThought(v) {
   if (v.curThought) {
-    v.curThought.textContent = "✦ thought for " + ((Date.now() - v.thoughtStart) / 1000).toFixed(1) + "s";
+    v.curThought._preview.textContent = "✦ thought for " + ((Date.now() - v.thoughtStart) / 1000).toFixed(1) + "s";
     v.curThought = null; v.thoughtBuf = "";
   }
+}
+function startThought(v) {
+  const thought = el("details", "thought"), summary = el("summary");
+  thought._preview = el("span", "thought-preview");
+  summary.appendChild(thought._preview);
+  summary.appendChild(el("span", "thought-expand", "Expand"));
+  summary.appendChild(el("span", "thought-collapse", "Collapse"));
+  const body = el("div", "thought-body");
+  thought._body = document.createTextNode(""); body.appendChild(thought._body);
+  thought.appendChild(summary); thought.appendChild(body);
+  summary.addEventListener("click", () => {
+    // Opening a long thought should keep its beginning in view, including
+    // when it is still streaming. Native summary activation handles keys too.
+    if (v === active && !thought.open) v.followBottom = false;
+  });
+  thought.addEventListener("toggle", () => {
+    // Collapsing can put us back at the bottom without changing scrollTop,
+    // so there may be no scroll event to resume following.
+    if (v === active) { v.followBottom = atBottom(); stick(); }
+  });
+  v.thoughtStart = Date.now(); v.thoughtBuf = ""; v.curText = null;
+  return add(v, thought);
 }
 
 function setBusy(v, label) {
@@ -307,11 +359,12 @@ function handle(m) {
       if (!v.curText) { v.curText = add(v, el("div", "md")); v.curText._raw = ""; }
       v.curText._raw += m.s; scheduleMd(v, v.curText); break;
     case "thinking":
-      if (!v.curThought) { v.curThought = add(v, el("div", "thought")); v.thoughtStart = Date.now(); v.thoughtBuf = ""; v.curText = null; }
-      v.thoughtBuf += m.s;
-      if (v.thoughtBuf.length > 4000) v.thoughtBuf = v.thoughtBuf.slice(-2000);
+      if (!v.curThought) v.curThought = startThought(v);
+      v.curThought._body.appendData(m.s);
+      // Only the one-line preview is truncated; the full text stays available.
+      v.thoughtBuf = (v.thoughtBuf + m.s).slice(-2000);
       var tt = v.thoughtBuf.replace(/\s+/g, " ").trim();
-      v.curThought.textContent = "✦ " + (tt.length > 160 ? "…" + tt.slice(-160) : tt);
+      v.curThought._preview.textContent = "✦ " + (tt.length > 160 ? "…" + tt.slice(-160) : tt);
       if (v === active) stick(); break;
     case "tool": {
       endThought(v); v.curText = null;
@@ -410,19 +463,21 @@ function show(sid) {
   if (active) {
     active.logEl.hidden = false; active.unread = false;
     input.value = active.draft || ""; autoGrow(); menuIdx = 0; renderMenu();
-    renderState(active); renderBusy();
-    stickBottom = true;
-    logwrap.scrollTop = active.scrollTop == null ? logwrap.scrollHeight : active.scrollTop;
+    renderState(active);
+    logwrap.scrollTop = active.followBottom ? logwrap.scrollHeight : active.scrollTop || 0;
+    active.scrollTop = logwrap.scrollTop;
+    renderBusy();
     if (location.hash !== "#" + sid) history.replaceState(null, "", "#" + sid);
     // On a narrow window the sidebar floats over the chat: tuck it away once
     // a session is picked.
     if (narrow()) setSide(true);
-    input.focus();
+    input.focus({ preventScroll: true });
   } else {
     if (location.hash) history.replaceState(null, "", location.pathname + location.search);
     $("status").textContent = "";
   }
   renderPanel(); renderSidebar(); renderCrumb(); renderTitle(); renderWelcome(); renderAttachments();
+  stick();
 }
 function newSession(path) {
   post("/sessions/new", { workspace: path }).then((r) => { if (r.id) { pendingSelect = r.id; show(r.id); } else if (r.error) alert(r.error); });
@@ -827,7 +882,7 @@ function submit() {
   const files = pending.filter((a) => a.id).map((a) => a.id);
   if (!v && !files.length) return;
   input.value = ""; active.draft = ""; active.pending = []; renderMenu(); autoGrow(); renderAttachments();
-  stickBottom = true;
+  scrollToBottom();
   post("/msg", { sid: active.sid, text: v, attachments: files }).then((r) => { if (r && r.error) alert(r.error); });
 }
 function autoGrow() { input.rows = Math.min(6, Math.max(1, input.value.split("\n").length)); }
