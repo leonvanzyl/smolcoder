@@ -112,3 +112,36 @@ test("settings: defaults are validated; bypass is never saved as a default", () 
   assert.throws(() => settings.saveDefaults({ effort: "extreme" }), /effort/);
   assert.throws(() => settings.saveDefaults({ mode: "bypass" }), /mode/);
 });
+
+test("settings: the hub serves the page's endpoints behind its token", async () => {
+  saveConfig({});
+  const { WebHub } = require("../dist/web/hub");
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "smol-settings-hub-"));
+  const hub = new WebHub({ port: 0, prefs: {}, help: "help", version: "9.9.9", dataDir, factory: async () => { throw new Error("unused"); }, quiet: true });
+  await hub.start();
+  const call = (method, p, body) =>
+    new Promise((resolve, reject) => {
+      const req = http.request({ host: "127.0.0.1", port: hub.port, path: p, method, headers: { "content-type": "application/json" } }, (res) => {
+        let data = "";
+        res.on("data", (c) => (data += c));
+        res.on("end", () => { let parsed = data; try { parsed = JSON.parse(data); } catch {} resolve({ status: res.statusCode, body: parsed }); });
+      });
+      req.on("error", reject);
+      req.end(body ? JSON.stringify(body) : undefined);
+    });
+  const k = "?k=" + hub.authToken;
+  try {
+    assert.equal((await call("GET", "/settings")).status, 403, "no token, no settings");
+    assert.equal((await call("POST", "/settings/defaults" + k, { effort: "low", mode: "ro" })).status, 200);
+    const bad = await call("POST", "/settings/defaults" + k, { mode: "bypass" });
+    assert.equal(bad.status, 400);
+    assert.match(bad.body.error, /mode/);
+    const view = await call("GET", "/settings" + k);
+    assert.equal(view.status, 200);
+    assert.ok(Array.isArray(view.body.servers));
+    assert.deepEqual({ e: view.body.defaults.effort, m: view.body.defaults.mode }, { e: "low", m: "ro" });
+    assert.equal((await call("POST", "/settings/machines/add" + k, { address: "ftp://x" })).body.status, "invalid");
+  } finally {
+    hub.close();
+  }
+});
