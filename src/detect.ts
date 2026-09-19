@@ -308,7 +308,8 @@ export interface ServerInfo {
 /** Ask one address which model server it is. null means none (or
  * nothing there). Both native listings are requested together so a dead
  * address costs one timeout, not one per backend. */
-export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIMEOUT_MS): Promise<ServerInfo | null> {
+export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIMEOUT_MS, apiKey?: string): Promise<ServerInfo | null> {
+  const keyed = apiKey ? { authorization: `Bearer ${apiKey}` } : undefined;
   const [tags, v1, health] = await Promise.all([
     probeJson(`${base}/api/tags`, timeoutMs),
     probeJson(`${base}/api/v1/models`, timeoutMs),
@@ -318,11 +319,11 @@ export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIM
   // oMLX: /health is the one open endpoint. A wrong or missing key still
   // identifies the server, with no models.
   if (isOmlxHealth(health.data)) {
-    const listing = await tryFetchJson(`${base}/v1/models`, { headers: omlxHeaders(base) }, timeoutMs);
+    const listing = await tryFetchJson(`${base}/v1/models`, { headers: keyed ?? omlxHeaders(base) }, timeoutMs);
     return { backend: "omlx", baseUrl: base, models: parseOmlxModels(listing, base) ?? [] };
   }
   if (isMtplxHealth(health.data)) {
-    const listing = await tryFetchJson(`${base}/v1/models`, { headers: mtplxHeaders() }, timeoutMs);
+    const listing = await tryFetchJson(`${base}/v1/models`, { headers: keyed ?? mtplxHeaders(base) }, timeoutMs);
     return { backend: "mtplx", baseUrl: base, models: parseMtplxModels(listing, base) ?? [] };
   }
   // LM Studio first: its listing names models by "key", which nothing else does.

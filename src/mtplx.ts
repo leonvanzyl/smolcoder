@@ -4,11 +4,13 @@
 // the /health answer tells them apart.
 //
 // A key is only required when MTPLX listens beyond this computer
-// (`mtplx serve --host 0.0.0.0 --api-key …`); MTPLX_API_KEY supplies it.
+// (`mtplx serve --host 0.0.0.0 --api-key …`): saved for the server from the
+// model picker, or given as MTPLX_API_KEY.
 
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { savedKey } from "./config";
 import type { DetectedModel } from "./detect";
 
 /** The port in the MTPLX app's settings; undefined when it is not installed. */
@@ -21,8 +23,13 @@ export function readMtplxPort(home = os.homedir()): number | undefined {
   }
 }
 
-export function mtplxHeaders(): Record<string, string> {
-  const key = process.env.MTPLX_API_KEY;
+/** A key saved for that server from the picker, else MTPLX_API_KEY. */
+export function mtplxApiKey(base: string): string | undefined {
+  return savedKey(base) || process.env.MTPLX_API_KEY;
+}
+
+export function mtplxHeaders(base: string): Record<string, string> {
+  const key = mtplxApiKey(base);
   return key ? { authorization: `Bearer ${key}` } : {};
 }
 

@@ -4,11 +4,13 @@
 //
 // The key is read from oMLX's own settings, the same way LM Studio's port is
 // read from its settings, so a local oMLX needs no setup. That key is only
-// ever sent to this computer; OMLX_API_KEY names a key for any address.
+// ever sent to this computer. Otherwise a key is saved for the server from the
+// model picker (Network hosts → API key), or given as OMLX_API_KEY.
 
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { savedKey } from "./config";
 import type { DetectedModel } from "./detect";
 
 export interface OmlxSettings {
@@ -33,9 +35,10 @@ export function readOmlxSettings(home = os.homedir()): OmlxSettings {
 
 const LOOPBACK = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[::1\])(?=[:/]|$)/i;
 
-/** The key to send to an oMLX at `base`, if we know one. */
+/** The key to send to an oMLX at `base`, if we know one: one saved for that
+ * server from the picker, then OMLX_API_KEY, then (this computer only) oMLX's own. */
 export function omlxApiKey(base: string, settings: OmlxSettings = readOmlxSettings()): string | undefined {
-  return process.env.OMLX_API_KEY || (LOOPBACK.test(base) ? settings.apiKey : undefined);
+  return savedKey(base) || process.env.OMLX_API_KEY || (LOOPBACK.test(base) ? settings.apiKey : undefined);
 }
 
 export function omlxHeaders(base: string): Record<string, string> {

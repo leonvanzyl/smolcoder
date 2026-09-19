@@ -6,17 +6,17 @@
 // sends source code to the server it talks to and runs the tool calls that
 // come back, so choosing a host is choosing to trust it.
 
-import { loadConfig, SavedHost, updateConfig } from "./config";
+import { loadConfig, SavedHost, savedKey, setKeys, updateConfig } from "./config";
 import { identifyServer, probeHosts, ServerInfo } from "./detect";
-import { addHost, hostLabel, isPrivateHost, parseAddress, removeHost, renameHost } from "./hosts";
+import { addHost, hostLabel, hostUrls, isPrivateHost, parseAddress, removeHost, renameHost } from "./hosts";
 import { FoundHost, localSubnets, scanSubnets, Subnet } from "./netscan";
-import { SelectOption } from "./ui";
+import { PromptOptions, SelectOption } from "./ui";
 import { plural } from "./util";
 
 /** The slice of a UI these flows need — the TUI and the web channel both fit. */
 export interface FlowUI {
   select(title: string, options: SelectOption[]): Promise<number | null>;
-  prompt(title: string, placeholder?: string): Promise<string | null>;
+  prompt(title: string, placeholder?: string, opts?: PromptOptions): Promise<string | null>;
   status(s: string): void;
   warn(s: string): void;
   startSpinner(label: string): void;
@@ -44,6 +44,13 @@ export function notFoundHelp(platform: NodeJS.Platform = process.platform): stri
   );
 }
 
+// Servers that can require an API key.
+const KEYED: string[] = ["omlx", "mtplx"];
+
+function askKey(ui: FlowUI, what: string): Promise<string | undefined> {
+  return ui.prompt(`API key for ${what}`, "the key set in the server's settings", { secret: true }).then((k) => k ?? undefined);
+}
+
 function save(hosts: SavedHost[]): SavedHost[] {
   return updateConfig({ hosts }).hosts ?? [];
 }
@@ -69,14 +76,31 @@ async function enterAddress(ui: FlowUI, replace?: SavedHost): Promise<boolean> {
   const found = (await Promise.all(parsed.urls.map((u) => identifyServer(u, 4000)))).filter((s): s is ServerInfo => !!s);
   ui.stopSpinner();
   if (!found.length) {
-    ui.warn(`Nothing answered at ${parsed.hostname} as Ollama or LM Studio.`);
+    ui.warn(`Nothing answered at ${parsed.hostname} as a model server.`);
     ui.status(notFoundHelp());
     return false;
   }
   if (!(await confirmOutsideNetwork(ui, parsed.hostname, found[0].baseUrl))) return false;
+  // oMLX and MTPLX answer /health without a key but list nothing without one.
+  const locked = found.findIndex((s) => KEYED.includes(s.backend) && !s.models.length);
+  let apiKey: string | undefined;
+  if (locked >= 0) {
+    const server = found[locked];
+    apiKey = await askKey(ui, `${BACKEND_NAMES[server.backend]} at ${parsed.hostname}`);
+    if (!apiKey) return false;
+    ui.startSpinner(`checking the key with ${parsed.hostname}`);
+    const again = await identifyServer(server.baseUrl, 4000, apiKey);
+    ui.stopSpinner();
+    if (!again?.models.length) {
+      ui.warn(`${BACKEND_NAMES[server.backend]} at ${parsed.hostname} did not accept that API key.`);
+      return false;
+    }
+    found[locked] = again;
+  }
   let hosts = loadConfig().hosts ?? [];
   if (replace) hosts = removeHost(hosts, replace.address);
   save(addHost(hosts, { address: parsed.address, ...(replace?.name ? { name: replace.name } : {}) }));
+  if (apiKey) setKeys([found[locked].baseUrl], apiKey);
   ui.status(`· added ${replace?.name ?? parsed.hostname} — ${describeServers(found.map((s) => ({ backend: s.backend, models: s.models.length })))}`);
   return true;
 }
@@ -152,7 +176,7 @@ export async function findModelsOnNetwork(ui: FlowUI, replace?: SavedHost): Prom
 }
 
 /** "Network hosts…": see what each added machine serves, rename or remove
- * it, or look for it again when its address changed. Returns true when the
+ * it, set its API key, or look for it again when its address changed. Returns true when the
  * list changed. */
 export async function manageHosts(ui: FlowUI): Promise<boolean> {
   let changed = false;
@@ -176,11 +200,16 @@ export async function manageHosts(ui: FlowUI): Promise<boolean> {
     );
     if (pick === null) return changed;
     const { host, servers } = statuses[pick];
-    const actions: { label: string; hint?: string; run: "rename" | "remove" | "refind" }[] = [
+    const actions: { label: string; hint?: string; run: "rename" | "remove" | "refind" | "key" | "unkey" }[] = [
       { label: "Rename", run: "rename" },
       { label: "Remove", run: "remove" },
     ];
     if (!servers.length) actions.push({ label: "Look for it again", hint: "its address may have changed", run: "refind" });
+    // Keys belong to servers; offer them where a server can require one.
+    const keyed = servers.filter((s) => KEYED.includes(s.backend)).map((s) => s.baseUrl);
+    const hasKey = keyed.some((u) => savedKey(u));
+    if (keyed.length) actions.push({ label: "API key", hint: hasKey ? "saved · enter a new one to replace it" : "the key set in the server's settings", run: "key" });
+    if (hasKey) actions.push({ label: "Remove API key", run: "unkey" });
     const act = await ui.select(hostLabel(host), actions.map(({ label, hint }) => ({ label, hint })));
     if (act === null) continue;
     if (actions[act].run === "rename") {
@@ -189,8 +218,20 @@ export async function manageHosts(ui: FlowUI): Promise<boolean> {
         save(renameHost(hosts, host.address, name));
         changed = true;
       }
+    } else if (actions[act].run === "key") {
+      const key = await askKey(ui, hostLabel(host));
+      if (key) {
+        setKeys(keyed, key);
+        ui.status(`· API key saved for ${hostLabel(host)}`);
+        changed = true;
+      }
+    } else if (actions[act].run === "unkey") {
+      setKeys(keyed);
+      ui.status(`· API key removed for ${hostLabel(host)}`);
+      changed = true;
     } else if (actions[act].run === "remove") {
       save(removeHost(hosts, host.address));
+      setKeys([...hostUrls(host), ...servers.map((s) => s.baseUrl)]);
       ui.status(`· removed ${hostLabel(host)}`);
       changed = true;
     } else if (await findModelsOnNetwork(ui, host)) {

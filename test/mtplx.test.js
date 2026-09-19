@@ -2,6 +2,8 @@
 // /health answer, listed from /v1/models, thinking switched off the way it
 // documents. Shares port 8000 with oMLX by default; the answer decides.
 const test = require("node:test");
+// Saved hosts can hold keys: never read the real config.
+process.env.SMOLCODER_CONFIG = require("node:path").join(require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "smol-cfg-")), "c.json");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");

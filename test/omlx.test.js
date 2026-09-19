@@ -1,6 +1,8 @@
 // oMLX (Apple Silicon MLX server): found on its own port, identified by its
 // /health answer, and asked for models with the API key it requires.
 const test = require("node:test");
+// Saved hosts can hold keys: never read the real config.
+process.env.SMOLCODER_CONFIG = require("node:path").join(require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "smol-cfg-")), "c.json");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const http = require("node:http");

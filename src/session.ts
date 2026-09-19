@@ -13,6 +13,7 @@ import { findModelsOnNetwork, FlowUI, manageHosts } from "./network";
 import { Plan, PlanStep } from "./plan";
 import { buildSystemPrompt, loadAgentsMd } from "./prompt";
 import { LmStudioProvider } from "./providers/lmstudio";
+import { mtplxApiKey } from "./mtplx";
 import { omlxApiKey } from "./omlx";
 import { OllamaProvider } from "./providers/ollama";
 import { Effort, Msg, Provider } from "./providers/types";
@@ -64,7 +65,7 @@ export function makeProvider(m: DetectedModel): Provider {
   const maxOut = outputBudget(m.contextWindow);
   if (m.backend === "ollama") return new OllamaProvider(m.baseUrl, m.id, m.contextWindow, m.numCtx, maxOut, m.vision);
   if (m.backend === "omlx") return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, undefined, m.vision, omlxApiKey(m.baseUrl), "oMLX");
-  if (m.backend === "mtplx") return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, undefined, m.vision, process.env.MTPLX_API_KEY, "MTPLX");
+  if (m.backend === "mtplx") return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, undefined, m.vision, mtplxApiKey(m.baseUrl), "MTPLX");
   return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, m.reasoning, m.vision);
 }
 
