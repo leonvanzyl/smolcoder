@@ -112,16 +112,20 @@ export const STYLES = String.raw`
   .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 14px 0 6px; line-height: 1.3; color: #eef3f5; }
   .md h1 { font-size: 1.3em; } .md h2 { font-size: 1.17em; } .md h3 { font-size: 1.06em; }
   .md h4, .md h5, .md h6 { font-size: 1em; }
-  .md ul, .md ol { margin: 6px 0; padding-left: 22px; }
+  .md ul, .md ol { margin: 6px 0; padding-inline-start: 22px; }
   .md li { margin: 2px 0; }
   .md strong { color: #eef3f5; }
   .md code { background: #1b2124; padding: 1px 5px; border-radius: 3px; color: var(--yellow); }
   .md pre { background: #11161a; border: 1px solid var(--line); border-radius: 4px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
   .md pre code { background: none; padding: 0; color: var(--fg); }
   .md table { border-collapse: collapse; margin: 8px 0; display: block; overflow-x: auto; max-width: 100%; }
-  .md th, .md td { border: 1px solid var(--line); padding: 4px 10px; text-align: left; }
+  .md th, .md td { border: 1px solid var(--line); padding: 4px 10px; text-align: start; }
   .md th { background: #171d20; color: #eef3f5; }
-  .md blockquote { border-left: 3px solid #2c343a; margin: 8px 0; padding-left: 12px; color: var(--dim); }
+  .md blockquote { border-inline-start: 3px solid #2c343a; margin: 8px 0; padding-inline-start: 12px; color: var(--dim); }
+  /* Hebrew, Arabic: the client sets dir on blocks by majority; free text
+     (thoughts, titles) takes each line's first letter. Code stays LTR. */
+  .thought-body, .stitle, #crumb .title { unicode-bidi: plaintext; text-align: start; }
+  .md code { unicode-bidi: plaintext; }
   .md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
   .tool { color: var(--dim); margin-top: 4px; }
   .tool .name { color: var(--accent); font-weight: 600; }

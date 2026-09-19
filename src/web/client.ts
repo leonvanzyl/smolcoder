@@ -66,16 +66,31 @@ function inlineMd(s) {
   s = s.replace(new RegExp(SENT + "(\\d+)" + SENT, "g"), (m, i) => "<code>" + codes[i] + "</code>");
   return s;
 }
+// Which way a block reads: Hebrew/Arabic letters against English words, with
+// code-shaped words counting less and inline code not at all. A tie is LTR,
+// so English never flips. Majority, not first letter: "Git היא מערכת…" is RTL.
+// Weights ported from motcke/cursor-ext-rtl (Apache-2.0), src/textDirection.ts.
+const RTL_G = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/g;
+function dirOf(text) {
+  const t = String(text || "").replace(/\`[^\`]*\`/g, " ").replace(/&\w+;/g, " ");
+  const rtl = (t.match(RTL_G) || []).length;
+  const words = t.match(/[A-Za-z][A-Za-z0-9._\/:-]*/g) || [];
+  if (!rtl) return words.length ? "ltr" : "";
+  let ltr = 0;
+  // Sentence punctuation is not part of a word: "peace." is prose, not a path.
+  for (const w of words.map((x) => x.replace(/[._\/:-]+$/, ""))) ltr += /[._\/:]/.test(w) ? 0.25 : /^[A-Z0-9-]{2,}$/.test(w) || /^[a-z]+[A-Z]/.test(w) ? 0.5 : 1;
+  return rtl > ltr ? "rtl" : "ltr";
+}
+// A dir attribute only where a block differs from its container.
+function dirAttr(text, parent) { const d = dirOf(text); return d && d !== parent ? ' dir="' + d + '"' : ""; }
 function renderMarkdown(src) {
   const lines = esc(src).split("\n");
-  let out = "", i = 0, listType = null;
-  const closeList = () => { if (listType) { out += "</" + listType + ">"; listType = null; } };
+  let out = "", i = 0;
   const cells = (row) => row.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
   while (i < lines.length) {
     const line = lines[i];
     const fence = /^\s*\`\`\`(\w*)\s*$/.exec(line);
     if (fence) {
-      closeList();
       const body = []; i++;
       while (i < lines.length && !/^\s*\`\`\`/.test(lines[i])) { body.push(lines[i]); i++; }
       i++;
@@ -83,42 +98,44 @@ function renderMarkdown(src) {
       continue;
     }
     if (/^\s*\|/.test(line) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|[\s:|-]*$/.test(lines[i + 1])) {
-      closeList();
       const head = cells(line); i += 2;
       const rows = [];
       while (i < lines.length && /^\s*\|/.test(lines[i])) { rows.push(cells(lines[i])); i++; }
-      out += "<table><thead><tr>" + head.map((h) => "<th>" + inlineMd(h) + "</th>").join("") + "</tr></thead><tbody>";
-      for (const r of rows) out += "<tr>" + r.map((c) => "<td>" + inlineMd(c) + "</td>").join("") + "</tr>";
+      const all = head.concat(...rows).join(" "), d = dirOf(all) || "ltr";
+      const cell = (tag, c) => "<" + tag + dirAttr(c, d) + ">" + inlineMd(c) + "</" + tag + ">";
+      out += "<table" + dirAttr(all, "ltr") + "><thead><tr>" + head.map((h) => cell("th", h)).join("") + "</tr></thead><tbody>";
+      for (const r of rows) out += "<tr>" + r.map((c) => cell("td", c)).join("") + "</tr>";
       out += "</tbody></table>";
       continue;
     }
     const h = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (h) { closeList(); out += "<h" + h[1].length + ">" + inlineMd(h[2]) + "</h" + h[1].length + ">"; i++; continue; }
-    if (/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(line)) { closeList(); out += "<hr>"; i++; continue; }
+    if (h) { out += "<h" + h[1].length + dirAttr(h[2], "ltr") + ">" + inlineMd(h[2]) + "</h" + h[1].length + ">"; i++; continue; }
+    if (/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(line)) { out += "<hr>"; i++; continue; }
     // NB: lines are already escaped, so the blockquote marker is "&gt;".
     if (/^\s*&gt;\s?/.test(line)) {
-      closeList();
       const body = [];
       while (i < lines.length && /^\s*&gt;\s?/.test(lines[i])) { body.push(lines[i].replace(/^\s*&gt;\s?/, "")); i++; }
-      out += "<blockquote>" + inlineMd(body.join(" ")) + "</blockquote>";
+      const text = body.join(" ");
+      out += "<blockquote" + dirAttr(text, "ltr") + ">" + inlineMd(text) + "</blockquote>";
       continue;
     }
-    const ul = /^\s*[-*+]\s+(.*)$/.exec(line);
-    const ol = /^\s*\d+[.)]\s+(.*)$/.exec(line);
-    if (ul || ol) {
-      const want = ul ? "ul" : "ol";
-      if (listType !== want) { closeList(); out += "<" + want + ">"; listType = want; }
-      out += "<li>" + inlineMd((ul || ol)[1]) + "</li>";
-      i++; continue;
+    const item = /^\s*[-*+]\s+(.*)$/.test(line) ? /^\s*[-*+]\s+(.*)$/ : /^\s*\d+[.)]\s+(.*)$/.test(line) ? /^\s*\d+[.)]\s+(.*)$/ : null;
+    if (item) {
+      // The whole list first: its direction decides which side the markers sit on.
+      const want = item.source.includes("d+") ? "ol" : "ul", items = [];
+      let m;
+      while (i < lines.length && (m = item.exec(lines[i]))) { items.push(m[1]); i++; }
+      const d = dirOf(items.join(" ")) || "ltr";
+      out += "<" + want + dirAttr(items.join(" "), "ltr") + ">" + items.map((t) => "<li" + dirAttr(t, d) + ">" + inlineMd(t) + "</li>").join("") + "</" + want + ">";
+      continue;
     }
-    if (!line.trim()) { closeList(); i++; continue; }
-    closeList();
+    if (!line.trim()) { i++; continue; }
     const para = [line]; i++;
     while (i < lines.length && lines[i].trim() &&
            !/^(\s*#{1,6}\s|\s*\`\`\`|\s*>\s?|\s*[-*+]\s|\s*\d+[.)]\s|\s*\|)/.test(lines[i])) { para.push(lines[i]); i++; }
-    out += "<p>" + inlineMd(para.join(" ")) + "</p>";
+    const text = para.join(" ");
+    out += "<p" + dirAttr(text, "ltr") + ">" + inlineMd(text) + "</p>";
   }
-  closeList();
   return out;
 }
 
@@ -210,6 +227,7 @@ function fmtSize(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFi
 // A sent message: its text, then thumbnails for images and links for files.
 function userBubble(m) {
   const d = el("div", "user", m.s || "");
+  d.dir = dirOf(m.s) || "auto";
   if (m.files && m.files.length) {
     const row = el("div", "files");
     for (const f of m.files) {
@@ -332,7 +350,8 @@ function renderPlan(v, p) {
   p.steps.forEach((s, i) => {
     const cls = s.done ? "done" : i === p.current ? "cur" : "todo";
     const mark = s.done ? "✔ " : i === p.current ? "▶ " : "○ ";
-    box.appendChild(el("div", cls, mark + s.text));
+    const step = el("div", cls, mark + s.text); step.dir = dirOf(s.text) || "auto";
+    box.appendChild(step);
   });
   if (v.planEl && v.planEl.isConnected) v.planEl.replaceWith(box); else add(v, box);
   v.planEl = box;
@@ -904,7 +923,7 @@ function submit() {
   scrollToBottom();
   post("/msg", { sid: active.sid, text: v, attachments: files }).then((r) => { if (r && r.error) alert(r.error); });
 }
-function autoGrow() { input.rows = Math.min(6, Math.max(1, input.value.split("\n").length)); }
+function autoGrow() { input.rows = Math.min(6, Math.max(1, input.value.split("\n").length)); input.dir = dirOf(input.value) || "auto"; }
 input.addEventListener("input", () => { menuIdx = 0; renderMenu(); autoGrow(); });
 input.addEventListener("keydown", (e) => {
   const items = menuItems();
