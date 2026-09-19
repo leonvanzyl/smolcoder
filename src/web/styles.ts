@@ -122,10 +122,9 @@ export const STYLES = String.raw`
   .md th, .md td { border: 1px solid var(--line); padding: 4px 10px; text-align: start; }
   .md th { background: #171d20; color: #eef3f5; }
   .md blockquote { border-inline-start: 3px solid #2c343a; margin: 8px 0; padding-inline-start: 12px; color: var(--dim); }
-  /* Hebrew, Arabic: each block takes the direction of its first letter, so
-     mixed-language text reads right and English is unchanged. Code stays LTR. */
-  .md p, .md li, .md h1, .md h2, .md h3, .md h4, .md h5, .md h6, .md th, .md td, .md blockquote,
-  .user, .thought-body, .plan > div, .stitle, #crumb .title, #input { unicode-bidi: plaintext; text-align: start; }
+  /* Hebrew, Arabic: the client sets dir on blocks by majority; free text
+     (thoughts, titles) takes each line's first letter. Code stays LTR. */
+  .thought-body, .stitle, #crumb .title { unicode-bidi: plaintext; text-align: start; }
   .md code { unicode-bidi: plaintext; }
   .md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
   .tool { color: var(--dim); margin-top: 4px; }
