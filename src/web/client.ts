@@ -302,7 +302,7 @@ function renderState(v) {
   const mode = el("button", "statusbtn mode " + s.mode, s.mode === "ro" ? "Read-only" : s.mode === "bypass" ? "Bypass" : "Edit");
   mode.title = "Permission mode"; mode.onclick = () => command("mode");
   st.appendChild(mode);
-  const model = el("button", "statusbtn modelpick", s.model + " ▾"); model.title = s.backend + " · Switch model"; model.onclick = () => command("models"); st.appendChild(model);
+  const model = el("button", "statusbtn modelpick", s.model + (s.host ? " @ " + s.host : "") + " ▾"); model.title = s.backend + (s.host ? " on " + s.host : "") + " · Switch model or find models on another machine"; model.onclick = () => command("models"); st.appendChild(model);
   const effort = el("button", "statusbtn eff", s.effort || "Auto"); effort.title = "Reasoning effort"; effort.onclick = () => command("effort"); st.appendChild(effort);
   st.appendChild(el("span", "grow"));
   const ctx = el("button", "statusbtn context-chip" + (s.ctxPct >= 75 ? " pressure" : ""));
@@ -420,6 +420,25 @@ function handle(m) {
       box.appendChild(cancel);
       v.asks.set(m.id, box);
       add(v, box); break;
+    }
+    case "prompt": {
+      endThought(v); v.curText = null;
+      const box = el("div", "ask");
+      box.appendChild(el("div", "cmd", m.title));
+      const field = el("input", "askinput"); field.type = "text"; field.placeholder = m.placeholder || ""; field.spellcheck = false; field.autocomplete = "off";
+      const send = (value) => { post("/prompt", { sid: v.sid, id: m.id, value: value }); box.remove(); };
+      field.onkeydown = (e) => {
+        if (e.key === "Enter") { e.preventDefault(); send(field.value.trim() || null); }
+        // Escape closes this box only; the page-level handler would cancel the whole turn.
+        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); send(null); }
+      };
+      box.appendChild(el("div")).appendChild(field);
+      const ok = el("button", "", "ok"); ok.onclick = () => send(field.value.trim() || null); box.appendChild(ok);
+      const cancel = el("button", "", "cancel"); cancel.onclick = () => send(null); box.appendChild(cancel);
+      v.asks.set(m.id, box);
+      add(v, box);
+      if (v === active) field.focus();
+      break;
     }
     case "termopen": ensureTermTab(v, m.tid, m.cwd); break;
     case "term": termWrite(v, m.tid, m.s); break;

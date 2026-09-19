@@ -12,7 +12,9 @@ import { c } from "../util";
 import { LineEditor, layoutBuffer } from "./editor";
 import { Key, KeyDecoder } from "./keys";
 
-type State = "hidden" | "idle" | "select" | "confirm";
+type State = "hidden" | "idle" | "select" | "confirm" | "prompt";
+
+const SELECT_ROWS = 10;
 
 const ACCENT = "\x1b[36m"; // cyan accent bar
 const RESET = "\x1b[0m";
@@ -83,8 +85,17 @@ export class Tui implements SessionUI {
     options: SelectOption[];
     filter: string;
     index: number;
+    /** First visible row: the list scrolls so the selection never leaves the window. */
+    top: number;
     resolve: (i: number | null) => void;
   } | null = null;
+  private promptState: {
+    title: string;
+    placeholder: string;
+    ed: LineEditor;
+    resolve: (s: string | null) => void;
+  } | null = null;
+  private started = false;
   private confirmState: {
     command: string;
     reason?: string;
@@ -96,7 +107,11 @@ export class Tui implements SessionUI {
   private atLineStart = true;
   private lastKind: "content" | "thinking" | null = null;
 
+  /** Safe to call twice: startup opens the TUI early when it has to ask where
+   * the models are, and the session starts it again later. */
   start(): void {
+    if (this.started) return;
+    this.started = true;
     process.stdin.setRawMode?.(true);
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
@@ -132,7 +147,17 @@ export class Tui implements SessionUI {
     process.stdout.write("\x1b[?25l");
     this.state = "select";
     return new Promise((resolve) => {
-      this.sel = { title, options, filter: "", index: 0, resolve };
+      this.sel = { title, options, filter: "", index: 0, top: 0, resolve };
+      this.redraw();
+    });
+  }
+
+  prompt(title: string, placeholder = ""): Promise<string | null> {
+    this.stopSpinner();
+    this.hideFrame();
+    this.state = "prompt";
+    return new Promise((resolve) => {
+      this.promptState = { title, placeholder, ed: new LineEditor(), resolve };
       this.redraw();
     });
   }
@@ -160,6 +185,9 @@ export class Tui implements SessionUI {
           break;
         case "confirm":
           this.keyConfirm(key);
+          break;
+        case "prompt":
+          this.keyPrompt(key);
           break;
         case "hidden": // agent running
           if (key.type === "esc" || key.type === "ctrlc") this.onCancel?.();
@@ -342,6 +370,59 @@ export class Tui implements SessionUI {
     s.resolve(result);
   }
 
+  private keyPrompt(key: Key): void {
+    const p = this.promptState!;
+    const finish = (value: string | null) => {
+      this.hideFrame();
+      this.promptState = null;
+      this.state = "hidden";
+      process.stdout.write(c.dim(`  ${p.title}: ${value ?? "cancelled"}\n`));
+      p.resolve(value);
+    };
+    switch (key.type) {
+      case "char":
+      case "text":
+        p.ed.insert(key.text!.replace(/[\r\n]+/g, " "));
+        break;
+      case "backspace":
+        p.ed.backspace();
+        break;
+      case "delete":
+        p.ed.del();
+        break;
+      case "left":
+        p.ed.left();
+        break;
+      case "right":
+        p.ed.right();
+        break;
+      case "home":
+      case "ctrla":
+        p.ed.home();
+        break;
+      case "end":
+      case "ctrle":
+        p.ed.end();
+        break;
+      case "ctrlu":
+        p.ed.killToLineStart();
+        break;
+      case "ctrlw":
+        p.ed.deleteWordBack();
+        break;
+      case "enter":
+        finish(p.ed.buffer.trim() || null);
+        return;
+      case "esc":
+      case "ctrlc":
+        finish(null);
+        return;
+      default:
+        break;
+    }
+    this.redraw();
+  }
+
   private filteredOptions(): SelectOption[] {
     const s = this.sel!;
     if (!s.filter) return s.options;
@@ -427,7 +508,11 @@ export class Tui implements SessionUI {
       lines.push(BAR + (s.filter ? s.filter : c.dim("type to filter")));
       const filtered = this.filteredOptions();
       if (!filtered.length) lines.push(c.dim("   no matches"));
-      for (let i = 0; i < Math.min(filtered.length, 10); i++) {
+      if (s.index < s.top) s.top = s.index;
+      if (s.index >= s.top + SELECT_ROWS) s.top = s.index - SELECT_ROWS + 1;
+      s.top = Math.max(0, Math.min(s.top, filtered.length - SELECT_ROWS));
+      if (s.top > 0) lines.push(c.dim(`   ↑ ${s.top} more`));
+      for (let i = s.top; i < Math.min(filtered.length, s.top + SELECT_ROWS); i++) {
         const o = filtered[i];
         const marker = o.current ? "● " : "  ";
         const plain = ` ${marker}${o.label}${o.hint ? "  " + o.hint : ""}`.slice(0, w).padEnd(w);
@@ -437,7 +522,22 @@ export class Tui implements SessionUI {
             : ` ${o.current ? c.green(marker) : marker}${o.label}${o.hint ? "  " + c.dim(o.hint) : ""}`
         );
       }
-      if (filtered.length > 10) lines.push(c.dim(`   … ${filtered.length - 10} more (type to filter)`));
+      const below = filtered.length - s.top - SELECT_ROWS;
+      if (below > 0) lines.push(c.dim(`   ↓ ${below} more (type to filter)`));
+    } else if (this.state === "prompt" && this.promptState) {
+      const p = this.promptState;
+      const w = Math.min(this.width(), 64);
+      lines.push(BAR + c.bold(p.title) + "   " + c.dim("enter confirm · esc cancel"));
+      cursorRow = lines.length;
+      if (p.ed.buffer.length === 0) {
+        cursorCol = 2;
+        lines.push(boxRow(c.dim(p.placeholder.slice(0, w - 2)), w));
+      } else {
+        // One line, scrolled so the cursor stays in view.
+        const from = Math.max(0, p.ed.cursor - (w - 3));
+        cursorCol = 2 + p.ed.cursor - from;
+        lines.push(boxRow(p.ed.buffer.slice(from, from + w - 2), w));
+      }
     } else if (this.state === "confirm" && this.confirmState) {
       lines.push(BAR + c.yellow("run? ") + c.bold(this.confirmState.command.slice(0, this.width() - 8)));
       if (this.confirmState.reason) lines.push("  " + c.dim(this.confirmState.reason));

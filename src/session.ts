@@ -5,10 +5,11 @@
 
 import * as os from "os";
 import { Agent } from "./agent";
-import { Config, saveConfig } from "./config";
+import { Config, loadConfig, updateConfig } from "./config";
 import { ContextManager } from "./context";
 import { detectAll, DetectedModel, resolveContextWindow } from "./detect";
 import { EventBus } from "./events";
+import { findModelsOnNetwork, FlowUI, manageHosts } from "./network";
 import { Plan, PlanStep } from "./plan";
 import { buildSystemPrompt, loadAgentsMd } from "./prompt";
 import { LmStudioProvider } from "./providers/lmstudio";
@@ -17,7 +18,7 @@ import { Effort, Msg, Provider } from "./providers/types";
 import { Mode, MODE_LABELS, ToolContext } from "./tools/index";
 import { pickShell } from "./tools/shell";
 import { TaskManager } from "./tools/tasks";
-import { renderPlan, SessionUI, SlashCommand } from "./ui";
+import { renderPlan, SelectOption, SessionUI, SlashCommand } from "./ui";
 import { c, truncateEnd } from "./util";
 
 /** Per-session preferences from the command line. `effort: null` means an
@@ -26,12 +27,14 @@ export interface SessionPrefs {
   mode?: Mode;
   model?: string;
   backend?: string;
+  /** Server the wanted model lives on, when the same id exists on several machines. */
+  baseUrl?: string;
   ctx?: number;
   effort?: Effort | null;
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
-  { name: "models", desc: "Switch model" },
+  { name: "models", desc: "Switch model · add models from other machines" },
   { name: "mode", desc: "Set mode (ro / edit / bypass)" },
   { name: "effort", desc: "Set reasoning effort" },
   { name: "plan", desc: "Show the agent's plan" },
@@ -87,40 +90,54 @@ export function reportCompactions(bus: EventBus, ui: { status: (s: string) => vo
   });
 }
 
+/** `url` says which server the wanted (or else the remembered) model was on;
+ * it only breaks ties between machines that serve the same model id. */
 export function autoPickModel(
   models: DetectedModel[],
   wanted: string | undefined,
-  remembered: string | undefined
+  remembered: string | undefined,
+  url?: string
 ): DetectedModel {
   if (wanted) {
     const hit =
+      models.find((m) => m.id === wanted && m.baseUrl === url) ??
       models.find((m) => m.id === wanted) ??
       models.find((m) => m.id.toLowerCase().includes(wanted.toLowerCase()));
     if (hit) return hit;
-    throw new Error(`Model "${wanted}" was not found on the selected backend. Use /models to choose an available local model.`);
+    throw new Error(`Model "${wanted}" was not found on the selected backend. Use /models to choose an available model.`);
   }
+  // With nothing remembered, a model on this computer beats one across the network.
+  const local = models.filter((m) => !m.host);
+  const pool = local.length ? local : models;
   return (
+    models.find((m) => m.id === remembered && m.baseUrl === url) ??
     models.find((m) => m.id === remembered) ??
-    models.find((m) => m.backend === "ollama") ??
-    models.find((m) => m.loaded) ??
-    models[0]
+    pool.find((m) => m.backend === "ollama") ??
+    pool.find((m) => m.loaded) ??
+    pool[0]
   );
 }
 
 export function noBackendsMessage(): string {
   return (
-    c.red("No usable local model found.") +
+    c.red("No usable model found.") +
     `\n\nsmolcoder connects to a running model server; it does not scan installed apps or drives.\n` +
     `  · ${c.bold("Ollama")}: start the app (or run: ollama serve), then check: ollama list\n` +
-    `    Probes local loopback, ${c.dim("$OLLAMA_HOST")}, and published Docker port 11434/tcp.\n` +
+    `    Found on this computer, at ${c.dim("$OLLAMA_HOST")}, and in Docker containers that publish its port.\n` +
     `    If the list is empty, run: ollama pull qwen3\n` +
-    `  · ${c.bold("LM Studio")}: load a model and start Local Server in the Developer tab.\n\n` +
+    `  · ${c.bold("LM Studio")}: load a model and start Local Server in the Developer tab (any port).\n` +
+    `  · ${c.bold("Another machine")}: start smol in a terminal or with --web and choose "Find models on another machine".\n\n` +
     `Then run smol again.`
   );
 }
 
+/** "ollama" on this computer, "ollama @ gpu-box" across the network. */
+export function backendLabel(m: DetectedModel): string {
+  return m.host ? `${m.backend} @ ${m.host}` : m.backend;
+}
+
 export function sessionLine(m: DetectedModel, mode: Mode): string {
-  return `${c.green("●")} ${m.backend} · ${c.bold(m.id)} · ctx ${m.contextWindow.toLocaleString()} · ${MODE_LABELS[mode]} mode`;
+  return `${c.green("●")} ${backendLabel(m)} · ${c.bold(m.id)} · ctx ${m.contextWindow.toLocaleString()} · ${MODE_LABELS[mode]} mode`;
 }
 
 export function fmtTokens(n: number): string {
@@ -142,11 +159,64 @@ export async function prepareModel(
   progress?: (label: string) => void
 ): Promise<DetectedModel | null> {
   progress?.("looking for Ollama and LM Studio");
-  const models = (await detectAll()).filter((m) => !prefs.backend || m.backend === prefs.backend);
+  const url = prefs.model ? prefs.baseUrl : cfg.lastModelUrl;
+  // Without --model the remembered one wins anyway, so stop looking the moment
+  // it shows up instead of waiting out a network host that is switched off.
+  const until =
+    !prefs.model && cfg.lastModel
+      ? (m: DetectedModel) => m.id === cfg.lastModel && (!url || m.baseUrl === url) && (!prefs.backend || m.backend === prefs.backend)
+      : undefined;
+  const models = (await detectAll({ hosts: cfg.hosts, until })).filter((m) => !prefs.backend || m.backend === prefs.backend);
   if (models.length === 0) return null;
-  const chosen = autoPickModel(models, prefs.model, cfg.lastModel);
+  const chosen = autoPickModel(models, prefs.model, cfg.lastModel, url);
   progress?.(`loading ${chosen.id}`);
   return resolveContextWindow(chosen, prefs.ctx);
+}
+
+/** Picker rows for a model list: this computer first, then each network host. */
+export function modelOptions(models: DetectedModel[], current?: DetectedModel): SelectOption[] {
+  return models.map((m) => ({
+    label: m.id,
+    hint:
+      (m.backend === "ollama" ? "ollama" : `lm studio${m.loaded ? ` · ctx ${m.contextWindow.toLocaleString()}` : " · not loaded"}`) +
+      (m.host ? ` · ${m.host}` : ""),
+    current: !!current && m.id === current.id && m.backend === current.backend && m.baseUrl === current.baseUrl,
+  }));
+}
+
+export const FIND_ROW: SelectOption = { label: "+ Find models on another machine…", hint: "search my network or enter an address" };
+export const HOSTS_ROW: SelectOption = { label: "Network hosts…", hint: "rename, remove or re-find added machines" };
+
+/** Nothing answered on this computer. Rather than giving up, offer to look on
+ * the network — with both UIs' own pickers, before a session exists. Returns
+ * a ready model, or null when the user backs out. */
+export async function setupWithoutLocalModels(ui: FlowUI, prefs: SessionPrefs): Promise<DetectedModel | null> {
+  for (;;) {
+    const pick = await ui.select("No model server found on this computer", [
+      { label: "Find models on another machine", hint: "search my network or enter an address" },
+      { label: "Look again", hint: "after starting Ollama or LM Studio here" },
+    ]);
+    if (pick === null) return null;
+    if (pick === 0 && !(await findModelsOnNetwork(ui))) continue;
+    ui.startSpinner("looking for Ollama and LM Studio");
+    const cfg = loadConfig();
+    const models = (await detectAll({ hosts: cfg.hosts })).filter((m) => !prefs.backend || m.backend === prefs.backend);
+    ui.stopSpinner();
+    if (!models.length) {
+      ui.warn("Still no model server answering.");
+      continue;
+    }
+    // A machine was just added by hand: let the user say which of its models
+    // to load instead of pulling the first one into its memory.
+    const idx = models.length === 1 ? 0 : await ui.select("Select model", modelOptions(models));
+    if (idx === null) continue;
+    ui.startSpinner(`loading ${models[idx].id}`);
+    try {
+      return await resolveContextWindow(models[idx], prefs.ctx);
+    } finally {
+      ui.stopSpinner();
+    }
+  }
 }
 
 // ---- session titles ---------------------------------------------------------
@@ -215,6 +285,8 @@ export interface SessionSnapshot {
   effort: Effort | null;
   model: string;
   backend: string;
+  /** Server the model ran on (absent in sessions saved before network hosts). */
+  baseUrl?: string;
 }
 
 export interface SessionOptions {
@@ -295,7 +367,7 @@ export class Session {
   }
 
   private persist(): void {
-    saveConfig({ lastModel: this.chosen.id, lastMode: this.agent.mode, effort: this.effort });
+    updateConfig({ lastModel: this.chosen.id, lastModelUrl: this.chosen.baseUrl, lastMode: this.agent.mode, effort: this.effort });
   }
 
   /** The TUI's status row: mode · model · effort · context · plan · tasks. */
@@ -304,7 +376,7 @@ export class Session {
     const tasks = this.taskManager.runningSummary().length;
     const plan = this.toolCtx.plan;
     return (
-      `${modeColored(agent.mode)} ${c.dim("·")} ${this.chosen.id} ${c.dim(this.chosen.backend)}` +
+      `${modeColored(agent.mode)} ${c.dim("·")} ${this.chosen.id} ${c.dim(backendLabel(this.chosen))}` +
       (this.effort || agent.provider.effortLabel()
         ? ` ${c.dim("·")} ${c.yellow(agent.provider.effortLabel() ?? this.effort ?? "")}`
         : "") +
@@ -327,6 +399,7 @@ export class Session {
       mode: this.agent.mode,
       model: this.chosen.id,
       backend: this.chosen.backend,
+      host: this.chosen.host,
       vision: this.chosen.vision,
       effort: this.agent.provider.effortLabel() ?? this.effort,
       ctxTokens: this.agent.contextTokens(),
@@ -362,6 +435,7 @@ export class Session {
       effort: this.effort,
       model: this.chosen.id,
       backend: this.chosen.backend,
+      baseUrl: this.chosen.baseUrl,
     };
   }
 
@@ -481,24 +555,33 @@ export class Session {
 
   private async switchModel(): Promise<void> {
     const { ui, agent } = this;
-    const fresh = await detectAll();
-    if (!fresh.length) {
-      ui.error("No backends reachable right now.");
-      return;
+    let fresh: DetectedModel[];
+    let idx: number | null;
+    // The picker is also where other machines are added and managed; after
+    // either, look again and reopen it so their models are right there.
+    for (;;) {
+      const hosts = loadConfig().hosts ?? [];
+      ui.startSpinner("looking for models");
+      fresh = await detectAll({ hosts });
+      ui.stopSpinner();
+      if (!fresh.length) ui.warn("No model server is answering right now.");
+      const rows = [...modelOptions(fresh, this.chosen), FIND_ROW, ...(hosts.length ? [HOSTS_ROW] : [])];
+      idx = await ui.select("Select model", rows);
+      if (idx === null) return;
+      if (idx < fresh.length) break;
+      if (rows[idx] === FIND_ROW) await findModelsOnNetwork(ui);
+      else await manageHosts(ui);
     }
-    const options = fresh.map((m) => ({
-      label: m.id,
-      hint:
-        m.backend === "ollama"
-          ? "ollama"
-          : `lm studio${m.loaded ? ` · ctx ${m.contextWindow.toLocaleString()}` : " · not loaded"}`,
-      current: m.id === this.chosen.id && m.backend === this.chosen.backend,
-    }));
-    const idx = await ui.select("Select model", options);
-    if (idx === null) return;
+    let next: DetectedModel;
     ui.startSpinner(`loading ${fresh[idx].id}`);
-    const next = await resolveContextWindow(fresh[idx], this.prefs.ctx);
-    ui.stopSpinner();
+    try {
+      next = await resolveContextWindow(fresh[idx], this.prefs.ctx);
+    } catch (err: any) {
+      ui.error(String(err?.message ?? err));
+      return;
+    } finally {
+      ui.stopSpinner();
+    }
     this.chosen = next;
     const p = makeProvider(next);
     p.setEffort(this.effort);

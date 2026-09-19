@@ -2,7 +2,7 @@
 
 A smol coding agent for the models already running on your machine.
 
-If you have Ollama or LM Studio running, you are two commands away from a coding assistant that reads your code, edits files, runs your tests and starts your dev server. No API key and no config file. Nothing leaves your machine except requests to your local model server.
+If you have Ollama or LM Studio running, you are two commands away from a coding assistant that reads your code, edits files, runs your tests and starts your dev server. No API key and no config file. Nothing leaves your machine except requests to the model server you chose.
 
 ```bash
 npm install -g smolcoder
@@ -28,6 +28,10 @@ smol
 
 smolcoder finds your server, lists the models you already have, and opens a chat. It remembers the model and permission mode you used last time.
 
+Both servers are found the same way, with nothing to set up: on their usual ports, on a port you changed (LM Studio's is read from its own settings, Ollama's from `OLLAMA_HOST`), inside Docker or Podman containers that publish the port, and on the host machine when smolcoder itself runs in WSL or a container.
+
+If your models run on a different computer, see [Using models on another machine](#using-models-on-another-machine).
+
 ## Using it
 
 Type what you want done and press enter. The agent reads files, edits them and runs commands inside your project folder, and says what it is doing as it goes. After it edits files it runs your project's build and test scripts and repairs what fails.
@@ -45,7 +49,7 @@ The line under the input shows the mode, the model, the reasoning effort, how fu
 
 | Command | What it does |
 |---|---|
-| `/models` | Switch model |
+| `/models` | Switch model, or add models from other machines |
 | `/mode` | Set the permission mode (`ro`, `edit`, `bypass`) |
 | `/effort` | Set reasoning effort (`off`, `low`, `medium`, `high`, `default`) |
 | `/plan` | Show the agent's checklist |
@@ -80,6 +84,52 @@ smol -p "build the app" --verify "npm test"   # headless with an acceptance comm
 ```
 
 With `--verify`, the command has to pass before the run counts as done. Failures go back to the agent to repair, six attempts by default. `--verify-attempts 12` allows more.
+
+## Using models on another machine
+
+The models do not have to run on the computer you code on. A desktop with a big GPU can serve a laptop, and you can add as many machines as you have. Everything below happens inside smolcoder. There is no file to edit and no command to run.
+
+### 1. Let the other machine accept connections
+
+Ollama and LM Studio only answer their own computer until you tell them otherwise. Do this once, on the machine that runs the models.
+
+| Server | What to turn on |
+|---|---|
+| Ollama (Windows, macOS) | Settings → **Expose Ollama to the network** |
+| Ollama (Linux, headless) | Set `OLLAMA_HOST=0.0.0.0` for the service and restart it |
+| LM Studio | Developer → Local Server → **Serve on Local Network** |
+
+On Windows the firewall asks the first time the server listens on the network. Allow it for Private networks.
+
+### 2. Find it from smolcoder
+
+Open the model picker: type `/models` in the terminal, or click the model name in the web UI. Choose **Find models on another machine**.
+
+- **Search my network** shows the range it is about to search, for example `192.168.1.0/24`, then looks for Ollama and LM Studio on it. This takes a few seconds. Every machine it finds is listed with what it runs, such as `gpu-box (192.168.1.50) · Ollama · 12 models`. Pick one and its models join your list. Pick again to add more.
+- **Enter an address** is for machines a search cannot reach: a VPN or Tailscale address, another subnet, or a server on the internet. Type an IP (`192.168.1.50`), a name (`gpu-box.local`), a host and port (`gpu-box:4321`) or a URL (`https://llm.example.com`). For a bare IP or name, smolcoder tries both servers' usual ports and works out which one is there.
+
+If no server is running on your own computer, smolcoder offers to find one on another machine at startup instead of exiting.
+
+### 3. Use it like any other model
+
+Models from other machines appear in the picker with the machine's name next to them, below the ones on your own computer. The status line shows where the current model runs, for example `qwen3:32b ollama @ gpu-box`.
+
+- Added machines are remembered and checked every time smolcoder starts. One that is switched off is skipped, and its models come back when it does.
+- The model you used last is remembered together with its machine, so the same model name on two machines is never confused.
+- In the web UI, sessions on different machines run at the same time. Sessions on the same machine take turns.
+- **Network hosts** in the model picker renames or removes a machine. If one stops answering because your router gave it a new address, **Look for it again** finds it and keeps its name.
+- Headless runs (`smol -p`) use the machines you already added. They never search the network.
+
+### Before you add a machine
+
+smolcoder sends your code and prompts to the server you choose, and runs the tool calls that come back. A machine found by a search is never used until you pick it, so only pick machines you trust. For an address outside your own network over plain `http://`, smolcoder warns that the traffic is unencrypted and asks again before adding it.
+
+### If nothing is found
+
+- The server on the other machine is not accepting connections yet. Check step 1, and that the machine is awake.
+- On macOS, allow your terminal app under System Settings → Privacy & Security → Local Network. Without that, nothing on the network is visible and no error is shown.
+- The search covers the private network your computer is on. On a very large network it searches the 254 addresses around your own. Use **Enter an address** for anything further away.
+- A server that needs an API key or login in front of it is not supported yet.
 
 ## The web UI
 

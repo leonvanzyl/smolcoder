@@ -76,6 +76,28 @@ test("channel: approvals flip the phase to waiting and resolve through handleAns
   assert.equal(await sel, 1);
 });
 
+test("channel: a text prompt resolves with the typed line, null when empty or cancelled, and is not replayed live", async () => {
+  const { ch, sent } = makeChannel();
+  const p = ch.prompt("Address of the machine", "192.168.1.50");
+  assert.equal(ch.phase, "waiting");
+  const ask = sent.find((e) => e.t === "prompt");
+  assert.deepEqual({ title: ask.title, placeholder: ask.placeholder }, { title: "Address of the machine", placeholder: "192.168.1.50" });
+  ch.handleAnswer(ask.id, "  gpu-box.local ");
+  assert.equal(await p, "gpu-box.local");
+  assert.ok(ch.replay.some((e) => e.t === "line" && e.s === "Address of the machine: gpu-box.local"), "the answer is kept in the transcript");
+
+  const empty = ch.prompt("Name");
+  ch.handleAnswer(sent.filter((e) => e.t === "prompt")[1].id, "   ");
+  assert.equal(await empty, null);
+  const open = ch.prompt("Name");
+  ch.cancel();
+  assert.equal(await open, null);
+
+  const { ch: restored } = makeChannel("s2");
+  restored.restoreReplay(ch.replay);
+  assert.ok(!restored.replay.some((e) => e.t === "prompt"), "a saved session does not come back with a live text box");
+});
+
 test("channel: cancel answers an open prompt with no/null before aborting the turn", async () => {
   const { ch } = makeChannel();
   let cancelled = 0;

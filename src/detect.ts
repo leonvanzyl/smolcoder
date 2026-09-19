@@ -1,5 +1,9 @@
-// Zero-config backend detection. Probe the standard Ollama and LM Studio
-// endpoints with short timeouts, merge whatever answers. No configuration.
+// Zero-config backend detection. Build a list of places a model server could
+// be — loopback on the usual ports, $OLLAMA_HOST, the port LM Studio says it
+// serves on, ports published by Docker containers, the host machine when we
+// run inside WSL or a container, and network hosts the user added — then ask
+// each one what it is. The ANSWER decides the backend, never the port, so
+// Ollama and LM Studio are found the same way wherever they listen.
 //
 // The two backends are asymmetric on context windows:
 //   - Ollama: WE choose the window (num_ctx is a per-request option). Read the
@@ -11,8 +15,13 @@
 //     and which one it defaults to — that default is often the MAXIMUM.
 
 import { execFile } from "child_process";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { SavedHost } from "./config";
+import { hostLabel, hostUrls, LMSTUDIO_PORT, OLLAMA_PORT } from "./hosts";
 import { ReasoningInfo } from "./providers/lmstudio";
-import { tryFetchJson } from "./util";
+import { probeJson, tryFetchJson } from "./util";
 
 export type BackendKind = "ollama" | "lmstudio";
 
@@ -20,6 +29,8 @@ export interface DetectedModel {
   id: string;
   backend: BackendKind;
   baseUrl: string;
+  /** Name of the network host serving it; undefined means this computer. */
+  host?: string;
   /** Best-known context window in tokens (see resolveContextWindow). */
   contextWindow: number;
   /** Ollama only: num_ctx to send per request. undefined = don't send one,
@@ -36,9 +47,13 @@ export interface DetectedModel {
   note?: string;
 }
 
-const DEFAULT_OLLAMA_BASE = "http://127.0.0.1:11434";
-const OLLAMA_PROBE_TIMEOUT_MS = 3000;
+const DEFAULT_OLLAMA_BASE = `http://127.0.0.1:${OLLAMA_PORT}`;
+const LOCAL_PROBE_TIMEOUT_MS = 3000;
+// An added machine that is switched off must not hold up startup for long.
+const NETWORK_PROBE_TIMEOUT_MS = 1500;
 const DOCKER_DISCOVERY_TIMEOUT_MS = 2000;
+
+const LOOPBACK_RE = /^(https?:\/\/)(localhost|127(?:\.\d+){3}|\[::1\])(?=[:/]|$)/i;
 
 function normalizeOllamaBase(env?: string): string {
   let base: string;
@@ -51,12 +66,12 @@ function normalizeOllamaBase(env?: string): string {
   base = base.replace(/^(https?:\/\/)(0\.0\.0\.0|\[::\]|::)(?=[:/]|$)/, "$1127.0.0.1");
   // A bare local OLLAMA_HOST is common in desktop environment settings. Ollama
   // means port 11434 there, while fetch would otherwise try port 80.
-  if (/^https?:\/\/(localhost|127(?:\.\d+){3}|\[::1\])$/i.test(base)) base += ":11434";
+  if (/^https?:\/\/(localhost|127(?:\.\d+){3}|\[::1\])$/i.test(base)) base += `:${OLLAMA_PORT}`;
   return base;
 }
 
 function loopbackAliases(base: string): string[] {
-  const match = base.match(/^(https?:\/\/)(localhost|127(?:\.\d+){3}|\[::1\])(?=[:/]|$)/i);
+  const match = base.match(LOOPBACK_RE);
   if (!match) return [base];
   const tail = base.slice(match[0].length);
   return [match[2], "127.0.0.1", "localhost", "[::1]"]
@@ -64,22 +79,62 @@ function loopbackAliases(base: string): string[] {
     .filter((url, i, urls) => urls.indexOf(url) === i);
 }
 
-/** Probe the configured endpoint first, then every loopback spelling. A remote
- * OLLAMA_HOST remains authoritative when it works, but a stale setting does
- * not hide a healthy local or Docker-published server. */
+/** Probe the configured endpoint first, then every loopback spelling. A stale
+ * OLLAMA_HOST does not hide a healthy local or Docker-published server. */
 export function ollamaBaseUrls(env?: string): string[] {
   const primary = normalizeOllamaBase(env);
   const candidates = [...loopbackAliases(primary), ...loopbackAliases(DEFAULT_OLLAMA_BASE)];
   return candidates.filter((url, i) => candidates.indexOf(url) === i);
 }
 
+/** Loopback spellings for LM Studio: the port its settings file names (it is
+ * changeable in the app), then the default. */
+export function lmStudioBaseUrls(configuredPort?: number): string[] {
+  const ports = [configuredPort, LMSTUDIO_PORT].filter((p, i, all): p is number => !!p && all.indexOf(p) === i);
+  return ports.flatMap((port) => loopbackAliases(`http://127.0.0.1:${port}`));
+}
+
+/** Exported for tests: the port in LM Studio's http-server-config.json. */
+export function parseLmStudioServerPort(text: string): number | undefined {
+  try {
+    const port = JSON.parse(text)?.port;
+    return Number.isInteger(port) && port > 0 && port < 65536 ? port : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** LM Studio keeps its live server settings in its home folder, which the
+ * pointer file relocates when the user moved it. Missing or unreadable just
+ * means we fall back to the default port. */
+export function readLmStudioPort(home = os.homedir()): number | undefined {
+  const homes: string[] = [];
+  try {
+    const pointed = fs.readFileSync(path.join(home, ".lmstudio-home-pointer"), "utf8").trim();
+    if (pointed) homes.push(pointed);
+  } catch {
+    /* not relocated */
+  }
+  homes.push(path.join(home, ".lmstudio"), path.join(home, ".cache", "lm-studio"));
+  for (const dir of homes) {
+    try {
+      const port = parseLmStudioServerPort(fs.readFileSync(path.join(dir, ".internal", "http-server-config.json"), "utf8"));
+      if (port) return port;
+    } catch {
+      /* try the next location */
+    }
+  }
+  return undefined;
+}
+
 /** Parse `docker ps --format {{.Ports}}` and return host endpoints that publish
- * a container's Ollama port. Unpublished/expose-only ports are intentionally
- * ignored because the CLI cannot reach them from the host. */
-export function parseDockerOllamaBaseUrls(output: string): string[] {
+ * a container's model-server port. Unpublished/expose-only ports are
+ * intentionally ignored because the CLI cannot reach them from the host. */
+export function parseDockerBaseUrls(output: string, containerPorts: number[] = [OLLAMA_PORT, LMSTUDIO_PORT]): string[] {
   const urls: string[] = [];
-  const mapping = /(\[[^\]]+\]|(?:\d{1,3}\.){3}\d{1,3}|localhost):(\d+)->11434\/tcp\b/gi;
+  const mapping = /(\[[^\]]+\]|(?:\d{1,3}\.){3}\d{1,3}|localhost):(\d+)->(\d+)\/tcp\b/gi;
   for (const match of output.matchAll(mapping)) {
+    if (!containerPorts.includes(Number(match[3]))) continue;
     let host = match[1].toLowerCase();
     if (host === "0.0.0.0") host = "127.0.0.1";
     else if (host === "[::]") host = "[::1]";
@@ -88,20 +143,63 @@ export function parseDockerOllamaBaseUrls(output: string): string[] {
   return urls.filter((url, i) => urls.indexOf(url) === i);
 }
 
-function dockerOllamaBaseUrls(): Promise<string[]> {
-  return new Promise((resolve) => {
-    execFile(
-      "docker",
-      ["ps", "--format", "{{.Ports}}"],
-      { encoding: "utf8", timeout: DOCKER_DISCOVERY_TIMEOUT_MS, windowsHide: true },
-      (err, stdout) => resolve(err ? [] : parseDockerOllamaBaseUrls(stdout))
-    );
-  });
+function containerPublishedUrls(containerPorts: number[]): Promise<string[]> {
+  const ask = (cli: string) =>
+    new Promise<string[] | null>((resolve) => {
+      execFile(
+        cli,
+        ["ps", "--format", "{{.Ports}}"],
+        { encoding: "utf8", timeout: DOCKER_DISCOVERY_TIMEOUT_MS, windowsHide: true },
+        (err, stdout) => resolve(err ? null : parseDockerBaseUrls(stdout, containerPorts))
+      );
+    });
+  // Podman prints the same port format; only ask it when Docker is absent.
+  return ask("docker").then((urls) => urls ?? ask("podman")).then((urls) => urls ?? []);
 }
 
-async function probeOllama(base: string): Promise<DetectedModel[]> {
-  const data = await tryFetchJson(`${base}/api/tags`, undefined, OLLAMA_PROBE_TIMEOUT_MS);
-  if (!data || !Array.isArray(data.models) || data.models.length === 0) return [];
+/** Exported for tests: the default gateway in /proc/net/route (little-endian hex). */
+export function parseDefaultGateway(procNetRoute: string): string | undefined {
+  for (const line of procNetRoute.split("\n").slice(1)) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 3 || cols[1] !== "00000000" || !/^[0-9a-f]{8}$/i.test(cols[2]) || cols[2] === "00000000") continue;
+    const hex = cols[2];
+    return [6, 4, 2, 0].map((i) => parseInt(hex.slice(i, i + 2), 16)).join(".");
+  }
+  return undefined;
+}
+
+/** Inside WSL or a container, "this computer" includes the machine hosting
+ * us: loopback does not reach a model server running there. */
+function hostMachineUrls(ports: number[]): string[] {
+  if (process.platform !== "linux") return [];
+  const read = (file: string) => {
+    try {
+      return fs.readFileSync(file, "utf8");
+    } catch {
+      return "";
+    }
+  };
+  const wsl = !!process.env.WSL_DISTRO_NAME || /microsoft/i.test(read("/proc/version"));
+  const container = fs.existsSync("/.dockerenv") || fs.existsSync("/run/.containerenv");
+  if (!wsl && !container) return [];
+  const names = [parseDefaultGateway(read("/proc/net/route")), container ? "host.docker.internal" : undefined];
+  return names.filter((n): n is string => !!n).flatMap((name) => ports.map((port) => `http://${name}:${port}`));
+}
+
+// ---- asking a server what it is ---------------------------------------------
+
+const NOT_LOADED_NOTE =
+  "not loaded yet — LM Studio will load it on first use, likely at a small default context. For longer sessions, load it in LM Studio with a bigger context first.";
+const LMSTUDIO_JIT_GUESS = 4096; // LM Studio's usual default when a model is JIT-loaded
+const DEFAULT_LMSTUDIO_BASE = `http://127.0.0.1:${LMSTUDIO_PORT}`;
+
+/** LM Studio labels vision models "vlm" and text-only ones "llm". */
+function visionOf(type: unknown): boolean | undefined {
+  return type === "vlm" ? true : type === "llm" ? false : undefined;
+}
+
+function parseOllamaTags(data: any, base: string): DetectedModel[] | null {
+  if (!data || !Array.isArray(data.models) || !data.models.every((m: any) => typeof m?.name === "string")) return null;
   return data.models.map((m: any) => ({
     id: m.name as string,
     backend: "ollama" as const,
@@ -110,39 +208,8 @@ async function probeOllama(base: string): Promise<DetectedModel[]> {
   }));
 }
 
-const DEFAULT_OLLAMA_CTX_CAP = 32768; // avoid surprise VRAM blowups on huge-window models
-const LMSTUDIO_JIT_GUESS = 4096; // LM Studio's usual default when a model is JIT-loaded
-const LMSTUDIO_BASE = "http://127.0.0.1:1234";
-
-export async function detectOllamaModels(): Promise<DetectedModel[]> {
-  const tried = ollamaBaseUrls(process.env.OLLAMA_HOST);
-  for (const base of tried) {
-    const models = await probeOllama(base);
-    if (models.length) return models;
-  }
-
-  // Standard Docker publishing (-p 11434:11434) was covered above. Ask Docker
-  // only after those cheap probes fail so a nonstandard host port also works
-  // without making every normal startup shell out to the Docker CLI.
-  const dockerBases = await dockerOllamaBaseUrls();
-  for (const base of dockerBases) {
-    if (tried.includes(base)) continue;
-    const models = await probeOllama(base);
-    if (models.length) return models;
-  }
-  return [];
-}
-
-const NOT_LOADED_NOTE =
-  "not loaded yet — LM Studio will load it on first use, likely at a small default context. For longer sessions, load it in LM Studio with a bigger context first.";
-
-/** LM Studio labels vision models "vlm" and text-only ones "llm". */
-function visionOf(type: unknown): boolean | undefined {
-  return type === "vlm" ? true : type === "llm" ? false : undefined;
-}
-
 /** Exported for tests: parse LM Studio's /api/v1/models listing. */
-export function parseLmStudioV1(data: any): DetectedModel[] | null {
+export function parseLmStudioV1(data: any, base = DEFAULT_LMSTUDIO_BASE): DetectedModel[] | null {
   if (!data || !Array.isArray(data.models)) return null;
   return data.models
     .filter((m: any) => m.type === "llm" || m.type === "vlm" || m.type === undefined)
@@ -160,7 +227,7 @@ export function parseLmStudioV1(data: any): DetectedModel[] | null {
       return {
         id: String(inst?.id ?? m.key),
         backend: "lmstudio" as const,
-        baseUrl: LMSTUDIO_BASE,
+        baseUrl: base,
         contextWindow: loaded && loadedCtx ? loadedCtx : Math.min(max ?? LMSTUDIO_JIT_GUESS, LMSTUDIO_JIT_GUESS),
         maxContext: max,
         loaded,
@@ -171,46 +238,65 @@ export function parseLmStudioV1(data: any): DetectedModel[] | null {
     });
 }
 
-export async function detectLmStudioModels(): Promise<DetectedModel[]> {
-  const base = LMSTUDIO_BASE;
-  // Newest listing first: it carries the loaded context, and the reasoning
-  // levels the model supports (needed to make effort mean what it says).
-  const v1 = parseLmStudioV1(await tryFetchJson(`${base}/api/v1/models`));
-  if (v1) return v1;
+function parseLmStudioV0(data: any, base: string): DetectedModel[] | null {
+  if (!data || !Array.isArray(data.data)) return null;
+  return data.data
+    .filter((m: any) => m.type === "llm" || m.type === "vlm" || m.type === undefined)
+    .map((m: any) => {
+      const loaded = m.state === "loaded";
+      const max = typeof m.max_context_length === "number" ? m.max_context_length : undefined;
+      const loadedCtx =
+        typeof m.loaded_context_length === "number" ? m.loaded_context_length : undefined;
+      let contextWindow: number;
+      let note: string | undefined;
+      if (loaded && loadedCtx) {
+        contextWindow = loadedCtx;
+      } else {
+        contextWindow = Math.min(max ?? LMSTUDIO_JIT_GUESS, LMSTUDIO_JIT_GUESS);
+        note = NOT_LOADED_NOTE;
+      }
+      return {
+        id: m.id as string,
+        backend: "lmstudio" as const,
+        baseUrl: base,
+        contextWindow,
+        maxContext: max,
+        loaded,
+        vision: visionOf(m.type),
+        note,
+      };
+    });
+}
 
-  const data = await tryFetchJson(`${base}/api/v0/models`);
-  if (data && Array.isArray(data.data)) {
-    return data.data
-      .filter((m: any) => m.type === "llm" || m.type === "vlm" || m.type === undefined)
-      .map((m: any) => {
-        const loaded = m.state === "loaded";
-        const max = typeof m.max_context_length === "number" ? m.max_context_length : undefined;
-        const loadedCtx =
-          typeof m.loaded_context_length === "number" ? m.loaded_context_length : undefined;
-        let contextWindow: number;
-        let note: string | undefined;
-        if (loaded && loadedCtx) {
-          contextWindow = loadedCtx;
-        } else {
-          contextWindow = Math.min(max ?? LMSTUDIO_JIT_GUESS, LMSTUDIO_JIT_GUESS);
-          note = NOT_LOADED_NOTE;
-        }
-        return {
-          id: m.id as string,
-          backend: "lmstudio" as const,
-          baseUrl: base,
-          contextWindow,
-          maxContext: max,
-          loaded,
-          vision: visionOf(m.type),
-          note,
-        };
-      });
-  }
+export interface ServerInfo {
+  backend: BackendKind;
+  baseUrl: string;
+  models: DetectedModel[];
+}
+
+/** Ask one address whether it is Ollama or LM Studio. null means neither (or
+ * nothing there). Both native listings are requested together so a dead
+ * address costs one timeout, not one per backend. */
+export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIMEOUT_MS): Promise<ServerInfo | null> {
+  const [tags, v1] = await Promise.all([
+    probeJson(`${base}/api/tags`, timeoutMs),
+    probeJson(`${base}/api/v1/models`, timeoutMs),
+  ]);
+  if (!tags.reached && !v1.reached) return null;
+  // LM Studio first: its listing names models by "key", which nothing else does.
+  const lmKeyed = Array.isArray(v1.data?.models) && v1.data.models.length > 0 && v1.data.models.every((m: any) => typeof m?.key === "string");
+  if (lmKeyed) return { backend: "lmstudio", baseUrl: base, models: parseLmStudioV1(v1.data, base) ?? [] };
+  const ollama = parseOllamaTags(tags.data, base);
+  if (ollama) return { backend: "ollama", baseUrl: base, models: ollama };
+  const lmV1 = parseLmStudioV1(v1.data, base);
+  if (lmV1) return { backend: "lmstudio", baseUrl: base, models: lmV1 };
+
+  const v0 = parseLmStudioV0(await tryFetchJson(`${base}/api/v0/models`, undefined, timeoutMs), base);
+  if (v0) return { backend: "lmstudio", baseUrl: base, models: v0 };
   // Older LM Studio builds: fall back to the OpenAI-compat listing (no context info).
-  const v1compat = await tryFetchJson(`${base}/v1/models`);
-  if (v1compat && Array.isArray(v1compat.data)) {
-    return v1compat.data
+  const compat = await tryFetchJson(`${base}/v1/models`, undefined, timeoutMs);
+  if (compat && Array.isArray(compat.data)) {
+    const models = compat.data
       .filter((m: any) => !String(m.id).includes("embed"))
       .map((m: any) => ({
         id: m.id as string,
@@ -219,14 +305,110 @@ export async function detectLmStudioModels(): Promise<DetectedModel[]> {
         contextWindow: LMSTUDIO_JIT_GUESS,
         note: "context window unknown (older LM Studio) — assuming 4096 to be safe.",
       }));
+    return { backend: "lmstudio", baseUrl: base, models };
   }
-  return [];
+  return null;
 }
 
-export async function detectAll(): Promise<DetectedModel[]> {
-  const [ollama, lmstudio] = await Promise.all([detectOllamaModels(), detectLmStudioModels()]);
-  return [...ollama, ...lmstudio];
+// ---- putting it together ----------------------------------------------------
+
+/** Spellings of ONE server, tried in order until one answers. Different
+ * servers live in different groups and are probed side by side. */
+interface ServerGroup {
+  urls: string[];
+  timeoutMs: number;
+  host?: string;
 }
+
+/** Exported for tests. Loopback spellings of the same port are one server;
+ * every other URL is its own. Order of first appearance is kept. */
+export function groupServers(urls: string[], timeoutMs: number, host?: string): ServerGroup[] {
+  const groups = new Map<string, ServerGroup>();
+  for (const url of urls) {
+    const loop = url.match(LOOPBACK_RE);
+    const key = loop ? `loopback${url.slice(loop[0].length)}` : url;
+    const group = groups.get(key) ?? { urls: [], timeoutMs, host };
+    if (!group.urls.includes(url)) group.urls.push(url);
+    groups.set(key, group);
+  }
+  return [...groups.values()];
+}
+
+async function probeGroup(group: ServerGroup): Promise<ServerInfo | null> {
+  for (const url of group.urls) {
+    const info = await identifyServer(url, group.timeoutMs);
+    if (info) return { ...info, models: info.models.map((m) => ({ ...m, host: group.host })) };
+  }
+  return null;
+}
+
+export interface DetectOptions {
+  /** Network hosts the user added; probed alongside this computer. */
+  hosts?: SavedHost[];
+  /** Return as soon as a matching model turns up (startup looks for the
+   * remembered model and need not wait for a machine that is switched off). */
+  until?: (m: DetectedModel) => boolean;
+}
+
+export interface HostStatus {
+  host: SavedHost;
+  servers: ServerInfo[];
+}
+
+/** What each saved host is serving right now (for the hosts manager). */
+export async function probeHosts(hosts: SavedHost[]): Promise<HostStatus[]> {
+  return Promise.all(
+    hosts.map(async (host) => {
+      const found = await Promise.all(groupServers(hostUrls(host), NETWORK_PROBE_TIMEOUT_MS, hostLabel(host)).map(probeGroup));
+      return { host, servers: found.filter((s): s is ServerInfo => !!s) };
+    })
+  );
+}
+
+export async function detectAll(opts: DetectOptions = {}): Promise<DetectedModel[]> {
+  const lmPort = readLmStudioPort();
+  const ports = [OLLAMA_PORT, lmPort ?? LMSTUDIO_PORT, LMSTUDIO_PORT].filter((p, i, all) => all.indexOf(p) === i);
+  const local = groupServers(
+    [...ollamaBaseUrls(process.env.OLLAMA_HOST), ...lmStudioBaseUrls(lmPort), ...hostMachineUrls(ports)],
+    LOCAL_PROBE_TIMEOUT_MS
+  );
+  const covered = new Set(local.flatMap((g) => g.urls));
+
+  // One slot per source, in display order: this computer, its containers,
+  // then each added host. Slots finish at different times.
+  const slots: Promise<DetectedModel[]>[] = [
+    ...local.map((g) => probeGroup(g).then((s) => s?.models ?? [])),
+    containerPublishedUrls(ports).then(async (urls) => {
+      const groups = groupServers(urls.filter((u) => !covered.has(u)), LOCAL_PROBE_TIMEOUT_MS);
+      return (await Promise.all(groups.map(probeGroup))).flatMap((s) => s?.models ?? []);
+    }),
+    ...(opts.hosts ?? []).flatMap((host) =>
+      groupServers(hostUrls(host), NETWORK_PROBE_TIMEOUT_MS, hostLabel(host)).map((g) => probeGroup(g).then((s) => s?.models ?? []))
+    ),
+  ];
+
+  const done: (DetectedModel[] | undefined)[] = slots.map(() => undefined);
+  const merged = () => {
+    const seen = new Set<string>();
+    return done.flatMap((models) => models ?? []).filter((m) => {
+      const key = `${m.baseUrl}|${m.id}`;
+      return seen.has(key) ? false : (seen.add(key), true);
+    });
+  };
+  return new Promise((resolve) => {
+    let left = slots.length;
+    slots.forEach((slot, i) =>
+      slot
+        .catch(() => [] as DetectedModel[])
+        .then((models) => {
+          done[i] = models;
+          if (--left === 0 || (opts.until && models.some(opts.until))) resolve(merged());
+        })
+    );
+  });
+}
+
+const DEFAULT_OLLAMA_CTX_CAP = 32768; // avoid surprise VRAM blowups on huge-window models
 
 /**
  * Resolve the context window we will actually budget against for a chosen model.

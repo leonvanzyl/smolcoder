@@ -55,6 +55,8 @@ export interface SessionUI extends AgentUI {
   /** The next user turn: plain text, or text plus attachments from the web UI. */
   readInput(): Promise<string | UserInput>;
   select(title: string, options: SelectOption[]): Promise<number | null>;
+  /** Ask for one line of text (an address, a name); null when cancelled. */
+  prompt(title: string, placeholder?: string): Promise<string | null>;
   refresh(): void;
 }
 

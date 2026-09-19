@@ -42,11 +42,11 @@ export class SessionChannel implements SessionUI {
   private pendingInput: ((s: string | UserInput) => void) | null = null;
   private inputQueue: (string | UserInput)[] = [];
   private exitRequested = false;
-  private pending = new Map<number, { resolve: (v: any) => void; kind: "confirm" | "select"; label: string }>();
+  private pending = new Map<number, { resolve: (v: any) => void; kind: "confirm" | "select" | "prompt"; label: string }>();
   private askId = 0;
 
   restoreReplay(events: Event[]): void {
-    this.replay = events.slice(-REPLAY_CAP).filter((e) => e.t !== "confirm" && e.t !== "select" && e.t !== "answered");
+    this.replay = events.slice(-REPLAY_CAP).filter((e) => e.t !== "confirm" && e.t !== "select" && e.t !== "prompt" && e.t !== "answered");
     this.askId = Math.max(0, ...events.map((e) => typeof e.id === "number" ? e.id : 0));
   }
 
@@ -123,8 +123,10 @@ export class SessionChannel implements SessionUI {
     if (p.kind === "confirm") {
       const a = value === "always" ? "always allow" : value === "yes" ? "yes" : "no";
       this.broadcast({ t: "line", kind: "status", s: `${a} — ${p.label}` });
-    } else if (value === null || value === undefined) {
+    } else if (value === null || value === undefined || (p.kind === "prompt" && !String(value).trim())) {
       this.broadcast({ t: "line", kind: "status", s: `cancelled — ${p.label}` });
+    } else if (p.kind === "prompt") {
+      this.broadcast({ t: "line", kind: "status", s: `${p.label}: ${String(value).trim().slice(0, 200)}` });
     }
     p.resolve(value);
   }
@@ -198,6 +200,19 @@ export class SessionChannel implements SessionUI {
     this.setStatus("waiting");
     return new Promise((resolve) =>
       this.pending.set(id, { kind: "select", label: title, resolve: (i) => resolve(typeof i === "number" ? i : null) })
+    );
+  }
+
+  prompt(title: string, placeholder = ""): Promise<string | null> {
+    const id = ++this.askId;
+    this.broadcast({ t: "prompt", id, title, placeholder });
+    this.setStatus("waiting");
+    return new Promise((resolve) =>
+      this.pending.set(id, {
+        kind: "prompt",
+        label: title,
+        resolve: (s) => resolve(typeof s === "string" && s.trim() ? s.trim().slice(0, 500) : null),
+      })
     );
   }
 

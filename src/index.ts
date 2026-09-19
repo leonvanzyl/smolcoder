@@ -28,6 +28,7 @@ import {
   Session,
   SessionPrefs,
   sessionLine,
+  setupWithoutLocalModels,
 } from "./session";
 import { Mode, ToolContext } from "./tools/index";
 import { pickShell } from "./tools/shell";
@@ -114,7 +115,9 @@ function parseArgs(argv: string[]): CliArgs {
 const HELP = `
 ${c.bold("smolcoder")} v${VERSION} — a smol, zero-config coding agent for local models.
 
-Detects Ollama and LM Studio automatically. No configuration.
+Detects Ollama and LM Studio on this computer automatically — any port, Docker
+containers included. Models on other machines: /models → "Find models on
+another machine" searches your network or takes an address, and remembers it.
 
 ${c.bold("Usage:")}
   smol [workspace] [options]
@@ -290,16 +293,28 @@ async function runInteractive(args: CliArgs): Promise<void> {
   printLogo();
   const cfg = loadConfig();
   process.stdout.write(c.dim("· looking for Ollama and LM Studio…"));
-  const chosen = await prepareModel(prefsOf(args), cfg, (label) => {
+  let chosen = await prepareModel(prefsOf(args), cfg, (label) => {
     process.stdout.write("\r\x1b[2K" + c.dim(`· ${label}…`));
   });
   process.stdout.write("\r\x1b[2K");
-  if (!chosen) {
-    console.log(noBackendsMessage());
-    process.exit(1);
-  }
 
   const tui = new Tui();
+  if (!chosen) {
+    // Nothing on this computer: open the TUI early and offer to look on the
+    // network. Until a session exists, esc/ctrl+c while it searches quits.
+    tui.onCancel = () => {
+      tui.close();
+      process.exit(130);
+    };
+    tui.start();
+    chosen = await setupWithoutLocalModels(tui, prefsOf(args));
+    if (!chosen) {
+      tui.close();
+      console.log(noBackendsMessage());
+      process.exit(1);
+    }
+  }
+
   const session = new Session(tui, { workspace: args.workspace, chosen, prefs: prefsOf(args), cfg, help: HELP });
   session.onExit = () => process.exit(0);
   process.on("exit", () => session.taskManager.killAll());

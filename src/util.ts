@@ -51,6 +51,22 @@ export function fmtDuration(ms: number): string {
   return `${Math.floor(s / 60)}m${Math.round(s % 60)}s`;
 }
 
+/** Like tryFetchJson, but also says whether anything answered at all — a 404
+ * from a live server is worth a follow-up request, a dead address is not. */
+export async function probeJson(url: string, timeoutMs = 1500): Promise<{ reached: boolean; data: any | null }> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal });
+    if (!res.ok) return { reached: true, data: null };
+    return { reached: true, data: await res.json().catch(() => null) };
+  } catch {
+    return { reached: false, data: null };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 /** fetch with a hard timeout; returns null on any failure (used for detection probes). */
 export async function tryFetchJson(
   url: string,

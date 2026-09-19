@@ -16,7 +16,7 @@ import * as http from "http";
 import * as os from "os";
 import * as path from "path";
 import { DATA_DIR, loadConfig } from "../config";
-import { noBackendsMessage, prepareModel, Session, SessionPrefs, SessionSnapshot } from "../session";
+import { noBackendsMessage, prepareModel, Session, SessionPrefs, SessionSnapshot, setupWithoutLocalModels } from "../session";
 import { tryFetchJson } from "../util";
 import { Attachment, classifyUpload, extOf, MAX_UPLOAD_BYTES, mimeForExt, safeName } from "../attachments";
 import { Event, SessionChannel, uploadUrl } from "./channel";
@@ -210,8 +210,10 @@ export function browseDir(input: string | null | undefined): Record<string, any>
 function defaultFactory(help: string): SessionFactory {
   return async (ui, workspace, prefs) => {
     const cfg = loadConfig();
-    const chosen = await prepareModel(prefs, cfg, (label) => ui.startSpinner(label));
+    let chosen = await prepareModel(prefs, cfg, (label) => ui.startSpinner(label));
     ui.stopSpinner();
+    // Nothing on this computer: the page offers to look on the network.
+    if (!chosen) chosen = await setupWithoutLocalModels(ui, prefs);
     if (!chosen) throw new Error(noBackendsMessage());
     return new Session(ui, { workspace, chosen, prefs, cfg, help });
   };
@@ -454,7 +456,7 @@ export class WebHub {
       // A saved bypass mode is not inherited silently, same as the config:
       // the user re-enables it per session.
       const mode = restore.mode === "bypass" ? "edit" : restore.mode ?? prefs.mode;
-      prefs = { ...prefs, mode, backend: restore.backend, model: restore.model ?? prefs.model, effort: restore.effort !== undefined ? restore.effort : prefs.effort };
+      prefs = { ...prefs, mode, backend: restore.backend, model: restore.model ?? prefs.model, baseUrl: restore.baseUrl, effort: restore.effort !== undefined ? restore.effort : prefs.effort };
     }
     try {
       const session = await this.factory(live.channel, live.workspace, prefs);
@@ -886,6 +888,9 @@ export class WebHub {
         return {};
       case "/select":
         live().channel.handleAnswer(Number(d.id), d.index);
+        return {};
+      case "/prompt":
+        live().channel.handleAnswer(Number(d.id), typeof d.value === "string" ? d.value : null);
         return {};
       case "/cycle": {
         const l = live();

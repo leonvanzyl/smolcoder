@@ -170,6 +170,16 @@ The [unattended follow-up](unattended-2026-09-13.md#final-accepted-results) incl
 
 Implementation: [context manager](../src/context.ts), [plan state](../src/plan.ts), [agent loop](../src/agent.ts), [tool schemas](../src/tools/index.ts), [inference scheduler](../src/providers/scheduler.ts).
 
+## Finding model servers
+
+Detection builds a list of addresses where a server could be, then asks each one what it is. The answer decides the backend, never the port: an address that returns Ollama's model list (`/api/tags`) is Ollama, one that returns LM Studio's catalog (`/api/v1/models`, or the older listings) is LM Studio. Both requests go out together, so an address with nothing behind it costs one timeout.
+
+On this computer the list holds the loopback spellings (`127.0.0.1`, `localhost`, `[::1]`) on port 11434, on `OLLAMA_HOST`, on the port in LM Studio's `http-server-config.json` (found through `~/.lmstudio-home-pointer` when its folder was moved) and on the default 1234. Spellings of one port count as one server, and the first that answers is used. `docker ps` (or `podman ps`) adds host ports that containers publish for either backend. Inside WSL or a container, the default gateway and `host.docker.internal` are added, because loopback there does not reach a server on the host. Every server found is merged into one model list.
+
+Network hosts are the machines added from the model picker, saved in `~/.smolcoder.json`. A bare host is tried on both usual ports; `host:port` or a URL names one server. They are probed alongside the local addresses with a 1.5-second timeout. At startup the search ends as soon as the remembered model turns up, so a machine that is switched off adds no delay. The remembered model is stored with its server address, which keeps the same model id on two machines apart. When nothing is remembered, a model on this computer is preferred over one on the network.
+
+"Search my network" is a TCP connect sweep of the private IPv4 subnets this computer is on, 64 connections at a time with a 350 ms timeout, on the two model-server ports. It needs no ping, raw sockets or admin rights. Subnets are chosen by address (10/8, 172.16/12, 192.168/16), not by adapter name, and a network wider than a /22 is searched only in the /24 around this computer. Open ports are then identified as above. When the network can name a machine and that name resolves back to the same address, the name is saved instead of the IP, so a new DHCP lease does not break it. The sweep runs only when asked for, never at startup and never in headless runs, and a machine it finds is not used until it is picked.
+
 ## Local APIs and failure recovery
 
 Ollama uses [native chat](https://docs.ollama.com/api/chat) for tools, thinking, keep-alive and token/timing usage, plus [running-model information](https://docs.ollama.com/api/ps) for loaded context. LM Studio uses its [native model catalog](https://lmstudio.ai/docs/developer/rest/list) and [OpenAI-compatible tool streaming](https://lmstudio.ai/docs/developer/openai-compat/chat-completions). For an unloaded LM Studio model, an explicit `--ctx` uses the [native load API](https://lmstudio.ai/docs/developer/rest/load) and checks the returned allocation. Already-loaded models are not reloaded to enlarge their windows.

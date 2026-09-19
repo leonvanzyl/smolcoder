@@ -8,13 +8,28 @@ import * as path from "path";
 import { Effort } from "./providers/types";
 import { Mode } from "./tools/index";
 
-export const CONFIG_PATH = path.join(os.homedir(), ".smolcoder.json");
+// SMOLCODER_CONFIG points tests at a scratch file so they never touch the
+// real one.
+export const CONFIG_PATH = process.env.SMOLCODER_CONFIG || path.join(os.homedir(), ".smolcoder.json");
 export const DATA_DIR = path.join(os.homedir(), ".smolcoder");
+
+/** Another machine that serves models, added from the model picker. */
+export interface SavedHost {
+  /** What to connect to: a bare host ("192.168.1.50", "gpu-box.local") means
+   * "look for Ollama and LM Studio on their usual ports"; a full URL or
+   * host:port names one server exactly. */
+  address: string;
+  /** Display name; defaults to the host part of the address. */
+  name?: string;
+}
 
 export interface Config {
   lastModel?: string;
+  /** Server the last model ran on — the same model id can exist on several machines. */
+  lastModelUrl?: string;
   lastMode?: Mode;
   effort?: Effort | null;
+  hosts?: SavedHost[];
 }
 
 export function loadConfig(): Config {
@@ -27,6 +42,11 @@ export function loadConfig(): Config {
     // saved "write"/"yolo" under the previous mode names.
     if (cfg.lastMode === "write") cfg.lastMode = "edit";
     if (cfg.lastMode === "yolo" || cfg.lastMode === "bypass") cfg.lastMode = "edit";
+    cfg.hosts = Array.isArray(cfg.hosts)
+      ? cfg.hosts
+          .filter((h: any) => h && typeof h.address === "string" && h.address.trim())
+          .map((h: any) => ({ address: h.address.trim(), ...(typeof h.name === "string" && h.name.trim() ? { name: h.name.trim() } : {}) }))
+      : [];
     return cfg;
   } catch {
     return {};
@@ -39,4 +59,12 @@ export function saveConfig(cfg: Config): void {
   } catch {
     /* non-fatal */
   }
+}
+
+/** Change some settings and keep the rest. Re-reads the file first: several
+ * web sessions share it, and each one only knows about its own fields. */
+export function updateConfig(patch: Partial<Config>): Config {
+  const next = { ...loadConfig(), ...patch };
+  saveConfig(next);
+  return next;
 }
