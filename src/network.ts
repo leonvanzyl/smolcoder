@@ -23,7 +23,7 @@ export interface FlowUI {
   stopSpinner(): void;
 }
 
-const BACKEND_NAMES = { ollama: "Ollama", lmstudio: "LM Studio", omlx: "oMLX", mtplx: "MTPLX" } as const;
+export const BACKEND_NAMES = { ollama: "Ollama", lmstudio: "LM Studio", omlx: "oMLX", mtplx: "MTPLX" } as const;
 
 function describeServers(servers: { backend: keyof typeof BACKEND_NAMES; models: number }[]): string {
   return servers.map((s) => `${BACKEND_NAMES[s.backend]} · ${plural(s.models, "model")}`).join(" + ");
@@ -45,7 +45,7 @@ export function notFoundHelp(platform: NodeJS.Platform = process.platform): stri
 }
 
 // Servers that can require an API key.
-const KEYED: string[] = ["omlx", "mtplx"];
+export const KEYED: string[] = ["omlx", "mtplx"];
 const LOOPBACK_URL = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[::1\])(?=[:/]|$)/i;
 
 function askKey(ui: FlowUI, what: string): Promise<string | undefined> {
@@ -88,40 +88,80 @@ function save(hosts: SavedHost[]): SavedHost[] {
   return updateConfig({ hosts }).hosts ?? [];
 }
 
-async function confirmOutsideNetwork(ui: FlowUI, hostname: string, url: string): Promise<boolean> {
-  if (url.startsWith("https://") || isPrivateHost(hostname)) return true;
-  ui.warn(`${hostname} is outside your own network and the connection is plain http: your code and prompts would travel unencrypted.`);
-  return (await ui.select(`Add ${hostname} anyway?`, [{ label: "Cancel" }, { label: "Add it anyway" }])) === 1;
+export type AddResult =
+  | { status: "added"; name: string; summary: string }
+  | { status: "needs-key" | "bad-key"; name: string; host: string; message: string; secure: boolean }
+  | { status: "outside"; host: string; message: string }
+  | { status: "invalid" | "not-found"; message: string };
+
+/** Check a typed address and save it when it serves models — the logic
+ * behind "Enter an address" in the picker and "Add a machine" in the web
+ * settings. `apiKey` answers "needs-key"; `outsideOk` answers "outside". */
+export async function addMachine(typed: string, apiKey?: string, outsideOk = false, replace?: SavedHost): Promise<AddResult> {
+  let parsed;
+  try {
+    parsed = parseAddress(typed);
+  } catch (err: any) {
+    return { status: "invalid", message: String(err?.message ?? err) };
+  }
+  const found = (await Promise.all(parsed.urls.map((u) => identifyServer(u, 4000)))).filter((s): s is ServerInfo => !!s);
+  if (!found.length) return { status: "not-found", message: `Nothing answered at ${parsed.hostname} as a model server.` };
+  if (!outsideOk && !found[0].baseUrl.startsWith("https://") && !isPrivateHost(parsed.hostname))
+    return { status: "outside", host: parsed.hostname, message: `${parsed.hostname} is outside your own network and the connection is plain http: your code and prompts would travel unencrypted.` };
+  // oMLX and MTPLX answer /health without a key but list nothing without one.
+  const locked = found.findIndex((s) => KEYED.includes(s.backend) && !s.models.length);
+  if (locked >= 0) {
+    const server = found[locked];
+    const name = BACKEND_NAMES[server.backend];
+    const secure = server.baseUrl.startsWith("https://") || LOOPBACK_URL.test(server.baseUrl);
+    if (!apiKey) return { status: "needs-key", name, host: parsed.hostname, secure, message: `${name} at ${parsed.hostname} needs its API key.` };
+    const again = await identifyServer(server.baseUrl, 4000, apiKey);
+    if (!again?.models.length) return { status: "bad-key", name, host: parsed.hostname, secure, message: `${name} at ${parsed.hostname} did not accept that API key.` };
+    // Keep it as soon as the server accepts it: a machine running both an
+    // oMLX and an MTPLX then asks for the second one's key on the next round.
+    setKeys([server.baseUrl], apiKey);
+    found[locked] = again;
+  }
+  const stillLocked = found.findIndex((s) => KEYED.includes(s.backend) && !s.models.length);
+  if (stillLocked >= 0) {
+    const name = BACKEND_NAMES[found[stillLocked].backend];
+    return { status: "needs-key", name, host: parsed.hostname, secure: found[stillLocked].baseUrl.startsWith("https://") || LOOPBACK_URL.test(found[stillLocked].baseUrl), message: `${name} at ${parsed.hostname} needs its API key.` };
+  }
+  let hosts = loadConfig().hosts ?? [];
+  if (replace) hosts = removeHost(hosts, replace.address);
+  save(addHost(hosts, { address: parsed.address, ...(replace?.name ? { name: replace.name } : {}) }));
+  const name = replace?.name ?? parsed.hostname;
+  return { status: "added", name, summary: describeServers(found.map((s) => ({ backend: s.backend, models: s.models.length }))) };
 }
 
 /** "Enter an address": returns true when a host was added. */
 async function enterAddress(ui: FlowUI, replace?: SavedHost): Promise<boolean> {
   const typed = await ui.prompt("Address of the machine", "192.168.1.50, gpu-box.local or https://…");
   if (!typed) return false;
-  let parsed;
-  try {
-    parsed = parseAddress(typed);
-  } catch (err: any) {
-    ui.warn(String(err?.message ?? err));
-    return false;
+  let apiKey: string | undefined;
+  let outsideOk = false;
+  for (;;) {
+    ui.startSpinner("checking the address");
+    const r = await addMachine(typed, apiKey, outsideOk, replace);
+    ui.stopSpinner();
+    if (r.status === "added") {
+      ui.status(`· added ${r.name} — ${r.summary}`);
+      return true;
+    }
+    if (r.status === "outside") {
+      ui.warn(r.message);
+      if ((await ui.select(`Add ${r.host} anyway?`, [{ label: "Cancel" }, { label: "Add it anyway" }])) !== 1) return false;
+      outsideOk = true;
+    } else if (r.status === "needs-key") {
+      if (!r.secure) ui.warn(`The connection to ${r.host} is plain http: the key travels unencrypted, so it is only as safe as that network.`);
+      apiKey = await askKey(ui, `${r.name} at ${r.host}`);
+      if (!apiKey) return false;
+    } else {
+      ui.warn(r.message);
+      if (r.status === "not-found") ui.status(notFoundHelp());
+      return false;
+    }
   }
-  ui.startSpinner(`checking ${parsed.hostname}`);
-  const found = (await Promise.all(parsed.urls.map((u) => identifyServer(u, 4000)))).filter((s): s is ServerInfo => !!s);
-  ui.stopSpinner();
-  if (!found.length) {
-    ui.warn(`Nothing answered at ${parsed.hostname} as a model server.`);
-    ui.status(notFoundHelp());
-    return false;
-  }
-  if (!(await confirmOutsideNetwork(ui, parsed.hostname, found[0].baseUrl))) return false;
-  // oMLX and MTPLX answer /health without a key but list nothing without one.
-  const entries = found.map((x) => ({ backend: x.backend, url: x.baseUrl, models: x.models.length }));
-  if (!(await unlockServers(ui, entries, parsed.hostname))) return false;
-  let hosts = loadConfig().hosts ?? [];
-  if (replace) hosts = removeHost(hosts, replace.address);
-  save(addHost(hosts, { address: parsed.address, ...(replace?.name ? { name: replace.name } : {}) }));
-  ui.status(`· added ${replace?.name ?? parsed.hostname} — ${describeServers(entries)}`);
-  return true;
 }
 
 function savedAddressesOf(found: FoundHost, hosts: SavedHost[]): boolean {
