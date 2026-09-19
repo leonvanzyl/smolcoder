@@ -141,7 +141,7 @@ export async function findModelsOnNetwork(ui: FlowUI, replace?: SavedHost): Prom
   const subnets = localSubnets();
   const options: SelectOption[] = [
     ...(subnets.length
-      ? [{ label: "Search my network", hint: `${subnets.map((s) => s.cidr).join(", ")} — looks for Ollama, LM Studio and oMLX` }]
+      ? [{ label: "Search my network", hint: `${subnets.map((s) => s.cidr).join(", ")} — looks for Ollama, LM Studio, oMLX and MTPLX` }]
       : []),
     { label: "Enter an address", hint: "IP, name or URL — also for VPNs and other networks" },
   ];

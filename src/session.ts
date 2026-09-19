@@ -198,7 +198,7 @@ export async function setupWithoutLocalModels(ui: FlowUI, prefs: SessionPrefs): 
   for (;;) {
     const pick = await ui.select("No model server found on this computer", [
       { label: "Find models on another machine", hint: "search my network or enter an address" },
-      { label: "Look again", hint: "after starting Ollama, LM Studio or oMLX here" },
+      { label: "Look again", hint: "after starting Ollama, LM Studio, oMLX or MTPLX here" },
     ]);
     if (pick === null) return null;
     if (pick === 0 && !(await findModelsOnNetwork(ui))) continue;

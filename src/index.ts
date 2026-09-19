@@ -115,8 +115,8 @@ function parseArgs(argv: string[]): CliArgs {
 const HELP = `
 ${c.bold("smolcoder")} v${VERSION} — a smol, zero-config coding agent for local models.
 
-Detects Ollama, LM Studio and oMLX on this computer automatically — any port,
-Docker containers included. Models on other machines: /models → "Find models on
+Detects Ollama, LM Studio, oMLX and MTPLX on this computer automatically — any
+port, Docker containers included. Models on other machines: /models → "Find models on
 another machine" searches your network or takes an address, and remembers it.
 
 ${c.bold("Usage:")}
