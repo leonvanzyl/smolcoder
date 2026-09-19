@@ -98,7 +98,7 @@ Ollama and LM Studio only answer their own computer until you tell them otherwis
 | Ollama (Windows, macOS) | Settings → **Expose Ollama to the network** |
 | Ollama (Linux, headless) | Set `OLLAMA_HOST=0.0.0.0` for the service and restart it |
 | LM Studio | Developer → Local Server → **Serve on Local Network** |
-| oMLX | Settings → Server → **Listen Address**: all interfaces. Set `OMLX_API_KEY` on the machine running smolcoder to its API key |
+| oMLX | Settings → Server → **Listen Address**: change it from "127.0.0.1 (Local only)" to the network option. Set `OMLX_API_KEY` on the machine running smolcoder to its API key |
 
 On Windows the firewall asks the first time the server listens on the network. Allow it for Private networks.
 
