@@ -248,6 +248,9 @@ function openSettings(tab) {
   const show = (name) => { for (const b of tabs.children) b.setAttribute("aria-selected", String(b.dataset.tab === name)); panes[name][1](pane); };
   Object.keys(panes).forEach((name) => { const b = el("button", "", panes[name][0]); b.type = "button"; b.dataset.tab = name; b.setAttribute("role", "tab"); b.onclick = () => show(name); tabs.appendChild(b); });
   body.appendChild(tabs); body.appendChild(pane); dialog.appendChild(hdr); dialog.appendChild(body);
+  // Esc closes the dialog and goes no further: the page-level handler would
+  // read it as "cancel the running turn".
+  dialog.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); dialog.close(); } });
   document.body.appendChild(dialog); dialog.onclose = () => dialog.remove(); dialog.showModal();
   show(tab || "models");
 }
