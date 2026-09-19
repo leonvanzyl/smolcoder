@@ -145,3 +145,15 @@ test("settings: the hub serves the page's endpoints behind its token", async () 
     hub.close();
   }
 });
+
+test("settings: the page has the gear, the dialog script, and the theme applied before paint", () => {
+  const { PAGE_HTML } = require("../dist/web/page");
+  assert.match(PAGE_HTML, /id="btnsettings"[^>]*aria-label="Settings"/);
+  assert.match(PAGE_HTML, /function openSettings\(/);
+  const head = PAGE_HTML.slice(0, PAGE_HTML.indexOf("</head>"));
+  assert.match(head, /smol\.theme/, "the theme is set in <head>, so a light page never flashes dark");
+  // The page script must parse: one syntax slip would blank the whole UI.
+  const script = PAGE_HTML.slice(PAGE_HTML.lastIndexOf("<script>") + 8, PAGE_HTML.lastIndexOf("</script>"));
+  assert.doesNotThrow(() => new Function(script));
+  assert.doesNotMatch(require("../dist/web/settings").SETTINGS_JS, /innerHTML/);
+});
