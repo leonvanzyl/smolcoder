@@ -87,7 +87,7 @@ function renderMarkdown(src) {
       const head = cells(line); i += 2;
       const rows = [];
       while (i < lines.length && /^\s*\|/.test(lines[i])) { rows.push(cells(lines[i])); i++; }
-      out += "<table><thead><tr>" + head.map((h) => "<th>" + inlineMd(h) + "</th>").join("") + "</tr></thead><tbody>";
+      out += '<table dir="auto"><thead><tr>' + head.map((h) => "<th>" + inlineMd(h) + "</th>").join("") + "</tr></thead><tbody>";
       for (const r of rows) out += "<tr>" + r.map((c) => "<td>" + inlineMd(c) + "</td>").join("") + "</tr>";
       out += "</tbody></table>";
       continue;
@@ -100,14 +100,14 @@ function renderMarkdown(src) {
       closeList();
       const body = [];
       while (i < lines.length && /^\s*&gt;\s?/.test(lines[i])) { body.push(lines[i].replace(/^\s*&gt;\s?/, "")); i++; }
-      out += "<blockquote>" + inlineMd(body.join(" ")) + "</blockquote>";
+      out += '<blockquote dir="auto">' + inlineMd(body.join(" ")) + "</blockquote>";
       continue;
     }
     const ul = /^\s*[-*+]\s+(.*)$/.exec(line);
     const ol = /^\s*\d+[.)]\s+(.*)$/.exec(line);
     if (ul || ol) {
       const want = ul ? "ul" : "ol";
-      if (listType !== want) { closeList(); out += "<" + want + ">"; listType = want; }
+      if (listType !== want) { closeList(); out += "<" + want + ' dir="auto">'; listType = want; }
       out += "<li>" + inlineMd((ul || ol)[1]) + "</li>";
       i++; continue;
     }

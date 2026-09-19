@@ -60,7 +60,7 @@ export const PAGE_HTML = `<!doctype html>
     <div id="inputbox">
       <div id="attachrow" hidden></div>
       <div class="inputrow">
-        <textarea id="input" aria-label="Message" rows="2" placeholder="Describe a change…" title="Enter to send · Shift+Enter for a new line · / for commands · paste or drop files to attach"></textarea>
+        <textarea id="input" dir="auto" aria-label="Message" rows="2" placeholder="Describe a change…" title="Enter to send · Shift+Enter for a new line · / for commands · paste or drop files to attach"></textarea>
         <button id="attachbtn" class="iconbtn" title="Attach a file or image — or paste / drop one" aria-label="Attach a file">${ICON_ATTACH}</button>
         <input type="file" id="filepick" multiple hidden>
         <button id="actionbtn" title="send (enter)">send</button>
