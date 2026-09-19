@@ -20,11 +20,12 @@ import * as os from "os";
 import * as path from "path";
 import { SavedHost } from "./config";
 import { hostLabel, hostUrls, LMSTUDIO_PORT, OLLAMA_PORT, OMLX_PORT } from "./hosts";
+import { isMtplxHealth, mtplxHeaders, parseMtplxModels, readMtplxPort } from "./mtplx";
 import { isOmlxHealth, omlxHeaders, parseOmlxModels, readOmlxSettings } from "./omlx";
 import { ReasoningInfo } from "./providers/lmstudio";
 import { probeJson, tryFetchJson } from "./util";
 
-export type BackendKind = "ollama" | "lmstudio" | "omlx";
+export type BackendKind = "ollama" | "lmstudio" | "omlx" | "mtplx";
 
 export interface DetectedModel {
   id: string;
@@ -95,9 +96,10 @@ export function lmStudioBaseUrls(configuredPort?: number): string[] {
   return ports.flatMap((port) => loopbackAliases(`http://127.0.0.1:${port}`));
 }
 
-/** Loopback spellings for oMLX: the port its settings name, then the default. */
+/** Loopback spellings for oMLX and MTPLX: the ports their settings name,
+ * then the default both share. */
 function omlxBaseUrls(): string[] {
-  const ports = [readOmlxSettings().port, OMLX_PORT].filter((p, i, all): p is number => !!p && all.indexOf(p) === i);
+  const ports = [readOmlxSettings().port, readMtplxPort(), OMLX_PORT].filter((p, i, all): p is number => !!p && all.indexOf(p) === i);
   return ports.flatMap((port) => loopbackAliases(`http://127.0.0.1:${port}`));
 }
 
@@ -162,6 +164,28 @@ function containerPublishedUrls(containerPorts: number[]): Promise<string[]> {
     });
   // Podman prints the same port format; only ask it when Docker is absent.
   return ask("docker").then((urls) => urls ?? ask("podman")).then((urls) => urls ?? []);
+}
+
+/** Exported for tests: listening ports in `lsof -Fn` output ("n127.0.0.1:8001"). */
+export function parseLsofPorts(output: string): number[] {
+  const ports = [...output.matchAll(/^n.*:(\d+)$/gm)].map((m) => Number(m[1]));
+  return ports.filter((p, i) => ports.indexOf(p) === i);
+}
+
+/** macOS: where running oMLX and MTPLX servers listen, whatever port they were
+ * moved to (they share 8000 by default, so one of them often is). */
+function mlxProcessUrls(): Promise<string[]> {
+  if (process.platform !== "darwin") return Promise.resolve([]);
+  const run = (cmd: string, args: string[]) =>
+    new Promise<string>((resolve) =>
+      execFile(cmd, args, { encoding: "utf8", timeout: DOCKER_DISCOVERY_TIMEOUT_MS }, (err, stdout) => resolve(err ? "" : stdout))
+    );
+  return run("pgrep", ["-f", "mtplx\\.server|omlx-server"]).then(async (pids) => {
+    const list = pids.split(/\s+/).filter(Boolean).join(",");
+    if (!list) return [];
+    const ports = parseLsofPorts(await run("lsof", ["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-p", list, "-Fn"]));
+    return ports.map((port) => `http://127.0.0.1:${port}`);
+  });
 }
 
 /** Exported for tests: the default gateway in /proc/net/route (little-endian hex). */
@@ -297,6 +321,10 @@ export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIM
     const listing = await tryFetchJson(`${base}/v1/models`, { headers: omlxHeaders(base) }, timeoutMs);
     return { backend: "omlx", baseUrl: base, models: parseOmlxModels(listing, base) ?? [] };
   }
+  if (isMtplxHealth(health.data)) {
+    const listing = await tryFetchJson(`${base}/v1/models`, { headers: mtplxHeaders() }, timeoutMs);
+    return { backend: "mtplx", baseUrl: base, models: parseMtplxModels(listing, base) ?? [] };
+  }
   // LM Studio first: its listing names models by "key", which nothing else does.
   const lmKeyed = Array.isArray(v1.data?.models) && v1.data.models.length > 0 && v1.data.models.every((m: any) => typeof m?.key === "string");
   if (lmKeyed) return { backend: "lmstudio", baseUrl: base, models: parseLmStudioV1(v1.data, base) ?? [] };
@@ -392,6 +420,10 @@ export async function detectAll(opts: DetectOptions = {}): Promise<DetectedModel
   // then each added host. Slots finish at different times.
   const slots: Promise<DetectedModel[]>[] = [
     ...local.map((g) => probeGroup(g).then((s) => s?.models ?? [])),
+    mlxProcessUrls().then(async (urls) => {
+      const groups = groupServers(urls.filter((u) => !covered.has(u)), LOCAL_PROBE_TIMEOUT_MS);
+      return (await Promise.all(groups.map(probeGroup))).flatMap((s) => s?.models ?? []);
+    }),
     containerPublishedUrls(ports).then(async (urls) => {
       const groups = groupServers(urls.filter((u) => !covered.has(u)), LOCAL_PROBE_TIMEOUT_MS);
       return (await Promise.all(groups.map(probeGroup))).flatMap((s) => s?.models ?? []);

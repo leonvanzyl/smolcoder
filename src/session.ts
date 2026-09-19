@@ -64,6 +64,7 @@ export function makeProvider(m: DetectedModel): Provider {
   const maxOut = outputBudget(m.contextWindow);
   if (m.backend === "ollama") return new OllamaProvider(m.baseUrl, m.id, m.contextWindow, m.numCtx, maxOut, m.vision);
   if (m.backend === "omlx") return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, undefined, m.vision, omlxApiKey(m.baseUrl), "oMLX");
+  if (m.backend === "mtplx") return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, undefined, m.vision, process.env.MTPLX_API_KEY, "MTPLX");
   return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, m.reasoning, m.vision);
 }
 
@@ -128,6 +129,7 @@ export function noBackendsMessage(): string {
     `    If the list is empty, run: ollama pull qwen3\n` +
     `  · ${c.bold("LM Studio")}: load a model and start Local Server in the Developer tab (any port).\n` +
     `  · ${c.bold("oMLX")}: start its server (menu bar app). The API key is read from its settings; set ${c.dim("OMLX_API_KEY")} for one on another machine.\n` +
+    `  · ${c.bold("MTPLX")}: start its server (app play button, or: mtplx start). Set ${c.dim("MTPLX_API_KEY")} if it runs with --api-key.\n` +
     `  · ${c.bold("Another machine")}: start smol in a terminal or with --web and choose "Find models on another machine".\n\n` +
     `Then run smol again.`
   );
@@ -180,7 +182,7 @@ export function modelOptions(models: DetectedModel[], current?: DetectedModel): 
   return models.map((m) => ({
     label: m.id,
     hint:
-      (m.backend === "ollama" ? "ollama" : m.backend === "omlx" ? `omlx · ctx ${m.contextWindow.toLocaleString()}` : `lm studio${m.loaded ? ` · ctx ${m.contextWindow.toLocaleString()}` : " · not loaded"}`) +
+      (m.backend === "ollama" ? "ollama" : m.backend === "omlx" || m.backend === "mtplx" ? `${m.backend} · ctx ${m.contextWindow.toLocaleString()}` : `lm studio${m.loaded ? ` · ctx ${m.contextWindow.toLocaleString()}` : " · not loaded"}`) +
       (m.host ? ` · ${m.host}` : ""),
     current: !!current && m.id === current.id && m.backend === current.backend && m.baseUrl === current.baseUrl,
   }));

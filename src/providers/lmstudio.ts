@@ -166,9 +166,9 @@ export class LmStudioProvider implements Provider {
       max_tokens: opts.maxTokens ?? this.maxOutputTokens,
     };
     const wireEffort = mapEffort(effort, this.reasoning);
-    if (effort === "off" && this.serverName === "oMLX") {
-      // oMLX reads reasoning_effort "none" as "low"; only the chat template
-      // switch really turns thinking off (measured: 5.7s → 1.0s on "say hi").
+    if (effort === "off" && (this.serverName === "oMLX" || this.serverName === "MTPLX")) {
+      // oMLX and MTPLX read reasoning_effort "none" as "low"; only the chat
+      // template switch turns thinking off (oMLX measured: 5.7s → 1.0s on "say hi").
       base.chat_template_kwargs = { enable_thinking: false };
     } else if (wireEffort && !this.effortUnsupported) {
       base.reasoning_effort = wireEffort;
