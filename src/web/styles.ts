@@ -125,7 +125,7 @@ export const STYLES = String.raw`
   /* Hebrew, Arabic: each block takes the direction of its first letter, so
      mixed-language text reads right and English is unchanged. Code stays LTR. */
   .md p, .md li, .md h1, .md h2, .md h3, .md h4, .md h5, .md h6, .md th, .md td, .md blockquote,
-  .user, .thought-body, .plan > div, .stitle, #input { unicode-bidi: plaintext; text-align: start; }
+  .user, .thought-body, .plan > div, .stitle, #crumb .title, #input { unicode-bidi: plaintext; text-align: start; }
   .md code { unicode-bidi: plaintext; }
   .md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
   .tool { color: var(--dim); margin-top: 4px; }

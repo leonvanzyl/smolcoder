@@ -34,7 +34,7 @@ test("rtl: text blocks follow their own first strong character, lists and quotes
 test("rtl: the message box, user messages and session titles follow what is typed", () => {
   const { PAGE_HTML } = require("../dist/web/page");
   assert.match(PAGE_HTML, /<textarea id="input"[^>]*dir="auto"/);
-  for (const sel of [".user", ".thought-body", ".stitle", "#input"]) {
+  for (const sel of [".user", ".thought-body", ".stitle", "#crumb .title", "#input"]) {
     const rule = STYLES.split("}").find((r) => r.includes(sel) && r.includes("unicode-bidi"));
     assert.ok(rule, sel + " should resolve its direction per paragraph");
   }
