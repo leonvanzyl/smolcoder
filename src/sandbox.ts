@@ -17,6 +17,22 @@ function normalizeForCompare(p: string): string {
   return isWin ? p.toLowerCase() : p;
 }
 
+/** The deepest ancestor of `abs` that exists (the path itself when it does).
+ * Throws when a path cannot be inspected for a reason other than not existing. */
+function deepestExisting(abs: string): string {
+  let existing = abs;
+  for (;;) {
+    try { fs.lstatSync(existing); break; }
+    catch (err: any) {
+      if (err?.code !== "ENOENT" && err?.code !== "ENOTDIR") throw err;
+    }
+    const parent = path.dirname(existing);
+    if (parent === existing) break;
+    existing = parent;
+  }
+  return existing;
+}
+
 export function resolveInWorkspace(root: string, userPath: string): string {
   if (typeof userPath !== "string" || userPath.trim() === "") {
     throw new SandboxError("path is required (relative to the workspace, e.g. \"src/app.js\").");
@@ -24,15 +40,11 @@ export function resolveInWorkspace(root: string, userPath: string): string {
   const abs = path.resolve(root, userPath);
 
   // realpath the deepest existing ancestor to defeat symlink escapes
-  let existing = abs;
-  for (;;) {
-    try { fs.lstatSync(existing); break; }
-    catch (err: any) {
-      if (err?.code !== "ENOENT" && err?.code !== "ENOTDIR") throw new SandboxError(`cannot inspect path "${userPath}".`);
-    }
-    const parent = path.dirname(existing);
-    if (parent === existing) break;
-    existing = parent;
+  let existing: string;
+  try {
+    existing = deepestExisting(abs);
+  } catch {
+    throw new SandboxError(`cannot inspect path "${userPath}".`);
   }
   let realExisting: string;
   let realRoot: string;
@@ -105,14 +117,23 @@ function isAbsoluteLike(tok: string): boolean {
   return tok.startsWith("/");
 }
 
-function insideWorkspace(root: string, abs: string): boolean {
-  let realRoot = root;
+/** `abs` with symlinks resolved as far as the path exists; the part not
+ * written yet is kept as given. Falls back to the path itself. */
+function realPathOf(abs: string): string {
   try {
-    realRoot = fs.realpathSync(root);
+    const existing = deepestExisting(abs);
+    return path.join(fs.realpathSync(existing), path.relative(existing, abs));
   } catch {
-    /* compare against the given root */
+    return abs;
   }
-  const rel = path.relative(normalizeForCompare(realRoot), normalizeForCompare(path.resolve(abs)));
+}
+
+/** Both sides are resolved the same way. Resolving only the root made every
+ * in-tree path look foreign when the workspace sits behind a symlink — macOS
+ * temp folders, or `smol /tmp/project` — and resolving the path also catches
+ * a link inside the workspace that leads out of it. */
+function insideWorkspace(root: string, abs: string): boolean {
+  const rel = path.relative(normalizeForCompare(realPathOf(path.resolve(root))), normalizeForCompare(realPathOf(path.resolve(abs))));
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 

@@ -61,6 +61,39 @@ test("paths outside the workspace are flagged", () => {
   }
 });
 
+// macOS temp folders (/var → /private/var) and `smol /tmp/project` put the
+// workspace behind a symlink. Built by hand here so it is tested on every OS.
+test("a workspace reached through a symlink is still the workspace", (t) => {
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), "tc-sandbox-real-"));
+  const elsewhere = fs.mkdtempSync(path.join(os.tmpdir(), "tc-sandbox-else-"));
+  const link = path.join(os.tmpdir(), `tc-sandbox-link-${process.pid}`);
+  fs.mkdirSync(path.join(real, "src"));
+  try {
+    // "junction" needs no special rights on Windows and is ignored elsewhere.
+    fs.symlinkSync(real, link, "junction");
+    fs.symlinkSync(elsewhere, path.join(real, "exit"), "junction");
+  } catch (err) {
+    if (err.code === "EPERM") return t.skip("OS does not allow creating symlinks");
+    throw err;
+  }
+  try {
+    const free = (cmd) => assert.equal(commandEscapesWorkspace(cmd, link), null, `should run freely: ${cmd}`);
+    free("cp src/a.js src/../src/b.js");
+    free(`node ${path.join(link, "src", "app.js")}`);
+    free(`node ${path.join(real, "src", "app.js")}`); // the same folder by its real name
+    free(`node ${path.join(link, "src", "not-written-yet.js")}`);
+    free(`cd ${link} && npm test`);
+    assert.match(commandEscapesWorkspace(`cp src/a.js ${path.join(os.tmpdir(), "a.js")}`, link), /outside/);
+    assert.match(commandEscapesWorkspace("cat ../secrets.env", link), /above/);
+    // A link inside the workspace that leads out of it is outside.
+    assert.match(commandEscapesWorkspace(`cat ${path.join(link, "exit", "secret.txt")}`, link), /outside/);
+  } finally {
+    fs.rmSync(link, { force: true, recursive: true });
+    fs.rmSync(real, { force: true, recursive: true });
+    fs.rmSync(elsewhere, { force: true, recursive: true });
+  }
+});
+
 test("global package installs are flagged", () => {
   outside("npm install -g typescript", /globally/);
   outside("npm i --global foo", /globally/);
