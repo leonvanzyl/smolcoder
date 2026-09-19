@@ -281,7 +281,7 @@ export interface ServerInfo {
   models: DetectedModel[];
 }
 
-/** Ask one address whether it is Ollama or LM Studio. null means neither (or
+/** Ask one address which model server it is. null means none (or
  * nothing there). Both native listings are requested together so a dead
  * address costs one timeout, not one per backend. */
 export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIMEOUT_MS): Promise<ServerInfo | null> {

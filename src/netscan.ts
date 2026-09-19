@@ -113,7 +113,7 @@ export interface ScanOptions {
   onProgress?: (done: number, total: number) => void;
 }
 
-/** Sweep the subnets and report every machine running Ollama or LM Studio. */
+/** Sweep the subnets and report every machine running a model server. */
 export async function scanSubnets(subnets: Subnet[], opts: ScanOptions = {}): Promise<FoundHost[]> {
   const ports = opts.ports ?? [OLLAMA_PORT, LMSTUDIO_PORT, OMLX_PORT];
   const timeout = opts.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;

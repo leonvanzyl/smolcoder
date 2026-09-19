@@ -160,7 +160,7 @@ export async function prepareModel(
   cfg: Config,
   progress?: (label: string) => void
 ): Promise<DetectedModel | null> {
-  progress?.("looking for Ollama and LM Studio");
+  progress?.("looking for model servers");
   const url = prefs.model ? prefs.baseUrl : cfg.lastModelUrl;
   // Without --model the remembered one wins anyway, so stop looking the moment
   // it shows up instead of waiting out a network host that is switched off.
@@ -196,11 +196,11 @@ export async function setupWithoutLocalModels(ui: FlowUI, prefs: SessionPrefs): 
   for (;;) {
     const pick = await ui.select("No model server found on this computer", [
       { label: "Find models on another machine", hint: "search my network or enter an address" },
-      { label: "Look again", hint: "after starting Ollama or LM Studio here" },
+      { label: "Look again", hint: "after starting Ollama, LM Studio or oMLX here" },
     ]);
     if (pick === null) return null;
     if (pick === 0 && !(await findModelsOnNetwork(ui))) continue;
-    ui.startSpinner("looking for Ollama and LM Studio");
+    ui.startSpinner("looking for model servers");
     const cfg = loadConfig();
     const models = (await detectAll({ hosts: cfg.hosts })).filter((m) => !prefs.backend || m.backend === prefs.backend);
     ui.stopSpinner();
