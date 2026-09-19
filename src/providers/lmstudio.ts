@@ -115,9 +115,12 @@ export class LmStudioProvider implements Provider {
     maxOutputTokens = MAX_OUTPUT_TOKENS,
     private reasoning?: ReasoningInfo,
     /** Whether the model accepts images (LM Studio lists such models as "vlm"). */
-    public readonly vision?: boolean
+    public readonly vision?: boolean,
+    /** Bearer key, for OpenAI-compatible servers that require one (oMLX). */
+    private apiKey?: string,
+    private serverName = "LM Studio"
   ) {
-    this.label = `lmstudio · ${modelId}`;
+    this.label = `${serverName === "LM Studio" ? "lmstudio" : serverName.toLowerCase()} · ${modelId}`;
     this.maxOutputTokens = maxOutputTokens;
   }
 
@@ -160,7 +163,11 @@ export class LmStudioProvider implements Provider {
       max_tokens: opts.maxTokens ?? this.maxOutputTokens,
     };
     const wireEffort = mapEffort(effort, this.reasoning);
-    if (wireEffort && !this.effortUnsupported) {
+    if (effort === "off" && this.serverName === "oMLX") {
+      // oMLX reads reasoning_effort "none" as "low"; only the chat template
+      // switch really turns thinking off (measured: 5.7s → 1.0s on "say hi").
+      base.chat_template_kwargs = { enable_thinking: false };
+    } else if (wireEffort && !this.effortUnsupported) {
       base.reasoning_effort = wireEffort;
     } else if (effort === "off" && /qwen/i.test(this.modelId)) {
       // Older LM Studio builds without reasoning_effort: fall back to the
@@ -227,13 +234,13 @@ export class LmStudioProvider implements Provider {
     const t0 = Date.now();
     const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}) },
       body: JSON.stringify(body),
       signal: opts.signal,
     });
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      throw new Error(`LM Studio returned ${res.status}: ${text.slice(0, 300)}`);
+      throw new Error(`${this.serverName} returned ${res.status}: ${text.slice(0, 300)}`);
     }
 
     if (body.stream === false) {

@@ -13,6 +13,7 @@ import { findModelsOnNetwork, FlowUI, manageHosts } from "./network";
 import { Plan, PlanStep } from "./plan";
 import { buildSystemPrompt, loadAgentsMd } from "./prompt";
 import { LmStudioProvider } from "./providers/lmstudio";
+import { omlxApiKey } from "./omlx";
 import { OllamaProvider } from "./providers/ollama";
 import { Effort, Msg, Provider } from "./providers/types";
 import { Mode, MODE_LABELS, ToolContext } from "./tools/index";
@@ -61,9 +62,9 @@ export function outputBudget(window: number): number {
 
 export function makeProvider(m: DetectedModel): Provider {
   const maxOut = outputBudget(m.contextWindow);
-  return m.backend === "ollama"
-    ? new OllamaProvider(m.baseUrl, m.id, m.contextWindow, m.numCtx, maxOut, m.vision)
-    : new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, m.reasoning, m.vision);
+  if (m.backend === "ollama") return new OllamaProvider(m.baseUrl, m.id, m.contextWindow, m.numCtx, maxOut, m.vision);
+  if (m.backend === "omlx") return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, undefined, m.vision, omlxApiKey(m.baseUrl), "oMLX");
+  return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, m.reasoning, m.vision);
 }
 
 /** One-line advice when the effective reasoning setting will be slow: LM
@@ -126,6 +127,7 @@ export function noBackendsMessage(): string {
     `    Found on this computer, at ${c.dim("$OLLAMA_HOST")}, and in Docker containers that publish its port.\n` +
     `    If the list is empty, run: ollama pull qwen3\n` +
     `  · ${c.bold("LM Studio")}: load a model and start Local Server in the Developer tab (any port).\n` +
+    `  · ${c.bold("oMLX")}: start its server (menu bar app). The API key is read from its settings; set ${c.dim("OMLX_API_KEY")} for one on another machine.\n` +
     `  · ${c.bold("Another machine")}: start smol in a terminal or with --web and choose "Find models on another machine".\n\n` +
     `Then run smol again.`
   );
@@ -178,7 +180,7 @@ export function modelOptions(models: DetectedModel[], current?: DetectedModel): 
   return models.map((m) => ({
     label: m.id,
     hint:
-      (m.backend === "ollama" ? "ollama" : `lm studio${m.loaded ? ` · ctx ${m.contextWindow.toLocaleString()}` : " · not loaded"}`) +
+      (m.backend === "ollama" ? "ollama" : m.backend === "omlx" ? `omlx · ctx ${m.contextWindow.toLocaleString()}` : `lm studio${m.loaded ? ` · ctx ${m.contextWindow.toLocaleString()}` : " · not loaded"}`) +
       (m.host ? ` · ${m.host}` : ""),
     current: !!current && m.id === current.id && m.backend === current.backend && m.baseUrl === current.baseUrl,
   }));

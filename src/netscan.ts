@@ -7,7 +7,7 @@ import * as dns from "dns";
 import * as net from "net";
 import * as os from "os";
 import { BackendKind, identifyServer } from "./detect";
-import { LMSTUDIO_PORT, OLLAMA_PORT } from "./hosts";
+import { LMSTUDIO_PORT, OLLAMA_PORT, OMLX_PORT } from "./hosts";
 
 export interface Subnet {
   /** e.g. "192.168.1.0/24" */
@@ -115,7 +115,7 @@ export interface ScanOptions {
 
 /** Sweep the subnets and report every machine running Ollama or LM Studio. */
 export async function scanSubnets(subnets: Subnet[], opts: ScanOptions = {}): Promise<FoundHost[]> {
-  const ports = opts.ports ?? [OLLAMA_PORT, LMSTUDIO_PORT];
+  const ports = opts.ports ?? [OLLAMA_PORT, LMSTUDIO_PORT, OMLX_PORT];
   const timeout = opts.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
   const targets = subnets.flatMap((s) => s.addresses).flatMap((ip) => ports.map((port) => ({ ip, port })));
   const open: { ip: string; port: number }[] = [];

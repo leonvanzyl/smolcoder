@@ -19,11 +19,12 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { SavedHost } from "./config";
-import { hostLabel, hostUrls, LMSTUDIO_PORT, OLLAMA_PORT } from "./hosts";
+import { hostLabel, hostUrls, LMSTUDIO_PORT, OLLAMA_PORT, OMLX_PORT } from "./hosts";
+import { isOmlxHealth, omlxHeaders, parseOmlxModels, readOmlxSettings } from "./omlx";
 import { ReasoningInfo } from "./providers/lmstudio";
 import { probeJson, tryFetchJson } from "./util";
 
-export type BackendKind = "ollama" | "lmstudio";
+export type BackendKind = "ollama" | "lmstudio" | "omlx";
 
 export interface DetectedModel {
   id: string;
@@ -91,6 +92,12 @@ export function ollamaBaseUrls(env?: string): string[] {
  * changeable in the app), then the default. */
 export function lmStudioBaseUrls(configuredPort?: number): string[] {
   const ports = [configuredPort, LMSTUDIO_PORT].filter((p, i, all): p is number => !!p && all.indexOf(p) === i);
+  return ports.flatMap((port) => loopbackAliases(`http://127.0.0.1:${port}`));
+}
+
+/** Loopback spellings for oMLX: the port its settings name, then the default. */
+function omlxBaseUrls(): string[] {
+  const ports = [readOmlxSettings().port, OMLX_PORT].filter((p, i, all): p is number => !!p && all.indexOf(p) === i);
   return ports.flatMap((port) => loopbackAliases(`http://127.0.0.1:${port}`));
 }
 
@@ -278,11 +285,18 @@ export interface ServerInfo {
  * nothing there). Both native listings are requested together so a dead
  * address costs one timeout, not one per backend. */
 export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIMEOUT_MS): Promise<ServerInfo | null> {
-  const [tags, v1] = await Promise.all([
+  const [tags, v1, health] = await Promise.all([
     probeJson(`${base}/api/tags`, timeoutMs),
     probeJson(`${base}/api/v1/models`, timeoutMs),
+    probeJson(`${base}/health`, timeoutMs),
   ]);
-  if (!tags.reached && !v1.reached) return null;
+  if (!tags.reached && !v1.reached && !health.reached) return null;
+  // oMLX: /health is the one open endpoint. A wrong or missing key still
+  // identifies the server, with no models.
+  if (isOmlxHealth(health.data)) {
+    const listing = await tryFetchJson(`${base}/v1/models`, { headers: omlxHeaders(base) }, timeoutMs);
+    return { backend: "omlx", baseUrl: base, models: parseOmlxModels(listing, base) ?? [] };
+  }
   // LM Studio first: its listing names models by "key", which nothing else does.
   const lmKeyed = Array.isArray(v1.data?.models) && v1.data.models.length > 0 && v1.data.models.every((m: any) => typeof m?.key === "string");
   if (lmKeyed) return { backend: "lmstudio", baseUrl: base, models: parseLmStudioV1(v1.data, base) ?? [] };
@@ -369,7 +383,7 @@ export async function detectAll(opts: DetectOptions = {}): Promise<DetectedModel
   const lmPort = readLmStudioPort();
   const ports = [OLLAMA_PORT, lmPort ?? LMSTUDIO_PORT, LMSTUDIO_PORT].filter((p, i, all) => all.indexOf(p) === i);
   const local = groupServers(
-    [...ollamaBaseUrls(process.env.OLLAMA_HOST), ...lmStudioBaseUrls(lmPort), ...hostMachineUrls(ports)],
+    [...ollamaBaseUrls(process.env.OLLAMA_HOST), ...lmStudioBaseUrls(lmPort), ...omlxBaseUrls(), ...hostMachineUrls(ports)],
     LOCAL_PROBE_TIMEOUT_MS
   );
   const covered = new Set(local.flatMap((g) => g.urls));
