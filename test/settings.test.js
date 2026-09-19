@@ -155,5 +155,7 @@ test("settings: the page has the gear, the dialog script, and the theme applied 
   // The page script must parse: one syntax slip would blank the whole UI.
   const script = PAGE_HTML.slice(PAGE_HTML.lastIndexOf("<script>") + 8, PAGE_HTML.lastIndexOf("</script>"));
   assert.doesNotThrow(() => new Function(script));
-  assert.doesNotMatch(require("../dist/web/settings").SETTINGS_JS, /innerHTML/);
+  const js = require("../dist/web/settings").SETTINGS_JS;
+  assert.doesNotMatch(js, /innerHTML/);
+  assert.match(js, /e\.key === "Escape"\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); dialog\.close\(\)/, "Esc in settings must not cancel the running turn");
 });
