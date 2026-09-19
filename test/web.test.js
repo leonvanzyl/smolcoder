@@ -463,3 +463,24 @@ test("hub: a session that fails to start shows the error and can be retried", as
     hub.close();
   }
 });
+
+test("hub: a session that fails to start does not leave its spinner running", async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "smol-hub-spin-"));
+  const ws = path.join(dataDir, "proj");
+  fs.mkdirSync(ws);
+  const factory = async (ui) => {
+    ui.startSpinner("looking for model servers");
+    throw new Error('Model "gone" was not found on the selected backend.');
+  };
+  const hub = new WebHub({ port: 0, prefs: {}, help: "help", version: "9.9.9", dataDir, factory, quiet: true });
+  await hub.start();
+  try {
+    const id = hub.openSession(ws);
+    await until(() => hub.snapshot().workspaces[0].sessions[0].status === "error", 2000, "failed session");
+    const replay = hub.live.get(id).channel.replay;
+    assert.ok(replay.some((e) => e.t === "line" && /was not found/.test(e.s)), "the error is shown");
+    assert.equal(hub.live.get(id).channel.busyLabel, null, "the spinner is stopped");
+  } finally {
+    hub.close();
+  }
+});

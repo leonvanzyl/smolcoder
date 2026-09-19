@@ -456,7 +456,7 @@ export class WebHub {
       // A saved bypass mode is not inherited silently, same as the config:
       // the user re-enables it per session.
       const mode = restore.mode === "bypass" ? "edit" : restore.mode ?? prefs.mode;
-      prefs = { ...prefs, mode, backend: restore.backend, model: restore.model ?? prefs.model, baseUrl: restore.baseUrl, effort: restore.effort !== undefined ? restore.effort : prefs.effort };
+      prefs = { ...prefs, mode, backend: restore.backend, model: restore.model ?? prefs.model, baseUrl: restore.baseUrl, effort: restore.effort !== undefined ? restore.effort : prefs.effort, resumed: true };
     }
     try {
       const session = await this.factory(live.channel, live.workspace, prefs);
@@ -482,6 +482,8 @@ export class WebHub {
       session.run().catch((err) => live.channel.error(String(err?.message ?? err)));
     } catch (err: any) {
       live.error = String(err?.message ?? err);
+      // A failed start must not leave "looking for model servers…" spinning.
+      live.channel.stopSpinner();
       live.channel.phase = "error";
       live.channel.error(live.error);
       live.channel.warn("Start a backend, then click this session in the sidebar to retry.");

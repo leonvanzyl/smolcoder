@@ -276,3 +276,18 @@ test("the same model id on two machines stays unambiguous", () => {
   assert.deepEqual(rows.map((r) => r.hint.replace(/4.096/, "4096")), ["ollama", "ollama · gpu-box", "lm studio · ctx 4096"]);
   assert.deepEqual(rows.map((r) => r.current), [false, true, false]);
 });
+
+test("a resumed session whose server is gone continues on another one", () => {
+  const { pickModel } = require("../dist/session");
+  const omlx = { id: "qwen3.8-27b", backend: "omlx", baseUrl: "http://127.0.0.1:8000", contextWindow: 32768 };
+  const resumed = { resumed: true, backend: "mtplx", model: "mtplx-qwen38", baseUrl: "http://127.0.0.1:8001" };
+  const chosen = pickModel([omlx], resumed, {});
+  assert.equal(chosen.id, "qwen3.8-27b");
+  assert.match(chosen.note, /mtplx-qwen38 is not available any more — continuing with qwen3\.8-27b/);
+  // Still there: resumed exactly, no note.
+  const mt = { id: "mtplx-qwen38", backend: "mtplx", baseUrl: "http://127.0.0.1:8001", contextWindow: 262144 };
+  assert.deepEqual(pickModel([omlx, mt], resumed, {}), mt);
+  // An explicit --model is a requirement, as before.
+  assert.throws(() => pickModel([omlx], { model: "mtplx-qwen38" }, {}), /was not found/);
+  assert.equal(pickModel([], resumed, {}), null);
+});
