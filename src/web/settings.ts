@@ -94,6 +94,9 @@ function serverRow(s, refresh) {
   const field = el("input"); field.type = "password"; field.autocomplete = "off"; field.placeholder = "the key set in " + s.name + "'s settings"; field.setAttribute("aria-label", "API key for " + s.name);
   const save = smallBtn("Save"), note = el("div", "msg");
   form.appendChild(field); form.appendChild(save);
+  // A key for a server on the network travels in the clear unless it is https.
+  if (!/^https:/.test(s.baseUrl) && !/^https?:\/\/(localhost|127(\.\d+){3}|\[::1\])([:\/]|$)/.test(s.baseUrl))
+    form.appendChild(el("div", "hint", "This connection is plain http: the key travels unencrypted, so it is only as safe as that network."));
   if (s.hasKey) {
     const remove = smallBtn("Remove key", "danger");
     remove.onclick = () => postJSON("/settings/key", { baseUrl: s.baseUrl, key: null }).then(refresh, (e) => msg(note, e.message, "err"));
