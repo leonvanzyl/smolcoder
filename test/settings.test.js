@@ -158,4 +158,5 @@ test("settings: the page has the gear, the dialog script, and the theme applied 
   const js = require("../dist/web/settings").SETTINGS_JS;
   assert.doesNotMatch(js, /innerHTML/);
   assert.match(js, /e\.key === "Escape"\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); dialog\.close\(\)/, "Esc in settings must not cancel the running turn");
+  assert.match(js, /plain http: the key travels unencrypted/, "a key for a networked server warns before it is typed");
 });
