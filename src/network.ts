@@ -59,6 +59,31 @@ async function pickServer(ui: FlowUI, servers: ServerInfo[]): Promise<ServerInfo
   return pick === null ? null : servers[pick];
 }
 
+/** A scan or an address can turn up an oMLX or MTPLX that answers but lists
+ * nothing until it has its key. Ask for it, check it with the server and
+ * keep it, and update its model count in place. False means the machine
+ * should not be added. */
+export async function unlockServers(ui: FlowUI, servers: { backend: string; url: string; models: number }[], hostname: string): Promise<boolean> {
+  for (const s of servers) {
+    if (!KEYED.includes(s.backend) || s.models > 0) continue;
+    const name = BACKEND_NAMES[s.backend as keyof typeof BACKEND_NAMES];
+    if (!s.url.startsWith("https://") && !LOOPBACK_URL.test(s.url))
+      ui.warn(`The connection to ${hostname} is plain http: the key travels unencrypted, so it is only as safe as that network.`);
+    const key = await askKey(ui, `${name} at ${hostname}`);
+    if (!key) return false;
+    ui.startSpinner(`checking the key with ${hostname}`);
+    const again = await identifyServer(s.url, 4000, key);
+    ui.stopSpinner();
+    if (!again?.models.length) {
+      ui.warn(`${name} at ${hostname} did not accept that API key.`);
+      return false;
+    }
+    setKeys([s.url], key);
+    s.models = again.models.length;
+  }
+  return true;
+}
+
 function save(hosts: SavedHost[]): SavedHost[] {
   return updateConfig({ hosts }).hosts ?? [];
 }
@@ -90,28 +115,12 @@ async function enterAddress(ui: FlowUI, replace?: SavedHost): Promise<boolean> {
   }
   if (!(await confirmOutsideNetwork(ui, parsed.hostname, found[0].baseUrl))) return false;
   // oMLX and MTPLX answer /health without a key but list nothing without one.
-  const locked = found.findIndex((s) => KEYED.includes(s.backend) && !s.models.length);
-  let apiKey: string | undefined;
-  if (locked >= 0) {
-    const server = found[locked];
-    if (!server.baseUrl.startsWith("https://") && !LOOPBACK_URL.test(server.baseUrl))
-      ui.warn(`The connection to ${parsed.hostname} is plain http: the key travels unencrypted, so it is only as safe as that network.`);
-    apiKey = await askKey(ui, `${BACKEND_NAMES[server.backend]} at ${parsed.hostname}`);
-    if (!apiKey) return false;
-    ui.startSpinner(`checking the key with ${parsed.hostname}`);
-    const again = await identifyServer(server.baseUrl, 4000, apiKey);
-    ui.stopSpinner();
-    if (!again?.models.length) {
-      ui.warn(`${BACKEND_NAMES[server.backend]} at ${parsed.hostname} did not accept that API key.`);
-      return false;
-    }
-    found[locked] = again;
-  }
+  const entries = found.map((x) => ({ backend: x.backend, url: x.baseUrl, models: x.models.length }));
+  if (!(await unlockServers(ui, entries, parsed.hostname))) return false;
   let hosts = loadConfig().hosts ?? [];
   if (replace) hosts = removeHost(hosts, replace.address);
   save(addHost(hosts, { address: parsed.address, ...(replace?.name ? { name: replace.name } : {}) }));
-  if (apiKey) setKeys([found[locked].baseUrl], apiKey);
-  ui.status(`· added ${replace?.name ?? parsed.hostname} — ${describeServers(found.map((s) => ({ backend: s.backend, models: s.models.length })))}`);
+  ui.status(`· added ${replace?.name ?? parsed.hostname} — ${describeServers(entries)}`);
   return true;
 }
 
@@ -159,10 +168,14 @@ async function searchNetwork(ui: FlowUI, subnets: Subnet[], replace?: SavedHost)
       ui.status(`· ${f.name ?? f.ip} is already added`);
       continue;
     }
+    // A machine whose oMLX or MTPLX waits for its key is no use added with no
+    // models: ask here, exactly as typing its address would.
+    const entries = f.servers.map((x) => ({ backend: x.backend, url: x.url, models: x.models }));
+    if (!(await unlockServers(ui, entries, f.name ?? f.ip))) continue;
     // The name survives the router handing out a new IP; fall back to the IP.
     const base = replace ? removeHost(hosts, replace.address) : hosts;
     save(addHost(base, { address: f.name ?? f.ip, ...(replace?.name ? { name: replace.name } : {}) }));
-    ui.status(`· added ${replace?.name ?? f.name ?? f.ip} — ${describeServers(f.servers)}`);
+    ui.status(`· added ${replace?.name ?? f.name ?? f.ip} — ${describeServers(entries)}`);
     added = true;
     if (replace || found.every((x) => savedAddressesOf(x, loadConfig().hosts ?? []))) return true;
   }
@@ -236,6 +249,15 @@ export async function manageHosts(ui: FlowUI, probe = probeHosts): Promise<boole
         ui.warn(`${server.baseUrl} is plain http: the key travels unencrypted to it. Fine on this computer; on a network, only as safe as that network.`);
       const key = await askKey(ui, `${BACKEND_NAMES[server.backend]} at ${hostLabel(host)}`);
       if (key) {
+        // Check it before it replaces a working one: a typo would otherwise
+        // make the server's models quietly disappear.
+        ui.startSpinner("checking the key");
+        const again = await identifyServer(server.baseUrl, 4000, key);
+        ui.stopSpinner();
+        if (!again?.models.length) {
+          ui.warn(`${BACKEND_NAMES[server.backend]} at ${hostLabel(host)} did not accept that API key${savedKey(server.baseUrl) ? " — the saved one is unchanged" : ""}.`);
+          continue;
+        }
         setKeys([server.baseUrl], key);
         ui.status(`· API key saved for ${BACKEND_NAMES[server.backend]} at ${hostLabel(host)}`);
         changed = true;

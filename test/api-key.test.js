@@ -163,13 +163,54 @@ test("api key: an environment key goes only to servers you chose, never to one a
 });
 
 test("api key: a machine running two keyed servers gets one key each", async () => {
-  const a = "http://127.0.0.1:8000", b = "http://127.0.0.1:8001";
+  const srv = await serveOmlx();
+  const real = `http://127.0.0.1:${srv.port}`, other = "http://127.0.0.1:1";
   saveConfig({ hosts: [{ address: "127.0.0.1", name: "Studio" }] });
   const probe = async (hosts) => [{ host: hosts[0], servers: [
-    { backend: "omlx", baseUrl: a, models: [] },
-    { backend: "mtplx", baseUrl: b, models: [{ id: "qwen" }] },
+    { backend: "omlx", baseUrl: real, models: [] },
+    { backend: "mtplx", baseUrl: other, models: [{ id: "qwen" }] },
   ] }];
-  const ui = scriptedUI({ picks: ["Studio", "API key", "MTPLX · " + b, null], texts: ["only-mtplx"] });
-  assert.equal(await manageHosts(ui, probe), true);
-  assert.deepEqual(loadConfig().keys, { [b]: "only-mtplx" }, "the key lands on the server it was typed for");
+  try {
+    const ui = scriptedUI({ picks: ["Studio", "API key", "oMLX · " + real, null], texts: [KEY] });
+    assert.equal(await manageHosts(ui, probe), true);
+    assert.deepEqual(loadConfig().keys, { [real]: KEY }, "the key lands on the server it was typed for");
+  } finally {
+    await srv.close();
+  }
+});
+
+test("api key: a locked server found by a scan is unlocked before the machine is saved", async () => {
+  const { unlockServers } = require("../dist/network");
+  saveConfig({});
+  const srv = await serveOmlx();
+  const url = `http://127.0.0.1:${srv.port}`;
+  try {
+    const found = [{ backend: "omlx", url, models: 0 }, { backend: "ollama", url: "http://127.0.0.1:1", models: 3 }];
+    const wrong = scriptedUI({ texts: ["nope"] });
+    assert.equal(await unlockServers(wrong, found, "studio.local"), false, "a rejected key does not add the machine");
+    assert.deepEqual(loadConfig().keys, {});
+    assert.match(wrong.shown.lines.join("\n"), /did not accept that API key/);
+
+    const ui = scriptedUI({ texts: [KEY] });
+    assert.equal(await unlockServers(ui, found, "studio.local"), true);
+    assert.deepEqual(loadConfig().keys, { [url]: KEY });
+    assert.deepEqual(ui.shown.prompts, [{ title: "API key for oMLX at studio.local", secret: true }], "only the locked server is asked about");
+  } finally {
+    await srv.close();
+  }
+});
+
+test("api key: a replacement key is checked before it replaces a working one", async () => {
+  const srv = await serveOmlx();
+  const address = `http://127.0.0.1:${srv.port}`;
+  saveConfig({ hosts: [{ address }], keys: { [address]: KEY } });
+  const probe = async (hosts) => [{ host: hosts[0], servers: [{ backend: "omlx", baseUrl: address, models: [{ id: "qwen" }] }] }];
+  try {
+    const typo = scriptedUI({ picks: ["127.0.0.1", "API key", null], texts: ["typo"] });
+    await manageHosts(typo, probe);
+    assert.deepEqual(loadConfig().keys, { [address]: KEY }, "the working key survives a typo");
+    assert.match(typo.shown.lines.join("\n"), /did not accept/);
+  } finally {
+    await srv.close();
+  }
 });

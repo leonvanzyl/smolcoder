@@ -107,8 +107,8 @@ On Windows the firewall asks the first time the server listens on the network. A
 
 Open the model picker: type `/models` in the terminal, or click the model name in the web UI. Choose **Find models on another machine**.
 
-- **Search my network** shows the range it is about to search, for example `192.168.1.0/24`, then looks for Ollama and LM Studio on it. This takes a few seconds. Every machine it finds is listed with what it runs, such as `gpu-box (192.168.1.50) · Ollama · 12 models`. Pick one and its models join your list. Pick again to add more.
-- **Enter an address** is for machines a search cannot reach: a VPN or Tailscale address, another subnet, or a server on the internet. Type an IP (`192.168.1.50`), a name (`gpu-box.local`), a host and port (`gpu-box:4321`) or a URL (`https://llm.example.com`). For a bare IP or name, smolcoder tries both servers' usual ports and works out which one is there.
+- **Search my network** shows the range it is about to search, for example `192.168.1.0/24`, then looks for Ollama, LM Studio, oMLX and MTPLX on it. This takes a few seconds. Every machine it finds is listed with what it runs, such as `gpu-box (192.168.1.50) · Ollama · 12 models`. Pick one and its models join your list. Pick again to add more.
+- **Enter an address** is for machines a search cannot reach: a VPN or Tailscale address, another subnet, or a server on the internet. Type an IP (`192.168.1.50`), a name (`gpu-box.local`), a host and port (`gpu-box:4321`) or a URL (`https://llm.example.com`). For a bare IP or name, smolcoder tries every server's usual ports and works out which one is there.
 
 If no server is running on your own computer, smolcoder offers to find one on another machine at startup instead of exiting.
 
