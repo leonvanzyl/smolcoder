@@ -113,3 +113,18 @@ test("omlx: effort off switches thinking off through the chat template", async (
     await srv.close();
   }
 });
+
+test("omlx: the LM Studio catalog is not polled on a server that has no such thing", async () => {
+  const seen = [];
+  const srv = await serveOmlx(seen);
+  try {
+    const omlx = new LmStudioProvider(srv.base, "qwen", 32768, undefined, undefined, undefined, KEY, "oMLX");
+    assert.equal(await omlx.loadedContextWindow(), undefined);
+    assert.deepEqual(seen, [], "no request at all");
+    const lmstudio = new LmStudioProvider(srv.base, "qwen", 32768);
+    await lmstudio.loadedContextWindow();
+    assert.deepEqual(seen.map((r) => r.url), ["/api/v1/models"], "LM Studio still asks");
+  } finally {
+    await srv.close();
+  }
+});

@@ -130,6 +130,9 @@ export class LmStudioProvider implements Provider {
   }
 
   async loadedContextWindow(): Promise<number | undefined> {
+    // LM Studio's own catalog, which the other OpenAI-compatible servers do
+    // not have: asking them costs a request per turn and can only fail.
+    if (this.serverName !== "LM Studio") return undefined;
     const data = await tryFetchJson(`${this.baseUrl}/api/v1/models`, undefined, 1500);
     for (const model of data?.models ?? []) {
       const instances = model.loaded_instances ?? [];
