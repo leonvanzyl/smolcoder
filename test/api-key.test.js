@@ -70,7 +70,8 @@ test("api key: adding a machine that needs one asks for it, secretly, and saves 
     assert.deepEqual(loadConfig().keys, { [address]: KEY });
     assert.ok(ui.shown.lines.some((l) => /oMLX · 1 model/.test(l)), ui.shown.lines.join("\n"));
     assert.ok(!ui.shown.lines.join("\n").includes(KEY), "the key is never printed");
-    assert.equal(fs.statSync(CONFIG).mode & 0o777, 0o600, "a config holding a key is private to its owner");
+    // Windows has no Unix permission bits; chmod there only toggles read-only.
+    if (process.platform !== "win32") assert.equal(fs.statSync(CONFIG).mode & 0o777, 0o600, "a config holding a key is private to its owner");
   } finally {
     await srv.close();
   }
