@@ -7,13 +7,14 @@ import { SavedHost } from "./config";
 
 export const OLLAMA_PORT = 11434;
 export const LMSTUDIO_PORT = 1234;
+export const OMLX_PORT = 8000;
 
 export interface ParsedAddress {
   /** Normalized form to save. */
   address: string;
   /** Host part, for display. */
   hostname: string;
-  /** Server URLs to try. A bare host means "both usual ports"; anything more
+  /** Server URLs to try. A bare host means "every usual port"; anything more
    * specific names exactly one server. */
   urls: string[];
 }
@@ -48,7 +49,7 @@ export function parseAddress(input: string): ParsedAddress {
     const base = `${url.protocol}//${url.host}${pathPart}`;
     return { address: base, hostname, urls: [base] };
   }
-  return { address: url.hostname, hostname, urls: [`http://${url.host}:${OLLAMA_PORT}`, `http://${url.host}:${LMSTUDIO_PORT}`] };
+  return { address: url.hostname, hostname, urls: [OLLAMA_PORT, LMSTUDIO_PORT, OMLX_PORT].map((port) => `http://${url.host}:${port}`) };
 }
 
 /** Server URLs for a saved host; empty when the entry is unusable. */
