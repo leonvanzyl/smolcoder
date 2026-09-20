@@ -5,15 +5,18 @@
 
 import { SavedHost } from "./config";
 
+const LOOPBACK_URL = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[::1\])(?=[:/]|$)/i;
+
 export const OLLAMA_PORT = 11434;
 export const LMSTUDIO_PORT = 1234;
+export const OMLX_PORT = 8000;
 
 export interface ParsedAddress {
   /** Normalized form to save. */
   address: string;
   /** Host part, for display. */
   hostname: string;
-  /** Server URLs to try. A bare host means "both usual ports"; anything more
+  /** Server URLs to try. A bare host means "every usual port"; anything more
    * specific names exactly one server. */
   urls: string[];
 }
@@ -48,7 +51,7 @@ export function parseAddress(input: string): ParsedAddress {
     const base = `${url.protocol}//${url.host}${pathPart}`;
     return { address: base, hostname, urls: [base] };
   }
-  return { address: url.hostname, hostname, urls: [`http://${url.host}:${OLLAMA_PORT}`, `http://${url.host}:${LMSTUDIO_PORT}`] };
+  return { address: url.hostname, hostname, urls: [OLLAMA_PORT, LMSTUDIO_PORT, OMLX_PORT].map((port) => `http://${url.host}:${port}`) };
 }
 
 /** Server URLs for a saved host; empty when the entry is unusable. */
@@ -78,6 +81,12 @@ export function addHost(hosts: SavedHost[], host: SavedHost): SavedHost[] {
   const at = hosts.findIndex((h) => sameAddress(h.address, host.address));
   if (at < 0) return [...hosts, host];
   return hosts.map((h, i) => (i === at ? { ...h, ...(host.name ? { name: host.name } : {}) } : h));
+}
+
+/** A server the user chose to talk to: on this computer, or on a machine
+ * they added by hand. A machine a network search merely found is not one. */
+export function isChosenServer(base: string, hosts: SavedHost[]): boolean {
+  return LOOPBACK_URL.test(base) || hosts.some((h) => hostUrls(h).includes(base));
 }
 
 export function removeHost(hosts: SavedHost[], address: string): SavedHost[] {

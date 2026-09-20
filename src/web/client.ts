@@ -425,7 +425,7 @@ function handle(m) {
       endThought(v); v.curText = null;
       const box = el("div", "ask");
       box.appendChild(el("div", "cmd", m.title));
-      const field = el("input", "askinput"); field.type = "text"; field.placeholder = m.placeholder || ""; field.spellcheck = false; field.autocomplete = "off";
+      const field = el("input", "askinput"); field.type = m.secret ? "password" : "text"; field.placeholder = m.placeholder || ""; field.spellcheck = false; field.autocomplete = "off";
       const send = (value) => { post("/prompt", { sid: v.sid, id: m.id, value: value }); box.remove(); };
       field.onkeydown = (e) => {
         if (e.key === "Enter") { e.preventDefault(); send(field.value.trim() || null); }

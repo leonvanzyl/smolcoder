@@ -9,6 +9,11 @@ import { c } from "./util";
 
 /** What the agent loop needs from a UI — implemented by the plain UI (used in
  * -p / non-TTY mode) and by the interactive Tui. */
+/** A secret prompt (an API key) is masked while typed and never echoed. */
+export interface PromptOptions {
+  secret?: boolean;
+}
+
 export interface AgentUI {
   /** Discard an interrupted streamed response before a safe retry. */
   resetResponse?(): void;
@@ -55,8 +60,8 @@ export interface SessionUI extends AgentUI {
   /** The next user turn: plain text, or text plus attachments from the web UI. */
   readInput(): Promise<string | UserInput>;
   select(title: string, options: SelectOption[]): Promise<number | null>;
-  /** Ask for one line of text (an address, a name); null when cancelled. */
-  prompt(title: string, placeholder?: string): Promise<string | null>;
+  /** Ask for one line of text (an address, a name, a key); null when cancelled. */
+  prompt(title: string, placeholder?: string, opts?: PromptOptions): Promise<string | null>;
   refresh(): void;
 }
 
