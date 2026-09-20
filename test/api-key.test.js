@@ -64,6 +64,8 @@ test("api key: adding a machine that needs one asks for it, secretly, and saves 
     const ui = scriptedUI({ picks: ["Enter an address"], texts: [`127.0.0.1:${srv.port}`, KEY] });
     assert.equal(await findModelsOnNetwork(ui), true);
     assert.deepEqual(ui.shown.prompts[1], { title: `API key for oMLX at 127.0.0.1`, secret: true });
+    assert.ok(!ui.shown.lines.some((l) => /plain http/.test(l)), "no warning for a server on this computer");
+    assert.ok(!ui.shown.lines.some((l) => /plain http/.test(l)), "no warning for a server on this computer");
     assert.deepEqual(loadConfig().hosts, [{ address }]);
     assert.deepEqual(loadConfig().keys, { [address]: KEY });
     assert.ok(ui.shown.lines.some((l) => /oMLX · 1 model/.test(l)), ui.shown.lines.join("\n"));
@@ -113,12 +115,13 @@ test("api key: set and removed from Network hosts", async () => {
 });
 
 test("api key: a key saved for a server wins over the environment and oMLX's own settings", () => {
-  saveConfig({ keys: { "http://127.0.0.1:8000": "saved" } });
+  saveConfig({ keys: { "http://127.0.0.1:8000": "saved" }, hosts: [{ address: "gpu-box" }] });
   process.env.OMLX_API_KEY = "env";
   process.env.MTPLX_API_KEY = "env";
   try {
     assert.equal(omlxApiKey("http://127.0.0.1:8000", { apiKey: "settings" }), "saved");
     assert.equal(mtplxApiKey("http://127.0.0.1:8000"), "saved");
+    // gpu-box is a machine the user added, so the environment key applies there.
     assert.equal(omlxApiKey("http://gpu-box:8000", {}), "env");
     assert.equal(mtplxApiKey("http://gpu-box:8000"), "env");
   } finally {
@@ -137,4 +140,36 @@ test("api key: the web page gets a password field and the transcript only says i
   assert.equal(await p, KEY);
   assert.ok(!JSON.stringify(ch.replay).includes(KEY), "the key is not kept in the transcript");
   assert.ok(ch.replay.some((e) => e.t === "line" && e.s === "API key for oMLX at gpu-box: (hidden)"));
+});
+
+test("api key: an environment key goes only to servers you chose, never to one a scan found", () => {
+  saveConfig({ hosts: [{ address: "gpu-box" }] });
+  process.env.OMLX_API_KEY = "env";
+  process.env.MTPLX_API_KEY = "env";
+  try {
+    // This computer, and a machine that was added by hand.
+    assert.equal(omlxApiKey("http://127.0.0.1:8000", {}), "env");
+    assert.equal(mtplxApiKey("http://gpu-box:8000"), "env");
+    // Anything a network search turned up: it only has to answer like oMLX.
+    assert.equal(omlxApiKey("http://192.168.1.77:8000", {}), undefined);
+    assert.equal(mtplxApiKey("http://192.168.1.77:8000"), undefined);
+    // oMLX's own settings key stays on this computer, as before.
+    assert.equal(omlxApiKey("http://192.168.1.77:8000", { apiKey: "settings" }), undefined);
+    assert.equal(omlxApiKey("http://127.0.0.1:8000", { apiKey: "settings" }), "env");
+  } finally {
+    delete process.env.OMLX_API_KEY;
+    delete process.env.MTPLX_API_KEY;
+  }
+});
+
+test("api key: a machine running two keyed servers gets one key each", async () => {
+  const a = "http://127.0.0.1:8000", b = "http://127.0.0.1:8001";
+  saveConfig({ hosts: [{ address: "127.0.0.1", name: "Studio" }] });
+  const probe = async (hosts) => [{ host: hosts[0], servers: [
+    { backend: "omlx", baseUrl: a, models: [] },
+    { backend: "mtplx", baseUrl: b, models: [{ id: "qwen" }] },
+  ] }];
+  const ui = scriptedUI({ picks: ["Studio", "API key", "MTPLX · " + b, null], texts: ["only-mtplx"] });
+  assert.equal(await manageHosts(ui, probe), true);
+  assert.deepEqual(loadConfig().keys, { [b]: "only-mtplx" }, "the key lands on the server it was typed for");
 });

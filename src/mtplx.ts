@@ -10,7 +10,8 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { savedKey } from "./config";
+import { loadConfig, savedKey } from "./config";
+import { isChosenServer } from "./hosts";
 import type { DetectedModel } from "./detect";
 
 /** The port in the MTPLX app's settings; undefined when it is not installed. */
@@ -23,9 +24,12 @@ export function readMtplxPort(home = os.homedir()): number | undefined {
   }
 }
 
-/** A key saved for that server from the picker, else MTPLX_API_KEY. */
+/** A key saved for that server from the picker, else MTPLX_API_KEY — and
+ * only for a server the user chose, never one a network search found. */
 export function mtplxApiKey(base: string): string | undefined {
-  return savedKey(base) || process.env.MTPLX_API_KEY;
+  const saved = savedKey(base);
+  if (saved) return saved;
+  return isChosenServer(base, loadConfig().hosts ?? []) ? process.env.MTPLX_API_KEY : undefined;
 }
 
 export function mtplxHeaders(base: string): Record<string, string> {

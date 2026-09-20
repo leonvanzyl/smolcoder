@@ -53,14 +53,16 @@ test("omlx: port and key come from oMLX's own settings file", () => {
   assert.deepEqual(readOmlxSettings(home), { port: 8123, apiKey: KEY });
 });
 
-test("omlx: the local settings key never leaves this computer; OMLX_API_KEY goes anywhere", () =>
+test("omlx: the local settings key never leaves this computer, and an env key only reaches servers you chose", () =>
   withEnv("OMLX_API_KEY", undefined, async () => {
     const settings = { apiKey: KEY };
     assert.equal(omlxApiKey("http://127.0.0.1:8000", settings), KEY);
     assert.equal(omlxApiKey("http://localhost:8000", settings), KEY);
     assert.equal(omlxApiKey("http://192.168.1.50:8000", settings), undefined);
     process.env.OMLX_API_KEY = "from-env";
-    assert.equal(omlxApiKey("http://192.168.1.50:8000", settings), "from-env");
+    // Only for a machine that was added by hand — not one a network scan found.
+    assert.equal(omlxApiKey("http://192.168.1.50:8000", settings), undefined);
+    assert.equal(omlxApiKey("http://127.0.0.1:8000", settings), "from-env");
   }));
 
 test("omlx: identified by /health and listed with the API key", async () => {

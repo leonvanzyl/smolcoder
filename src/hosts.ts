@@ -5,6 +5,8 @@
 
 import { SavedHost } from "./config";
 
+const LOOPBACK_URL = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[::1\])(?=[:/]|$)/i;
+
 export const OLLAMA_PORT = 11434;
 export const LMSTUDIO_PORT = 1234;
 export const OMLX_PORT = 8000;
@@ -79,6 +81,12 @@ export function addHost(hosts: SavedHost[], host: SavedHost): SavedHost[] {
   const at = hosts.findIndex((h) => sameAddress(h.address, host.address));
   if (at < 0) return [...hosts, host];
   return hosts.map((h, i) => (i === at ? { ...h, ...(host.name ? { name: host.name } : {}) } : h));
+}
+
+/** A server the user chose to talk to: on this computer, or on a machine
+ * they added by hand. A machine a network search merely found is not one. */
+export function isChosenServer(base: string, hosts: SavedHost[]): boolean {
+  return LOOPBACK_URL.test(base) || hosts.some((h) => hostUrls(h).includes(base));
 }
 
 export function removeHost(hosts: SavedHost[], address: string): SavedHost[] {

@@ -10,7 +10,8 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { savedKey } from "./config";
+import { loadConfig, savedKey } from "./config";
+import { isChosenServer } from "./hosts";
 import type { DetectedModel } from "./detect";
 
 export interface OmlxSettings {
@@ -36,9 +37,14 @@ export function readOmlxSettings(home = os.homedir()): OmlxSettings {
 const LOOPBACK = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[::1\])(?=[:/]|$)/i;
 
 /** The key to send to an oMLX at `base`, if we know one: one saved for that
- * server from the picker, then OMLX_API_KEY, then (this computer only) oMLX's own. */
+ * server from the picker, then OMLX_API_KEY, then (this computer only) oMLX's
+ * own. Nothing at all for a server a network search found: answering like an
+ * oMLX is not a reason to hand it a key. */
 export function omlxApiKey(base: string, settings: OmlxSettings = readOmlxSettings()): string | undefined {
-  return savedKey(base) || process.env.OMLX_API_KEY || (LOOPBACK.test(base) ? settings.apiKey : undefined);
+  const saved = savedKey(base);
+  if (saved) return saved;
+  if (!isChosenServer(base, loadConfig().hosts ?? [])) return undefined;
+  return process.env.OMLX_API_KEY || (LOOPBACK.test(base) ? settings.apiKey : undefined);
 }
 
 export function omlxHeaders(base: string): Record<string, string> {

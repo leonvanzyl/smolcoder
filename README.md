@@ -2,7 +2,7 @@
 
 A smol coding agent for the models already running on your machine.
 
-If you have Ollama, LM Studio, oMLX or MTPLX running, you are two commands away from a coding assistant that reads your code, edits files, runs your tests and starts your dev server. No API key and no config file. Nothing leaves your machine except requests to the model server you chose.
+If you have Ollama, LM Studio, oMLX or MTPLX running, you are two commands away from a coding assistant that reads your code, edits files, runs your tests and starts your dev server. No cloud account and no config file. Nothing leaves your machine except requests to the model server you chose. (oMLX and MTPLX have their own API keys; smolcoder reads a local one from the server's own settings and asks you for one on another machine.)
 
 ```bash
 npm install -g smolcoder
@@ -131,7 +131,7 @@ smolcoder sends your code and prompts to the server you choose, and runs the too
 - The server on the other machine is not accepting connections yet. Check step 1, and that the machine is awake.
 - On macOS, allow your terminal app under System Settings → Privacy & Security → Local Network. Without that, nothing on the network is visible and no error is shown.
 - The search covers the private network your computer is on. On a very large network it searches the 254 addresses around your own. Use **Enter an address** for anything further away.
-- A server that needs an API key or login in front of it is not supported yet.
+- A server that needs an API key is asked for it when you add it, and the key is saved for that server. A server behind a login page is not supported.
 
 ## The web UI
 

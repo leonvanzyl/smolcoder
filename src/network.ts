@@ -46,9 +46,17 @@ export function notFoundHelp(platform: NodeJS.Platform = process.platform): stri
 
 // Servers that can require an API key.
 const KEYED: string[] = ["omlx", "mtplx"];
+const LOOPBACK_URL = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[::1\])(?=[:/]|$)/i;
 
 function askKey(ui: FlowUI, what: string): Promise<string | undefined> {
   return ui.prompt(`API key for ${what}`, "the key set in the server's settings", { secret: true }).then((k) => k ?? undefined);
+}
+
+/** Which server a key is for. One keyed server needs no question. */
+async function pickServer(ui: FlowUI, servers: ServerInfo[]): Promise<ServerInfo | null> {
+  if (servers.length <= 1) return servers[0] ?? null;
+  const pick = await ui.select("Which server?", servers.map((s) => ({ label: `${BACKEND_NAMES[s.backend]} · ${s.baseUrl}` })));
+  return pick === null ? null : servers[pick];
 }
 
 function save(hosts: SavedHost[]): SavedHost[] {
@@ -86,6 +94,8 @@ async function enterAddress(ui: FlowUI, replace?: SavedHost): Promise<boolean> {
   let apiKey: string | undefined;
   if (locked >= 0) {
     const server = found[locked];
+    if (!server.baseUrl.startsWith("https://") && !LOOPBACK_URL.test(server.baseUrl))
+      ui.warn(`The connection to ${parsed.hostname} is plain http: the key travels unencrypted, so it is only as safe as that network.`);
     apiKey = await askKey(ui, `${BACKEND_NAMES[server.backend]} at ${parsed.hostname}`);
     if (!apiKey) return false;
     ui.startSpinner(`checking the key with ${parsed.hostname}`);
@@ -178,7 +188,7 @@ export async function findModelsOnNetwork(ui: FlowUI, replace?: SavedHost): Prom
 /** "Network hosts…": see what each added machine serves, rename or remove
  * it, set its API key, or look for it again when its address changed. Returns true when the
  * list changed. */
-export async function manageHosts(ui: FlowUI): Promise<boolean> {
+export async function manageHosts(ui: FlowUI, probe = probeHosts): Promise<boolean> {
   let changed = false;
   for (;;) {
     const hosts = loadConfig().hosts ?? [];
@@ -187,7 +197,7 @@ export async function manageHosts(ui: FlowUI): Promise<boolean> {
       return changed;
     }
     ui.startSpinner("checking hosts");
-    const statuses = await probeHosts(hosts);
+    const statuses = await probe(hosts);
     ui.stopSpinner();
     const pick = await ui.select(
       "Network hosts",
@@ -206,8 +216,8 @@ export async function manageHosts(ui: FlowUI): Promise<boolean> {
     ];
     if (!servers.length) actions.push({ label: "Look for it again", hint: "its address may have changed", run: "refind" });
     // Keys belong to servers; offer them where a server can require one.
-    const keyed = servers.filter((s) => KEYED.includes(s.backend)).map((s) => s.baseUrl);
-    const hasKey = keyed.some((u) => savedKey(u));
+    const keyed = servers.filter((s) => KEYED.includes(s.backend));
+    const hasKey = keyed.some((s) => savedKey(s.baseUrl));
     if (keyed.length) actions.push({ label: "API key", hint: hasKey ? "saved · enter a new one to replace it" : "the key set in the server's settings", run: "key" });
     if (hasKey) actions.push({ label: "Remove API key", run: "unkey" });
     const act = await ui.select(hostLabel(host), actions.map(({ label, hint }) => ({ label, hint })));
@@ -219,15 +229,22 @@ export async function manageHosts(ui: FlowUI): Promise<boolean> {
         changed = true;
       }
     } else if (actions[act].run === "key") {
-      const key = await askKey(ui, hostLabel(host));
+      // One machine can run an oMLX and an MTPLX, each with its own key.
+      const server = await pickServer(ui, keyed);
+      if (!server) continue;
+      if (!server.baseUrl.startsWith("https://"))
+        ui.warn(`${server.baseUrl} is plain http: the key travels unencrypted to it. Fine on this computer; on a network, only as safe as that network.`);
+      const key = await askKey(ui, `${BACKEND_NAMES[server.backend]} at ${hostLabel(host)}`);
       if (key) {
-        setKeys(keyed, key);
-        ui.status(`· API key saved for ${hostLabel(host)}`);
+        setKeys([server.baseUrl], key);
+        ui.status(`· API key saved for ${BACKEND_NAMES[server.backend]} at ${hostLabel(host)}`);
         changed = true;
       }
     } else if (actions[act].run === "unkey") {
-      setKeys(keyed);
-      ui.status(`· API key removed for ${hostLabel(host)}`);
+      const server = await pickServer(ui, keyed.filter((s) => savedKey(s.baseUrl)));
+      if (!server) continue;
+      setKeys([server.baseUrl]);
+      ui.status(`· API key removed for ${BACKEND_NAMES[server.backend]} at ${hostLabel(host)}`);
       changed = true;
     } else if (actions[act].run === "remove") {
       save(removeHost(hosts, host.address));
