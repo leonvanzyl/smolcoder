@@ -2,7 +2,7 @@
 
 A smol coding agent for the models already running on your machine.
 
-If you have Ollama or LM Studio running, you are two commands away from a coding assistant that reads your code, edits files, runs your tests and starts your dev server. No API key and no config file. Nothing leaves your machine except requests to the model server you chose.
+If you have Ollama, LM Studio, oMLX or MTPLX running, you are two commands away from a coding assistant that reads your code, edits files, runs your tests and starts your dev server. No API key and no config file. Nothing leaves your machine except requests to the model server you chose.
 
 ```bash
 npm install -g smolcoder
@@ -14,7 +14,7 @@ smol
 You need two things.
 
 1. **Node.js 18 or newer** from [nodejs.org](https://nodejs.org).
-2. **A local model server.** Either [Ollama](https://ollama.com) with a tool-capable model pulled (`ollama pull qwen3` is a good start), or [LM Studio](https://lmstudio.ai) with a model loaded and its local server running (Developer tab, then Start Server).
+2. **A local model server.** Either [Ollama](https://ollama.com) with a tool-capable model pulled (`ollama pull qwen3` is a good start), or [LM Studio](https://lmstudio.ai) with a model loaded and its local server running (Developer tab, then Start Server), or on Apple Silicon [oMLX](https://github.com/jundot/omlx) or [MTPLX](https://github.com/youssofal/MTPLX) with its server started.
 
 Then install smolcoder and start it inside a project:
 
@@ -28,7 +28,7 @@ smol
 
 smolcoder finds your server, lists the models you already have, and opens a chat. It remembers the model and permission mode you used last time.
 
-Both servers are found the same way, with nothing to set up: on their usual ports, on a port you changed (LM Studio's is read from its own settings, Ollama's from `OLLAMA_HOST`), inside Docker or Podman containers that publish the port, and on the host machine when smolcoder itself runs in WSL or a container.
+All four servers are found the same way, with nothing to set up: on their usual ports, on a port you changed (LM Studio's, oMLX's and MTPLX's are read from their own settings, Ollama's from `OLLAMA_HOST`), inside Docker or Podman containers that publish the port, and on the host machine when smolcoder itself runs in WSL or a container.
 
 If your models run on a different computer, see [Using models on another machine](#using-models-on-another-machine).
 
@@ -98,6 +98,8 @@ Ollama and LM Studio only answer their own computer until you tell them otherwis
 | Ollama (Windows, macOS) | Settings → **Expose Ollama to the network** |
 | Ollama (Linux, headless) | Set `OLLAMA_HOST=0.0.0.0` for the service and restart it |
 | LM Studio | Developer → Local Server → **Serve on Local Network** |
+| oMLX | Settings → Server → **Listen Address**: change it from "127.0.0.1 (Local only)" to the network option. Set `OMLX_API_KEY` on the machine running smolcoder to its API key |
+| MTPLX | `mtplx serve --host 0.0.0.0 --api-key <key>`, and set `MTPLX_API_KEY` to the same key on the machine running smolcoder |
 
 On Windows the firewall asks the first time the server listens on the network. Allow it for Private networks.
 

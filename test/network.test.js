@@ -62,14 +62,14 @@ test("a bare host means both usual ports; anything more specific names one serve
   assert.deepEqual(parseAddress(" 192.168.1.50 "), {
     address: "192.168.1.50",
     hostname: "192.168.1.50",
-    urls: ["http://192.168.1.50:11434", "http://192.168.1.50:1234"],
+    urls: ["http://192.168.1.50:11434", "http://192.168.1.50:1234", "http://192.168.1.50:8000"],
   });
-  assert.deepEqual(parseAddress("GPU-Box.local").urls, ["http://gpu-box.local:11434", "http://gpu-box.local:1234"]);
+  assert.deepEqual(parseAddress("GPU-Box.local").urls, ["http://gpu-box.local:11434", "http://gpu-box.local:1234", "http://gpu-box.local:8000"]);
   assert.deepEqual(parseAddress("gpu-box:4321").urls, ["http://gpu-box:4321"]);
   assert.deepEqual(parseAddress("box:80").urls, ["http://box"], "a typed default port still means that one server");
   assert.deepEqual(parseAddress("https://llm.example.com/").urls, ["https://llm.example.com"]);
   assert.deepEqual(parseAddress("https://llm.example.com/ollama/").urls, ["https://llm.example.com/ollama"]);
-  assert.deepEqual(parseAddress("fe80::1").urls, ["http://[fe80::1]:11434", "http://[fe80::1]:1234"]);
+  assert.deepEqual(parseAddress("fe80::1").urls, ["http://[fe80::1]:11434", "http://[fe80::1]:1234", "http://[fe80::1]:8000"]);
   assert.deepEqual(parseAddress("[fe80::1]:9000").urls, ["http://[fe80::1]:9000"]);
 });
 

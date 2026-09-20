@@ -23,7 +23,7 @@ export interface FlowUI {
   stopSpinner(): void;
 }
 
-const BACKEND_NAMES = { ollama: "Ollama", lmstudio: "LM Studio" } as const;
+const BACKEND_NAMES = { ollama: "Ollama", lmstudio: "LM Studio", omlx: "oMLX", mtplx: "MTPLX" } as const;
 
 function describeServers(servers: { backend: keyof typeof BACKEND_NAMES; models: number }[]): string {
   return servers.map((s) => `${BACKEND_NAMES[s.backend]} · ${plural(s.models, "model")}`).join(" + ");
@@ -101,7 +101,7 @@ async function searchNetwork(ui: FlowUI, subnets: Subnet[], replace?: SavedHost)
   });
   ui.stopSpinner();
   if (!found.length) {
-    ui.warn(`No Ollama or LM Studio found on ${range}.`);
+    ui.warn(`No model server found on ${range}.`);
     ui.status(notFoundHelp());
     return false;
   }
@@ -141,7 +141,7 @@ export async function findModelsOnNetwork(ui: FlowUI, replace?: SavedHost): Prom
   const subnets = localSubnets();
   const options: SelectOption[] = [
     ...(subnets.length
-      ? [{ label: "Search my network", hint: `${subnets.map((s) => s.cidr).join(", ")} — looks for Ollama and LM Studio` }]
+      ? [{ label: "Search my network", hint: `${subnets.map((s) => s.cidr).join(", ")} — looks for Ollama, LM Studio, oMLX and MTPLX` }]
       : []),
     { label: "Enter an address", hint: "IP, name or URL — also for VPNs and other networks" },
   ];
