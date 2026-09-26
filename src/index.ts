@@ -115,8 +115,8 @@ function parseArgs(argv: string[]): CliArgs {
 const HELP = `
 ${c.bold("smolcoder")} v${VERSION} — a smol, zero-config coding agent for local models.
 
-Detects Ollama and LM Studio on this computer automatically — any port, Docker
-containers included. Models on other machines: /models → "Find models on
+Detects Ollama, LM Studio, oMLX and MTPLX on this computer automatically — any
+port, Docker containers included. Models on other machines: /models → "Find models on
 another machine" searches your network or takes an address, and remembers it.
 
 ${c.bold("Usage:")}
@@ -292,7 +292,7 @@ async function runInteractive(args: CliArgs): Promise<void> {
 
   printLogo();
   const cfg = loadConfig();
-  process.stdout.write(c.dim("· looking for Ollama and LM Studio…"));
+  process.stdout.write(c.dim("· looking for model servers…"));
   let chosen = await prepareModel(prefsOf(args), cfg, (label) => {
     process.stdout.write("\r\x1b[2K" + c.dim(`· ${label}…`));
   });

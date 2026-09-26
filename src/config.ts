@@ -30,6 +30,8 @@ export interface Config {
   lastMode?: Mode;
   effort?: Effort | null;
   hosts?: SavedHost[];
+  /** API keys by server URL, for servers that require one (oMLX, MTPLX). */
+  keys?: Record<string, string>;
 }
 
 export function loadConfig(): Config {
@@ -45,8 +47,14 @@ export function loadConfig(): Config {
     cfg.hosts = Array.isArray(cfg.hosts)
       ? cfg.hosts
           .filter((h: any) => h && typeof h.address === "string" && h.address.trim())
-          .map((h: any) => ({ address: h.address.trim(), ...(typeof h.name === "string" && h.name.trim() ? { name: h.name.trim() } : {}) }))
+          .map((h: any) => ({
+            address: h.address.trim(),
+            ...(typeof h.name === "string" && h.name.trim() ? { name: h.name.trim() } : {}),
+          }))
       : [];
+    cfg.keys = Object.fromEntries(
+      Object.entries(cfg.keys && typeof cfg.keys === "object" ? cfg.keys : {}).filter(([u, v]) => /^https?:\/\//.test(u) && typeof v === "string" && v)
+    ) as Record<string, string>;
     return cfg;
   } catch {
     return {};
@@ -55,7 +63,9 @@ export function loadConfig(): Config {
 
 export function saveConfig(cfg: Config): void {
   try {
-    fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+    // It can hold API keys: private to its owner, also when it already existed.
+    fs.chmodSync(CONFIG_PATH, 0o600);
   } catch {
     /* non-fatal */
   }
@@ -67,4 +77,19 @@ export function updateConfig(patch: Partial<Config>): Config {
   const next = { ...loadConfig(), ...patch };
   saveConfig(next);
   return next;
+}
+
+/** The API key saved for the server at `base`, if any. */
+export function savedKey(base: string): string | undefined {
+  return loadConfig().keys?.[base];
+}
+
+/** Save a key for these servers, or forget theirs when `key` is empty. */
+export function setKeys(bases: string[], key?: string): void {
+  const keys = { ...(loadConfig().keys ?? {}) };
+  for (const base of bases) {
+    if (key) keys[base] = key;
+    else delete keys[base];
+  }
+  updateConfig({ keys });
 }
