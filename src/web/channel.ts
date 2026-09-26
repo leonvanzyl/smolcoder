@@ -6,7 +6,7 @@
 
 import { Attachment, UserInput } from "../attachments";
 import { Plan } from "../plan";
-import { SelectOption, SessionUI, SlashCommand, summarizeArgs } from "../ui";
+import { PromptOptions, SelectOption, SessionUI, SlashCommand, summarizeArgs } from "../ui";
 
 export type Event = Record<string, any>;
 
@@ -42,7 +42,7 @@ export class SessionChannel implements SessionUI {
   private pendingInput: ((s: string | UserInput) => void) | null = null;
   private inputQueue: (string | UserInput)[] = [];
   private exitRequested = false;
-  private pending = new Map<number, { resolve: (v: any) => void; kind: "confirm" | "select" | "prompt"; label: string }>();
+  private pending = new Map<number, { resolve: (v: any) => void; kind: "confirm" | "select" | "prompt"; label: string; secret?: boolean }>();
   private askId = 0;
 
   restoreReplay(events: Event[]): void {
@@ -126,7 +126,7 @@ export class SessionChannel implements SessionUI {
     } else if (value === null || value === undefined || (p.kind === "prompt" && !String(value).trim())) {
       this.broadcast({ t: "line", kind: "status", s: `cancelled — ${p.label}` });
     } else if (p.kind === "prompt") {
-      this.broadcast({ t: "line", kind: "status", s: `${p.label}: ${String(value).trim().slice(0, 200)}` });
+      this.broadcast({ t: "line", kind: "status", s: `${p.label}: ${p.secret ? "(hidden)" : String(value).trim().slice(0, 200)}` });
     }
     p.resolve(value);
   }
@@ -203,14 +203,15 @@ export class SessionChannel implements SessionUI {
     );
   }
 
-  prompt(title: string, placeholder = ""): Promise<string | null> {
+  prompt(title: string, placeholder = "", opts: PromptOptions = {}): Promise<string | null> {
     const id = ++this.askId;
-    this.broadcast({ t: "prompt", id, title, placeholder });
+    this.broadcast({ t: "prompt", id, title, placeholder, ...(opts.secret ? { secret: true } : {}) });
     this.setStatus("waiting");
     return new Promise((resolve) =>
       this.pending.set(id, {
         kind: "prompt",
         label: title,
+        secret: opts.secret,
         resolve: (s) => resolve(typeof s === "string" && s.trim() ? s.trim().slice(0, 500) : null),
       })
     );

@@ -2,7 +2,7 @@
 
 A smol coding agent for the models already running on your machine.
 
-If you have Ollama or LM Studio running, you are two commands away from a coding assistant that reads your code, edits files, runs your tests and starts your dev server. No API key and no config file. Nothing leaves your machine except requests to the model server you chose.
+If you have Ollama, LM Studio, oMLX or MTPLX running, you are two commands away from a coding assistant that reads your code, edits files, runs your tests and starts your dev server. No cloud account and no config file. Nothing leaves your machine except requests to the model server you chose. (oMLX and MTPLX have their own API keys; smolcoder reads a local one from the server's own settings and asks you for one on another machine.)
 
 ```bash
 npm install -g smolcoder
@@ -14,7 +14,7 @@ smol
 You need two things.
 
 1. **Node.js 18 or newer** from [nodejs.org](https://nodejs.org).
-2. **A local model server.** Either [Ollama](https://ollama.com) with a tool-capable model pulled (`ollama pull qwen3` is a good start), or [LM Studio](https://lmstudio.ai) with a model loaded and its local server running (Developer tab, then Start Server).
+2. **A local model server.** Either [Ollama](https://ollama.com) with a tool-capable model pulled (`ollama pull qwen3` is a good start), or [LM Studio](https://lmstudio.ai) with a model loaded and its local server running (Developer tab, then Start Server), or on Apple Silicon [oMLX](https://github.com/jundot/omlx) or [MTPLX](https://github.com/youssofal/MTPLX) with its server started.
 
 Then install smolcoder and start it inside a project:
 
@@ -28,7 +28,7 @@ smol
 
 smolcoder finds your server, lists the models you already have, and opens a chat. It remembers the model and permission mode you used last time.
 
-Both servers are found the same way, with nothing to set up: on their usual ports, on a port you changed (LM Studio's is read from its own settings, Ollama's from `OLLAMA_HOST`), inside Docker or Podman containers that publish the port, and on the host machine when smolcoder itself runs in WSL or a container.
+All four servers are found the same way, with nothing to set up: on their usual ports, on a port you changed (LM Studio's, oMLX's and MTPLX's are read from their own settings, Ollama's from `OLLAMA_HOST`), inside Docker or Podman containers that publish the port, and on the host machine when smolcoder itself runs in WSL or a container.
 
 If your models run on a different computer, see [Using models on another machine](#using-models-on-another-machine).
 
@@ -98,6 +98,8 @@ Ollama and LM Studio only answer their own computer until you tell them otherwis
 | Ollama (Windows, macOS) | Settings → **Expose Ollama to the network** |
 | Ollama (Linux, headless) | Set `OLLAMA_HOST=0.0.0.0` for the service and restart it |
 | LM Studio | Developer → Local Server → **Serve on Local Network** |
+| oMLX | Settings → Server → **Listen Address**: change it from "127.0.0.1 (Local only)" to the network option. Set `OMLX_API_KEY` on the machine running smolcoder to its API key |
+| MTPLX | `mtplx serve --host 0.0.0.0 --api-key <key>`, and set `MTPLX_API_KEY` to the same key on the machine running smolcoder |
 
 On Windows the firewall asks the first time the server listens on the network. Allow it for Private networks.
 
@@ -105,8 +107,8 @@ On Windows the firewall asks the first time the server listens on the network. A
 
 Open the model picker: type `/models` in the terminal, or click the model name in the web UI. Choose **Find models on another machine**.
 
-- **Search my network** shows the range it is about to search, for example `192.168.1.0/24`, then looks for Ollama and LM Studio on it. This takes a few seconds. Every machine it finds is listed with what it runs, such as `gpu-box (192.168.1.50) · Ollama · 12 models`. Pick one and its models join your list. Pick again to add more.
-- **Enter an address** is for machines a search cannot reach: a VPN or Tailscale address, another subnet, or a server on the internet. Type an IP (`192.168.1.50`), a name (`gpu-box.local`), a host and port (`gpu-box:4321`) or a URL (`https://llm.example.com`). For a bare IP or name, smolcoder tries both servers' usual ports and works out which one is there.
+- **Search my network** shows the range it is about to search, for example `192.168.1.0/24`, then looks for Ollama, LM Studio, oMLX and MTPLX on it. This takes a few seconds. Every machine it finds is listed with what it runs, such as `gpu-box (192.168.1.50) · Ollama · 12 models`. Pick one and its models join your list. Pick again to add more.
+- **Enter an address** is for machines a search cannot reach: a VPN or Tailscale address, another subnet, or a server on the internet. Type an IP (`192.168.1.50`), a name (`gpu-box.local`), a host and port (`gpu-box:4321`) or a URL (`https://llm.example.com`). For a bare IP or name, smolcoder tries every server's usual ports and works out which one is there.
 
 If no server is running on your own computer, smolcoder offers to find one on another machine at startup instead of exiting.
 
@@ -129,7 +131,18 @@ smolcoder sends your code and prompts to the server you choose, and runs the too
 - The server on the other machine is not accepting connections yet. Check step 1, and that the machine is awake.
 - On macOS, allow your terminal app under System Settings → Privacy & Security → Local Network. Without that, nothing on the network is visible and no error is shown.
 - The search covers the private network your computer is on. On a very large network it searches the 254 addresses around your own. Use **Enter an address** for anything further away.
-- A server that needs an API key or login in front of it is not supported yet.
+- A server that needs an API key is asked for it when you add it, and the key is saved for that server. A server behind a login page is not supported.
+
+## Web access
+
+Off by default. Turned on, the agent gets two more tools: **web_search**, which returns five results, and **web_fetch**, which reads a page as plain text. There is no browser: no cookies, no profile, nothing saved. While it is off the two tools are not sent to the model at all, so they cost no context.
+
+Turn it on in the web UI: the gear → **Web**. The switch takes effect from your next message, and `smol -p` follows it too. Reading pages needs nothing more; searching needs one of these:
+
+- **Brave Search** (easiest). Get a key at [api-dashboard.search.brave.com](https://api-dashboard.search.brave.com/) and paste it into the Web tab, which checks it with one search before saving it. About 1,000 searches a month are free. Your searches go to Brave's servers. `BRAVE_API_KEY` works too.
+- **SearXNG** (most private). A search server you run yourself: it asks Google, Bing, Brave and others on your behalf, with no account. Its [settings.yml](https://docs.searxng.org/admin/settings/index.html) needs `json` under `search: formats:` (it ships with only HTML), and it should listen on `127.0.0.1`. Point the Web tab at its address; it tells you whether SearXNG answers and whether JSON is on.
+
+Page text is untrusted, so the rules are strict. web_fetch only reads a link that came from your message, a search result or a page it already read: text on a page cannot make the agent build a new address with your files in it. Private, local and link-local addresses are refused, redirects included, and the address is checked inside the connection itself. Neither tool exists in bypass mode, where commands run without asking.
 
 ## The web UI
 

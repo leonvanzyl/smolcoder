@@ -7,7 +7,7 @@
 // the agent runs, output streams plainly and scrolls naturally.
 
 import { Plan } from "../plan";
-import { SelectOption, SessionUI, SlashCommand, summarizeArgs } from "../ui";
+import { PromptOptions, SelectOption, SessionUI, SlashCommand, summarizeArgs } from "../ui";
 import { c } from "../util";
 import { LineEditor, layoutBuffer } from "./editor";
 import { Key, KeyDecoder } from "./keys";
@@ -92,6 +92,7 @@ export class Tui implements SessionUI {
   private promptState: {
     title: string;
     placeholder: string;
+    secret?: boolean;
     ed: LineEditor;
     resolve: (s: string | null) => void;
   } | null = null;
@@ -152,12 +153,12 @@ export class Tui implements SessionUI {
     });
   }
 
-  prompt(title: string, placeholder = ""): Promise<string | null> {
+  prompt(title: string, placeholder = "", opts: PromptOptions = {}): Promise<string | null> {
     this.stopSpinner();
     this.hideFrame();
     this.state = "prompt";
     return new Promise((resolve) => {
-      this.promptState = { title, placeholder, ed: new LineEditor(), resolve };
+      this.promptState = { title, placeholder, secret: opts.secret, ed: new LineEditor(), resolve };
       this.redraw();
     });
   }
@@ -376,7 +377,7 @@ export class Tui implements SessionUI {
       this.hideFrame();
       this.promptState = null;
       this.state = "hidden";
-      process.stdout.write(c.dim(`  ${p.title}: ${value ?? "cancelled"}\n`));
+      process.stdout.write(c.dim(`  ${p.title}: ${value === null ? "cancelled" : p.secret ? "(hidden)" : value}\n`));
       p.resolve(value);
     };
     switch (key.type) {
@@ -536,7 +537,8 @@ export class Tui implements SessionUI {
         // One line, scrolled so the cursor stays in view.
         const from = Math.max(0, p.ed.cursor - (w - 3));
         cursorCol = 2 + p.ed.cursor - from;
-        lines.push(boxRow(p.ed.buffer.slice(from, from + w - 2), w));
+        const shown = p.secret ? "•".repeat(p.ed.buffer.length) : p.ed.buffer;
+        lines.push(boxRow(shown.slice(from, from + w - 2), w));
       }
     } else if (this.state === "confirm" && this.confirmState) {
       lines.push(BAR + c.yellow("run? ") + c.bold(this.confirmState.command.slice(0, this.width() - 8)));

@@ -19,11 +19,13 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { SavedHost } from "./config";
-import { hostLabel, hostUrls, LMSTUDIO_PORT, OLLAMA_PORT } from "./hosts";
+import { hostLabel, hostUrls, LMSTUDIO_PORT, OLLAMA_PORT, OMLX_PORT } from "./hosts";
+import { isMtplxHealth, mtplxHeaders, parseMtplxModels, readMtplxPort } from "./mtplx";
+import { isOmlxHealth, omlxHeaders, parseOmlxModels, readOmlxSettings } from "./omlx";
 import { ReasoningInfo } from "./providers/lmstudio";
 import { probeJson, tryFetchJson } from "./util";
 
-export type BackendKind = "ollama" | "lmstudio";
+export type BackendKind = "ollama" | "lmstudio" | "omlx" | "mtplx";
 
 export interface DetectedModel {
   id: string;
@@ -94,6 +96,13 @@ export function lmStudioBaseUrls(configuredPort?: number): string[] {
   return ports.flatMap((port) => loopbackAliases(`http://127.0.0.1:${port}`));
 }
 
+/** Loopback spellings for oMLX and MTPLX: the ports their settings name,
+ * then the default both share. */
+function omlxBaseUrls(): string[] {
+  const ports = [readOmlxSettings().port, readMtplxPort(), OMLX_PORT].filter((p, i, all): p is number => !!p && all.indexOf(p) === i);
+  return ports.flatMap((port) => loopbackAliases(`http://127.0.0.1:${port}`));
+}
+
 /** Exported for tests: the port in LM Studio's http-server-config.json. */
 export function parseLmStudioServerPort(text: string): number | undefined {
   try {
@@ -155,6 +164,28 @@ function containerPublishedUrls(containerPorts: number[]): Promise<string[]> {
     });
   // Podman prints the same port format; only ask it when Docker is absent.
   return ask("docker").then((urls) => urls ?? ask("podman")).then((urls) => urls ?? []);
+}
+
+/** Exported for tests: listening ports in `lsof -Fn` output ("n127.0.0.1:8001"). */
+export function parseLsofPorts(output: string): number[] {
+  const ports = [...output.matchAll(/^n.*:(\d+)$/gm)].map((m) => Number(m[1]));
+  return ports.filter((p, i) => ports.indexOf(p) === i);
+}
+
+/** macOS: where running oMLX and MTPLX servers listen, whatever port they were
+ * moved to (they share 8000 by default, so one of them often is). */
+function mlxProcessUrls(): Promise<string[]> {
+  if (process.platform !== "darwin") return Promise.resolve([]);
+  const run = (cmd: string, args: string[]) =>
+    new Promise<string>((resolve) =>
+      execFile(cmd, args, { encoding: "utf8", timeout: DOCKER_DISCOVERY_TIMEOUT_MS }, (err, stdout) => resolve(err ? "" : stdout))
+    );
+  return run("pgrep", ["-f", "mtplx\\.server|omlx-server"]).then(async (pids) => {
+    const list = pids.split(/\s+/).filter(Boolean).join(",");
+    if (!list) return [];
+    const ports = parseLsofPorts(await run("lsof", ["-nP", "-a", "-iTCP", "-sTCP:LISTEN", "-p", list, "-Fn"]));
+    return ports.map((port) => `http://127.0.0.1:${port}`);
+  });
 }
 
 /** Exported for tests: the default gateway in /proc/net/route (little-endian hex). */
@@ -272,17 +303,31 @@ export interface ServerInfo {
   backend: BackendKind;
   baseUrl: string;
   models: DetectedModel[];
+  /** Name of the network host serving it; undefined means this computer. */
+  host?: string;
 }
 
-/** Ask one address whether it is Ollama or LM Studio. null means neither (or
+/** Ask one address which model server it is. null means none (or
  * nothing there). Both native listings are requested together so a dead
  * address costs one timeout, not one per backend. */
-export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIMEOUT_MS): Promise<ServerInfo | null> {
-  const [tags, v1] = await Promise.all([
+export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIMEOUT_MS, apiKey?: string): Promise<ServerInfo | null> {
+  const keyed = apiKey ? { authorization: `Bearer ${apiKey}` } : undefined;
+  const [tags, v1, health] = await Promise.all([
     probeJson(`${base}/api/tags`, timeoutMs),
     probeJson(`${base}/api/v1/models`, timeoutMs),
+    probeJson(`${base}/health`, timeoutMs),
   ]);
-  if (!tags.reached && !v1.reached) return null;
+  if (!tags.reached && !v1.reached && !health.reached) return null;
+  // oMLX: /health is the one open endpoint. A wrong or missing key still
+  // identifies the server, with no models.
+  if (isOmlxHealth(health.data)) {
+    const listing = await tryFetchJson(`${base}/v1/models`, { headers: keyed ?? omlxHeaders(base) }, timeoutMs);
+    return { backend: "omlx", baseUrl: base, models: parseOmlxModels(listing, base) ?? [] };
+  }
+  if (isMtplxHealth(health.data)) {
+    const listing = await tryFetchJson(`${base}/v1/models`, { headers: keyed ?? mtplxHeaders(base) }, timeoutMs);
+    return { backend: "mtplx", baseUrl: base, models: parseMtplxModels(listing, base) ?? [] };
+  }
   // LM Studio first: its listing names models by "key", which nothing else does.
   const lmKeyed = Array.isArray(v1.data?.models) && v1.data.models.length > 0 && v1.data.models.every((m: any) => typeof m?.key === "string");
   if (lmKeyed) return { backend: "lmstudio", baseUrl: base, models: parseLmStudioV1(v1.data, base) ?? [] };
@@ -337,7 +382,7 @@ export function groupServers(urls: string[], timeoutMs: number, host?: string): 
 async function probeGroup(group: ServerGroup): Promise<ServerInfo | null> {
   for (const url of group.urls) {
     const info = await identifyServer(url, group.timeoutMs);
-    if (info) return { ...info, models: info.models.map((m) => ({ ...m, host: group.host })) };
+    if (info) return { ...info, host: group.host, models: info.models.map((m) => ({ ...m, host: group.host })) };
   }
   return null;
 }
@@ -365,28 +410,35 @@ export async function probeHosts(hosts: SavedHost[]): Promise<HostStatus[]> {
   );
 }
 
-export async function detectAll(opts: DetectOptions = {}): Promise<DetectedModel[]> {
+/** One promise per source, in display order: this computer, its MLX servers
+ * and containers, then each added host. They finish at different times. */
+function serverSlots(opts: DetectOptions): Promise<ServerInfo[]>[] {
   const lmPort = readLmStudioPort();
   const ports = [OLLAMA_PORT, lmPort ?? LMSTUDIO_PORT, LMSTUDIO_PORT].filter((p, i, all) => all.indexOf(p) === i);
   const local = groupServers(
-    [...ollamaBaseUrls(process.env.OLLAMA_HOST), ...lmStudioBaseUrls(lmPort), ...hostMachineUrls(ports)],
+    [...ollamaBaseUrls(process.env.OLLAMA_HOST), ...lmStudioBaseUrls(lmPort), ...omlxBaseUrls(), ...hostMachineUrls(ports)],
     LOCAL_PROBE_TIMEOUT_MS
   );
   const covered = new Set(local.flatMap((g) => g.urls));
+  const found = (groups: ServerGroup[]) => Promise.all(groups.map(probeGroup)).then((all) => all.filter((s): s is ServerInfo => !!s));
+  const extra = (urls: string[]) => found(groupServers(urls.filter((u) => !covered.has(u)), LOCAL_PROBE_TIMEOUT_MS));
+  return [
+    ...local.map((g) => found([g])),
+    mlxProcessUrls().then(extra),
+    containerPublishedUrls(ports).then(extra),
+    ...(opts.hosts ?? []).map((host) => found(groupServers(hostUrls(host), NETWORK_PROBE_TIMEOUT_MS, hostLabel(host)))),
+  ].map((slot) => slot.catch(() => [] as ServerInfo[]));
+}
 
-  // One slot per source, in display order: this computer, its containers,
-  // then each added host. Slots finish at different times.
-  const slots: Promise<DetectedModel[]>[] = [
-    ...local.map((g) => probeGroup(g).then((s) => s?.models ?? [])),
-    containerPublishedUrls(ports).then(async (urls) => {
-      const groups = groupServers(urls.filter((u) => !covered.has(u)), LOCAL_PROBE_TIMEOUT_MS);
-      return (await Promise.all(groups.map(probeGroup))).flatMap((s) => s?.models ?? []);
-    }),
-    ...(opts.hosts ?? []).flatMap((host) =>
-      groupServers(hostUrls(host), NETWORK_PROBE_TIMEOUT_MS, hostLabel(host)).map((g) => probeGroup(g).then((s) => s?.models ?? []))
-    ),
-  ];
+/** Every server that answers, including ones that list no models (an oMLX
+ * waiting for its API key) — what the settings page shows. */
+export async function detectServers(opts: DetectOptions = {}): Promise<ServerInfo[]> {
+  const all = (await Promise.all(serverSlots(opts))).flat();
+  return all.filter((s, i) => all.findIndex((x) => x.baseUrl === s.baseUrl) === i);
+}
 
+export async function detectAll(opts: DetectOptions = {}): Promise<DetectedModel[]> {
+  const slots = serverSlots(opts).map((slot) => slot.then((servers) => servers.flatMap((s) => s.models)));
   const done: (DetectedModel[] | undefined)[] = slots.map(() => undefined);
   const merged = () => {
     const seen = new Set<string>();
@@ -398,12 +450,10 @@ export async function detectAll(opts: DetectOptions = {}): Promise<DetectedModel
   return new Promise((resolve) => {
     let left = slots.length;
     slots.forEach((slot, i) =>
-      slot
-        .catch(() => [] as DetectedModel[])
-        .then((models) => {
-          done[i] = models;
-          if (--left === 0 || (opts.until && models.some(opts.until))) resolve(merged());
-        })
+      slot.then((models) => {
+        done[i] = models;
+        if (--left === 0 || (opts.until && models.some(opts.until))) resolve(merged());
+      })
     );
   });
 }

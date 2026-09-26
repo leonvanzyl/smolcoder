@@ -12,7 +12,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { Agent } from "./agent";
-import { loadConfig } from "./config";
+import { loadConfig, webSettings } from "./config";
 import { ContextManager } from "./context";
 import { EventBus } from "./events";
 import { terminalLogo } from "./logo";
@@ -31,6 +31,7 @@ import {
   setupWithoutLocalModels,
 } from "./session";
 import { Mode, ToolContext } from "./tools/index";
+import { makeWebContext, noteUrls } from "./tools/web";
 import { pickShell } from "./tools/shell";
 import { TaskManager } from "./tools/tasks";
 import { Tui } from "./tui/tui";
@@ -115,8 +116,8 @@ function parseArgs(argv: string[]): CliArgs {
 const HELP = `
 ${c.bold("smolcoder")} v${VERSION} — a smol, zero-config coding agent for local models.
 
-Detects Ollama and LM Studio on this computer automatically — any port, Docker
-containers included. Models on other machines: /models → "Find models on
+Detects Ollama, LM Studio, oMLX and MTPLX on this computer automatically — any
+port, Docker containers included. Models on other machines: /models → "Find models on
 another machine" searches your network or takes an address, and remembers it.
 
 ${c.bold("Usage:")}
@@ -232,12 +233,19 @@ async function runHeadless(args: CliArgs): Promise<void> {
     filesTouched: new Set(),
     commandsRun: [],
   };
+  // Web access follows the same setting as interactive sessions.
+  const web = webSettings();
+  toolCtx.web = makeWebContext(web, mode, new Set());
+  const webOn = !!toolCtx.web;
+  noteUrls(toolCtx.web, args.print!);
   const ctxMgr = new ContextManager(chosen.contextWindow, provider.maxOutputTokens);
   const agentsMd = loadAgentsMd(args.workspace);
   if (agentsMd) ui.status(`· AGENTS.md loaded (${agentsMd.split("\n").length} lines)`);
-  const systemPrompt = buildSystemPrompt({ workspace: args.workspace, mode, shellLabel: shell.label, agentsMd });
+  const systemPrompt = buildSystemPrompt({ workspace: args.workspace, mode, shellLabel: shell.label, agentsMd, web: webOn });
   const agent = new Agent(provider, mode, systemPrompt, toolCtx, ctxMgr, bus, ui, false, 1000,
     args.verify ? { command: args.verify, maxAttempts: args.verifyAttempts } : undefined);
+  agent.setWeb(webOn, systemPrompt);
+  if (webOn) ui.status(`  web access on (${web.provider === "brave" ? "Brave Search" : `SearXNG at ${web.searxng}`})`);
   reportCompactions(bus, ui);
   process.on("exit", () => taskManager.killAll());
   installSignalCleanup(() => taskManager.killAll());
@@ -292,7 +300,7 @@ async function runInteractive(args: CliArgs): Promise<void> {
 
   printLogo();
   const cfg = loadConfig();
-  process.stdout.write(c.dim("· looking for Ollama and LM Studio…"));
+  process.stdout.write(c.dim("· looking for model servers…"));
   let chosen = await prepareModel(prefsOf(args), cfg, (label) => {
     process.stdout.write("\r\x1b[2K" + c.dim(`· ${label}…`));
   });
