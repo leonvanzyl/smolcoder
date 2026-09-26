@@ -160,3 +160,16 @@ test("settings: the page has the gear, the dialog script, and the theme applied 
   assert.match(js, /e\.key === "Escape"\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); dialog\.close\(\)/, "Esc in settings must not cancel the running turn");
   assert.match(js, /plain http: the key travels unencrypted/, "a key for a networked server warns before it is typed");
 });
+
+test("settings: no top-level function in the page script is defined twice", () => {
+  // The page script is client.ts and settings.ts glued together, and a second
+  // `function x` silently replaces the first. Seen: a dropdown helper named
+  // select() replaced the client's select(id), so clicking a saved session
+  // (or opening its #link) did nothing at all.
+  const { PAGE_HTML } = require("../dist/web/page");
+  const script = PAGE_HTML.slice(PAGE_HTML.lastIndexOf("<script>") + 8, PAGE_HTML.lastIndexOf("</script>"));
+  const names = [...script.matchAll(/^function ([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
+  const twice = names.filter((n, i) => names.indexOf(n) !== i);
+  assert.deepEqual(twice, [], `defined more than once: ${twice.join(", ")}`);
+  assert.ok(names.includes("select"), "the client's select(id) is still there");
+});

@@ -191,7 +191,7 @@ function modelsPane(pane) {
   load();
 }
 
-function select(options, value) {
+function dropdown(options, value) {
   const s = el("select");
   options.forEach((o) => { const opt = el("option", "", o[1]); opt.value = o[0]; if (o[0] === value) opt.selected = true; s.appendChild(opt); });
   return s;
@@ -212,9 +212,9 @@ function defaultsPane(pane) {
     if (current < 0) current = v.models.findIndex((m) => m.id === d.model);
     if (!v.models.length) opts.push(["", "no models found — start a model server"]);
     else if (current < 0) opts.unshift(["", d.model ? d.model + " (not available now)" : "the first one found"]);
-    const model = field("Model", select(opts, current >= 0 ? String(current) : ""));
-    const effort = field("Reasoning effort", select([["", "Model default"], ["off", "Off — fastest"], ["low", "Low"], ["medium", "Medium"], ["high", "High"]], d.effort || ""));
-    const mode = field("Permission mode", select([["ro", "Read-only"], ["edit", "Edit"]], d.mode === "ro" ? "ro" : "edit"));
+    const model = field("Model", dropdown(opts, current >= 0 ? String(current) : ""));
+    const effort = field("Reasoning effort", dropdown([["", "Model default"], ["off", "Off — fastest"], ["low", "Low"], ["medium", "Medium"], ["high", "High"]], d.effort || ""));
+    const mode = field("Permission mode", dropdown([["ro", "Read-only"], ["edit", "Edit"]], d.mode === "ro" ? "ro" : "edit"));
     const save = (patch) => postJSON("/settings/defaults", patch).then(() => msg(note, "Saved.", "ok"), (e) => { console.error("[settings] defaults", e); msg(note, "Could not save: " + e.message, "err"); });
     model.onchange = () => { const m = v.models[Number(model.value)]; if (m) save({ model: m.id, modelUrl: m.baseUrl }); };
     effort.onchange = () => save({ effort: effort.value || null });
