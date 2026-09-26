@@ -53,6 +53,7 @@ export const SETTINGS_CSS = String.raw`
   .settings .choices label { border: 1px solid var(--line); border-radius: 5px; padding: 5px 12px; cursor: pointer; background: var(--box); }
   .settings .choices input { margin-inline-end: 6px; }
   .settings .loading { color: var(--dim); padding: 10px 0; }
+  .settings .toggle { display: flex; align-items: center; gap: 6px; margin: 4px 0 10px; cursor: pointer; }
   @media (max-width: 600px) { .settings .setbody { flex-direction: column; } .settings .settabs { width: auto; flex-direction: row; border-inline-end: 0; border-bottom: 1px solid var(--line); } .settings .field { grid-template-columns: 1fr; } }
 `;
 
@@ -241,13 +242,40 @@ function appearancePane(pane) {
   pane.appendChild(el("div", "hint", "Saved in this browser only."));
 }
 
+function webPane(pane) {
+  pane.replaceChildren();
+  pane.appendChild(el("h3", "", "Web access"));
+  pane.appendChild(el("div", "hint", "Lets the model search the web and read pages, through a SearXNG you run — no account, no cookies, nothing saved. While off, the two tools are not sent to the model at all, so they cost no context. Never available in bypass mode."));
+  const body = el("div", "loading", "Checking SearXNG…"), note = el("div", "msg");
+  pane.appendChild(body); pane.appendChild(note);
+  const render = (w) => {
+    body.className = ""; body.replaceChildren();
+    const toggle = el("label", "toggle"), box = el("input"); box.type = "checkbox"; box.checked = !!w.enabled;
+    toggle.appendChild(box); toggle.appendChild(document.createTextNode(" Let the model search the web and read pages"));
+    body.appendChild(toggle);
+    const row = el("div", "inline"), addr = el("input"), save = smallBtn("Save");
+    addr.type = "text"; addr.value = w.searxng; addr.setAttribute("aria-label", "SearXNG address");
+    row.appendChild(el("span", "where", "SearXNG")); row.appendChild(addr); row.appendChild(save); body.appendChild(row);
+    const state = el("div", "msg");
+    if (w.status === "ok") msg(state, "SearXNG answers at " + w.searxng + ".", "ok");
+    else if (w.status === "json-off") msg(state, "SearXNG answers, but its JSON output is off: add json under search: formats: in its settings.yml, then restart it.", "warn");
+    else msg(state, "Nothing answered at " + w.searxng + ". Start SearXNG (see the README's Web access section), then come back here.", w.enabled ? "err" : "");
+    body.appendChild(state);
+    const send = (patch) => postJSON("/settings/web", patch).then((v) => { render(v); msg(note, "Saved.", "ok"); }, (e) => { console.error("[settings] web", e); msg(note, "Could not save: " + e.message, "err"); });
+    box.onchange = () => send({ enabled: box.checked });
+    save.onclick = () => send({ searxng: addr.value });
+    addr.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); send({ searxng: addr.value }); } };
+  };
+  getJSON("/settings/web").then(render, (e) => { console.error("[settings] web", e); body.className = "msg err"; body.textContent = "Could not load: " + e.message; });
+}
+
 function openSettings(tab) {
   const dialog = document.createElement("dialog"); dialog.className = "dlg settings"; dialog.setAttribute("aria-label", "Settings");
   const hdr = el("div", "sethdr"); hdr.appendChild(el("span", "", "Settings")); hdr.appendChild(el("span", "grow"));
   const close = el("button", "iconbtn", "×"); close.title = "close"; close.setAttribute("aria-label", "Close settings"); close.onclick = () => dialog.close(); hdr.appendChild(close);
   const body = el("div", "setbody"), tabs = el("div", "settabs"), pane = el("div", "setpane");
   tabs.setAttribute("role", "tablist");
-  const panes = { models: ["Models", modelsPane], defaults: ["Defaults", defaultsPane], appearance: ["Appearance", appearancePane] };
+  const panes = { models: ["Models", modelsPane], defaults: ["Defaults", defaultsPane], web: ["Web", webPane], appearance: ["Appearance", appearancePane] };
   const show = (name) => { for (const b of tabs.children) b.setAttribute("aria-selected", String(b.dataset.tab === name)); panes[name][1](pane); };
   Object.keys(panes).forEach((name) => { const b = el("button", "", panes[name][0]); b.type = "button"; b.dataset.tab = name; b.setAttribute("role", "tab"); b.onclick = () => show(name); tabs.appendChild(b); });
   body.appendChild(tabs); body.appendChild(pane); dialog.appendChild(hdr); dialog.appendChild(body);
