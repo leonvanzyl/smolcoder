@@ -150,6 +150,7 @@ test("settings: the page has the gear, the dialog script, and the theme applied 
   const { PAGE_HTML } = require("../dist/web/page");
   assert.match(PAGE_HTML, /id="btnsettings"[^>]*aria-label="Settings"/);
   assert.match(PAGE_HTML, /function openSettings\(/);
+  assert.match(PAGE_HTML, /web: \["Web", webPane\]/, "the Web tab is there");
   const head = PAGE_HTML.slice(0, PAGE_HTML.indexOf("</head>"));
   assert.match(head, /smol\.theme/, "the theme is set in <head>, so a light page never flashes dark");
   // The page script must parse: one syntax slip would blank the whole UI.
@@ -172,4 +173,28 @@ test("settings: no top-level function in the page script is defined twice", () =
   const twice = names.filter((n, i) => names.indexOf(n) !== i);
   assert.deepEqual(twice, [], `defined more than once: ${twice.join(", ")}`);
   assert.ok(names.includes("select"), "the client's select(id) is still there");
+});
+
+test("settings: web access is saved validated, and the page is told whether SearXNG really answers", async () => {
+  saveConfig({});
+  const serveWith = async (status, body) => {
+    const s = http.createServer((req, res) => { res.writeHead(status, { "content-type": "application/json" }); res.end(body); });
+    await new Promise((r) => s.listen(0, "127.0.0.1", r));
+    return { base: `http://127.0.0.1:${s.address().port}`, close: () => new Promise((r) => s.close(r)) };
+  };
+  const good = await serveWith(200, JSON.stringify({ results: [] }));
+  const locked = await serveWith(403, "Forbidden");
+  try {
+    assert.deepEqual(await settings.webView(), { enabled: false, searxng: "http://127.0.0.1:8888", status: (await settings.webView()).status });
+    assert.equal((await settings.saveWeb({ enabled: true, searxng: good.base })).status, "ok");
+    assert.deepEqual(loadConfig().web, { enabled: true, searxng: good.base });
+    assert.equal((await settings.saveWeb({ searxng: locked.base })).status, "json-off");
+    assert.equal(loadConfig().web.enabled, true, "changing the address keeps the switch as it was");
+    assert.equal((await settings.saveWeb({ searxng: "http://127.0.0.1:9" })).status, "unreachable");
+    await assert.rejects(settings.saveWeb({ searxng: "javascript:alert(1)" }), /address/);
+    assert.equal((await settings.saveWeb({ enabled: false })).enabled, false);
+  } finally {
+    await good.close();
+    await locked.close();
+  }
 });

@@ -20,7 +20,7 @@ import { noBackendsMessage, prepareModel, Session, SessionPrefs, SessionSnapshot
 import { tryFetchJson } from "../util";
 import { Attachment, classifyUpload, extOf, MAX_UPLOAD_BYTES, mimeForExt, safeName } from "../attachments";
 import { Event, SessionChannel, uploadUrl } from "./channel";
-import { addMachine, removeMachine, renameMachine, saveDefaults, settingsView, setServerKey } from "../settings";
+import { addMachine, removeMachine, renameMachine, saveDefaults, saveWeb, settingsView, setServerKey, webView } from "../settings";
 import { PAGE_HTML } from "./page";
 import { SessionMeta, SessionStore, WorkspaceStore, workspaceKey } from "./store";
 import { Terminal } from "./terminal";
@@ -699,6 +699,12 @@ export class WebHub {
         case "/upload":
           this.serveUpload(res, url);
           return;
+        case "/settings/web":
+          webView().then(
+            (v) => json(200, v),
+            (err) => json(500, { error: String(err?.message ?? err) })
+          );
+          return;
         case "/settings":
           settingsView().then(
             (v) => json(200, v),
@@ -962,6 +968,11 @@ export class WebHub {
       case "/settings/machines/rename":
         renameMachine(String(d.address ?? ""), String(d.name ?? ""));
         return {};
+      case "/settings/web":
+        return saveWeb({
+          ...(typeof d.enabled === "boolean" ? { enabled: d.enabled } : {}),
+          ...(typeof d.searxng === "string" ? { searxng: d.searxng } : {}),
+        });
       case "/settings/defaults":
         saveDefaults({
           ...(typeof d.model === "string" ? { model: d.model } : {}),

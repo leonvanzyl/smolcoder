@@ -4,7 +4,7 @@
 // state — it is the same config the pickers and flags already use, in one
 // place. API keys go in and never come back out.
 
-import { Config, loadConfig, savedKey, setKeys, updateConfig } from "./config";
+import { Config, loadConfig, savedKey, setKeys, updateConfig, webSettings } from "./config";
 import { detectServers, identifyServer, ServerInfo } from "./detect";
 import { hostLabel, hostUrls, removeHost, renameHost } from "./hosts";
 import { addMachine, AddResult, BACKEND_NAMES, KEYED } from "./network";
@@ -118,4 +118,37 @@ export function saveDefaults(d: { model?: string; modelUrl?: string; effort?: st
     patch.lastMode = d.mode as Config["lastMode"];
   }
   updateConfig(patch);
+}
+
+export type SearxngStatus = "ok" | "json-off" | "unreachable";
+
+/** Whether a SearXNG answers at `base` with the JSON the model needs. */
+export async function searxngStatus(base: string): Promise<SearxngStatus> {
+  try {
+    const res = await fetch(`${base}/search?q=smolcoder&format=json`, { signal: AbortSignal.timeout(4000) });
+    if (res.status === 403) return "json-off";
+    return res.ok && Array.isArray(((await res.json().catch(() => null)) as any)?.results) ? "ok" : "unreachable";
+  } catch {
+    return "unreachable";
+  }
+}
+
+export async function webView(): Promise<{ enabled: boolean; searxng: string; status: SearxngStatus }> {
+  const w = webSettings();
+  return { ...w, status: await searxngStatus(w.searxng) };
+}
+
+/** Turn web access on or off and/or change the SearXNG address. Only the
+ * fields given change. */
+export async function saveWeb(d: { enabled?: boolean; searxng?: string }): Promise<{ enabled: boolean; searxng: string; status: SearxngStatus }> {
+  const now = webSettings();
+  let searxng = now.searxng;
+  if (d.searxng !== undefined) {
+    const url = String(d.searxng).trim().replace(/\/+$/, "");
+    if (!SERVER_URL.test(url)) throw new Error("not a server address — for example http://127.0.0.1:8888");
+    searxng = url;
+  }
+  const enabled = d.enabled === undefined ? now.enabled : d.enabled === true;
+  updateConfig({ web: { enabled, searxng } });
+  return webView();
 }
