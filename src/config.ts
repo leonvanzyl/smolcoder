@@ -32,6 +32,8 @@ export interface Config {
   hosts?: SavedHost[];
   /** API keys by server URL, for servers that require one (oMLX, MTPLX). */
   keys?: Record<string, string>;
+  /** Web search and page reading for the model. Off unless turned on. */
+  web?: { enabled?: boolean; searxng?: string };
 }
 
 export function loadConfig(): Config {
@@ -92,4 +94,13 @@ export function setKeys(bases: string[], key?: string): void {
     else delete keys[base];
   }
   updateConfig({ keys });
+}
+
+export const DEFAULT_SEARXNG = "http://127.0.0.1:8888";
+
+/** Web access as saved, with junk falling back to off and the default address. */
+export function webSettings(cfg: Config = loadConfig()): { enabled: boolean; searxng: string } {
+  const w = cfg.web && typeof cfg.web === "object" ? cfg.web : {};
+  const url = typeof w.searxng === "string" && /^https?:\/\/[^\s/?#]+/.test(w.searxng) ? w.searxng.replace(/\/+$/, "") : DEFAULT_SEARXNG;
+  return { enabled: w.enabled === true, searxng: url };
 }
