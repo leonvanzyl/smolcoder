@@ -129,3 +129,27 @@ test("web: the setting is off by default and survives only valid values", () => 
   assert.deepEqual(read({ web: { enabled: true, searxng: "http://127.0.0.1:9999/" } }), { enabled: true, searxng: "http://127.0.0.1:9999" });
   assert.deepEqual(read({ web: { enabled: "yes", searxng: "file:///etc" } }), { enabled: false, searxng: "http://127.0.0.1:8888" }, "junk falls back to the defaults");
 });
+
+test("web: IPv6 spellings of private IPv4 addresses are private too — as the URL parser writes them", () => {
+  // new URL() turns [::ffff:127.0.0.1] into [::ffff:7f00:1]; the check must see through that.
+  for (const u of ["http://[::ffff:127.0.0.1]/", "http://[::ffff:192.168.1.1]:8000/", "http://[::127.0.0.1]/", "http://[64:ff9b::10.0.0.1]/", "http://[::ffff:0:10.0.0.1]/", "http://[ff02::1]/"]) {
+    const host = new URL(u).hostname.replace(/^\[|\]$/g, "");
+    assert.equal(isPrivateAddress(host), true, `${u} → ${host}`);
+  }
+  assert.equal(isPrivateAddress("2606:4700:4700::1111"), false);
+  assert.equal(isPrivateAddress("64:ff9b::808:808"), false, "NAT64 of a public address is public");
+});
+
+test("web: a name that resolves to a private address is refused at connect time, not before", async () => {
+  const { safeLookup } = require("../dist/tools/web");
+  // The address is checked inside the connection's own DNS lookup, so a name
+  // that answers differently the second time (rebinding) has no gap to use.
+  const err = await new Promise((resolve) => safeLookup("localhost", {}, (e) => resolve(e)));
+  assert.match(String(err?.message), /private or local/);
+  const all = await new Promise((resolve) => safeLookup("localhost", { all: true }, (e, a) => resolve(e ?? a)));
+  assert.match(String(all?.message), /private or local/, "the all-addresses form (happy eyeballs) is checked too");
+
+  const web = { searxng: "", known: new Set(["http://localhost:1/"]) };
+  const out = await executeTool("web_fetch", { url: "http://localhost:1/" }, ctxWith(web));
+  assert.match(out, /^Error: .*(private|local)/);
+});
