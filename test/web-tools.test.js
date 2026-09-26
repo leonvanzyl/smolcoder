@@ -123,11 +123,11 @@ test("web: the setting is off by default and survives only valid values", () => 
   const { execFileSync } = require("node:child_process");
   const read = (json) => {
     fs.writeFileSync(file, JSON.stringify(json));
-    return JSON.parse(execFileSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(require('./dist/config').webSettings()))"], { env: { ...process.env, SMOLCODER_CONFIG: file } }).toString());
+    return JSON.parse(execFileSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(require('./dist/config').webSettings()))"], { env: { ...process.env, BRAVE_API_KEY: "", SMOLCODER_CONFIG: file } }).toString());
   };
-  assert.deepEqual(read({}), { enabled: false, searxng: "http://127.0.0.1:8888" });
-  assert.deepEqual(read({ web: { enabled: true, searxng: "http://127.0.0.1:9999/" } }), { enabled: true, searxng: "http://127.0.0.1:9999" });
-  assert.deepEqual(read({ web: { enabled: "yes", searxng: "file:///etc" } }), { enabled: false, searxng: "http://127.0.0.1:8888" }, "junk falls back to the defaults");
+  assert.deepEqual(read({}), { enabled: false, provider: "searxng", searxng: "http://127.0.0.1:8888" });
+  assert.deepEqual(read({ web: { enabled: true, searxng: "http://127.0.0.1:9999/" } }), { enabled: true, provider: "searxng", searxng: "http://127.0.0.1:9999" });
+  assert.deepEqual(read({ web: { enabled: "yes", searxng: "file:///etc" } }), { enabled: false, provider: "searxng", searxng: "http://127.0.0.1:8888" }, "junk falls back to the defaults");
 });
 
 test("web: IPv6 spellings of private IPv4 addresses are private too — as the URL parser writes them", () => {
@@ -152,4 +152,65 @@ test("web: a name that resolves to a private address is refused at connect time,
   const web = { searxng: "", known: new Set(["http://localhost:1/"]) };
   const out = await executeTool("web_fetch", { url: "http://localhost:1/" }, ctxWith(web));
   assert.match(out, /^Error: .*(private|local)/);
+});
+
+// ---- Brave Search: the no-install option (a key pasted in settings) ---------
+
+test("web: Brave search sends the key as its header and returns clean results", async () => {
+  let seen = null;
+  const brave = await serve((req, res) => {
+    seen = { url: req.url, token: req.headers["x-subscription-token"] };
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ web: { results: [
+      { title: "Configuring <strong>Vite</strong>", url: "https://vite.dev/config/", description: "Options for <strong>vite</strong> &amp; more" },
+    ] } }));
+  });
+  try {
+    const web = { provider: "brave", braveKey: "BSA-test", braveApi: brave.base, searxng: "", known: new Set() };
+    const out = await executeTool("web_search", { query: "vite alias" }, ctxWith(web));
+    assert.match(seen.url, /^\/res\/v1\/web\/search\?q=vite(\+|%20)alias&count=5/);
+    assert.equal(seen.token, "BSA-test");
+    assert.match(out, /1\. Configuring Vite\n\s+https:\/\/vite\.dev\/config\/\n\s+Options for vite & more/, "Brave's highlight tags are stripped");
+    assert.ok(web.known.has("https://vite.dev/config/"));
+  } finally {
+    await brave.close();
+  }
+});
+
+test("web: a bad Brave key or a spent free quota says so plainly", async () => {
+  for (const [status, expect] of [[401, /key/i], [429, /quota|limit/i]]) {
+    const brave = await serve((req, res) => { res.writeHead(status); res.end("{}"); });
+    try {
+      const out = await executeTool("web_search", { query: "x" }, ctxWith({ provider: "brave", braveKey: "k", braveApi: brave.base, searxng: "", known: new Set() }));
+      assert.match(out, /^Error: /);
+      assert.match(out, expect);
+    } finally {
+      await brave.close();
+    }
+  }
+  const nokey = await executeTool("web_search", { query: "x" }, ctxWith({ provider: "brave", searxng: "", known: new Set() }));
+  assert.match(nokey, /no Brave API key/i);
+});
+
+test("web: one function builds the web context for every entry point", () => {
+  const { makeWebContext } = require("../dist/tools/web");
+  const known = new Set(["https://a.dev/"]);
+  assert.equal(makeWebContext({ enabled: false, provider: "searxng", searxng: "http://127.0.0.1:8888" }, "edit", known), undefined);
+  assert.equal(makeWebContext({ enabled: true, provider: "searxng", searxng: "http://127.0.0.1:8888" }, "bypass", known), undefined, "never in bypass");
+  const ctx = makeWebContext({ enabled: true, provider: "brave", searxng: "http://127.0.0.1:8888", braveKey: "k" }, "ro", known);
+  assert.deepEqual({ p: ctx.provider, k: ctx.braveKey, same: ctx.known === known }, { p: "brave", k: "k", same: true });
+});
+
+test("web: the saved setting carries the provider and a Brave key; junk falls back", () => {
+  const fs = require("node:fs"), os = require("node:os"), path = require("node:path");
+  const { execFileSync } = require("node:child_process");
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "smol-webcfg2-")), "c.json");
+  const read = (json, env = {}) => {
+    fs.writeFileSync(file, JSON.stringify(json));
+    return JSON.parse(execFileSync(process.execPath, ["-e", "process.stdout.write(JSON.stringify(require('./dist/config').webSettings()))"], { env: { ...process.env, BRAVE_API_KEY: "", ...env, SMOLCODER_CONFIG: file } }).toString());
+  };
+  assert.equal(read({}).provider, "searxng");
+  assert.deepEqual(read({ web: { enabled: true, provider: "brave", braveKey: "BSA1" } }), { enabled: true, provider: "brave", searxng: "http://127.0.0.1:8888", braveKey: "BSA1" });
+  assert.equal(read({ web: { provider: "google" } }).provider, "searxng");
+  assert.equal(read({ web: { provider: "brave" } }, { BRAVE_API_KEY: "from-env" }).braveKey, "from-env", "BRAVE_API_KEY works when none is saved");
 });

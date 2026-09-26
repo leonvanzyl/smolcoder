@@ -245,26 +245,46 @@ function appearancePane(pane) {
 function webPane(pane) {
   pane.replaceChildren();
   pane.appendChild(el("h3", "", "Web access"));
-  pane.appendChild(el("div", "hint", "Lets the model search the web and read pages, through a SearXNG you run — no account, no cookies, nothing saved. While off, the two tools are not sent to the model at all, so they cost no context. Never available in bypass mode."));
-  const body = el("div", "loading", "Checking SearXNG…"), note = el("div", "msg");
+  pane.appendChild(el("div", "hint", "Lets the model search the web and read pages as plain text — no browser, no cookies, nothing saved. While off, the two tools are not sent to the model at all, so they cost no context. Never available in bypass mode."));
+  const body = el("div", "loading", "Checking…"), note = el("div", "msg");
   pane.appendChild(body); pane.appendChild(note);
+  const send = (patch) => postJSON("/settings/web", patch).then((v) => { render(v); msg(note, "Saved.", "ok"); }, (e) => { console.error("[settings] web", e); msg(note, e.message, "err"); });
   const render = (w) => {
     body.className = ""; body.replaceChildren();
     const toggle = el("label", "toggle"), box = el("input"); box.type = "checkbox"; box.checked = !!w.enabled;
     toggle.appendChild(box); toggle.appendChild(document.createTextNode(" Let the model search the web and read pages"));
-    body.appendChild(toggle);
-    const row = el("div", "inline"), addr = el("input"), save = smallBtn("Save");
-    addr.type = "text"; addr.value = w.searxng; addr.setAttribute("aria-label", "SearXNG address");
-    row.appendChild(el("span", "where", "SearXNG")); row.appendChild(addr); row.appendChild(save); body.appendChild(row);
-    const state = el("div", "msg");
-    if (w.status === "ok") msg(state, "SearXNG answers at " + w.searxng + ".", "ok");
-    else if (w.status === "json-off") msg(state, "SearXNG answers, but its JSON output is off: add json under search: formats: in its settings.yml, then restart it.", "warn");
-    else msg(state, "Nothing answered at " + w.searxng + ". Start SearXNG (see the README's Web access section), then come back here.", w.enabled ? "err" : "");
-    body.appendChild(state);
-    const send = (patch) => postJSON("/settings/web", patch).then((v) => { render(v); msg(note, "Saved.", "ok"); }, (e) => { console.error("[settings] web", e); msg(note, "Could not save: " + e.message, "err"); });
     box.onchange = () => send({ enabled: box.checked });
-    save.onclick = () => send({ searxng: addr.value });
-    addr.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); send({ searxng: addr.value }); } };
+    body.appendChild(toggle);
+    body.appendChild(el("h3", "", "Search with"));
+    body.appendChild(choices("provider", [["brave", "Brave Search"], ["searxng", "SearXNG"]], w.provider, (p) => send({ provider: p })));
+    const state = el("div", "msg");
+    if (w.provider === "brave") {
+      body.appendChild(el("div", "hint", "Paste a key from Brave's API dashboard: about 1,000 searches a month are free. Searches go to Brave's servers."));
+      const link = el("a", "", "Get a key at api-dashboard.search.brave.com"); link.href = "https://api-dashboard.search.brave.com/"; link.target = "_blank"; link.rel = "noopener";
+      body.appendChild(link);
+      const row = el("div", "keyform"), key = el("input"), save = smallBtn(w.hasBraveKey ? "Replace key" : "Save key");
+      key.type = "password"; key.autocomplete = "off"; key.placeholder = w.hasBraveKey ? "a key is saved — paste a new one to replace it" : "Brave Search API key"; key.setAttribute("aria-label", "Brave Search API key");
+      row.appendChild(key); row.appendChild(save);
+      if (w.hasBraveKey) { const rm = smallBtn("Remove key", "danger"); rm.onclick = () => send({ braveKey: "" }); row.appendChild(rm); }
+      body.appendChild(row);
+      const submit = () => { if (!key.value.trim()) return msg(note, "Paste the key first.", "warn"); save.disabled = true; msg(note, "Checking the key with Brave…"); send({ braveKey: key.value }).then(() => { save.disabled = false; }); };
+      save.onclick = submit;
+      key.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } };
+      if (w.status === "ok") msg(state, "Brave accepted the key.", "ok");
+      else if (w.status === "key-saved") msg(state, "A key is saved.", "ok");
+      else msg(state, "No key yet: paste one to search with Brave.", w.enabled ? "warn" : "");
+    } else {
+      body.appendChild(el("div", "hint", "A search server you run yourself: it asks Google, Bing, Brave and others for you, with no account. The most private option."));
+      const row = el("div", "inline"), addr = el("input"), save = smallBtn("Save");
+      addr.type = "text"; addr.value = w.searxng; addr.setAttribute("aria-label", "SearXNG address");
+      row.appendChild(addr); row.appendChild(save); body.appendChild(row);
+      save.onclick = () => send({ searxng: addr.value });
+      addr.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); send({ searxng: addr.value }); } };
+      if (w.status === "ok") msg(state, "SearXNG answers at " + w.searxng + ".", "ok");
+      else if (w.status === "json-off") msg(state, "SearXNG answers, but its JSON output is off: add json under search: formats: in its settings.yml, then restart it.", "warn");
+      else msg(state, "Nothing answered at " + w.searxng + ". Start SearXNG (see the README's Web access section), then come back here.", w.enabled ? "err" : "");
+    }
+    body.appendChild(state);
   };
   getJSON("/settings/web").then(render, (e) => { console.error("[settings] web", e); body.className = "msg err"; body.textContent = "Could not load: " + e.message; });
 }

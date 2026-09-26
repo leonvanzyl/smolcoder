@@ -31,7 +31,7 @@ import {
   setupWithoutLocalModels,
 } from "./session";
 import { Mode, ToolContext } from "./tools/index";
-import { noteUrls } from "./tools/web";
+import { makeWebContext, noteUrls } from "./tools/web";
 import { pickShell } from "./tools/shell";
 import { TaskManager } from "./tools/tasks";
 import { Tui } from "./tui/tui";
@@ -235,11 +235,9 @@ async function runHeadless(args: CliArgs): Promise<void> {
   };
   // Web access follows the same setting as interactive sessions.
   const web = webSettings();
-  const webOn = web.enabled && mode !== "bypass";
-  if (webOn) {
-    toolCtx.web = { searxng: web.searxng, known: new Set() };
-    noteUrls(toolCtx.web, args.print!);
-  }
+  toolCtx.web = makeWebContext(web, mode, new Set());
+  const webOn = !!toolCtx.web;
+  noteUrls(toolCtx.web, args.print!);
   const ctxMgr = new ContextManager(chosen.contextWindow, provider.maxOutputTokens);
   const agentsMd = loadAgentsMd(args.workspace);
   if (agentsMd) ui.status(`· AGENTS.md loaded (${agentsMd.split("\n").length} lines)`);
@@ -247,7 +245,7 @@ async function runHeadless(args: CliArgs): Promise<void> {
   const agent = new Agent(provider, mode, systemPrompt, toolCtx, ctxMgr, bus, ui, false, 1000,
     args.verify ? { command: args.verify, maxAttempts: args.verifyAttempts } : undefined);
   agent.setWeb(webOn, systemPrompt);
-  if (webOn) ui.status(`  web access on (SearXNG at ${web.searxng})`);
+  if (webOn) ui.status(`  web access on (${web.provider === "brave" ? "Brave Search" : `SearXNG at ${web.searxng}`})`);
   reportCompactions(bus, ui);
   process.on("exit", () => taskManager.killAll());
   installSignalCleanup(() => taskManager.killAll());

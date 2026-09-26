@@ -971,7 +971,9 @@ export class WebHub {
       case "/settings/web":
         return saveWeb({
           ...(typeof d.enabled === "boolean" ? { enabled: d.enabled } : {}),
+          ...(typeof d.provider === "string" ? { provider: d.provider } : {}),
           ...(typeof d.searxng === "string" ? { searxng: d.searxng } : {}),
+          ...(typeof d.braveKey === "string" ? { braveKey: d.braveKey } : {}),
         });
       case "/settings/defaults":
         saveDefaults({

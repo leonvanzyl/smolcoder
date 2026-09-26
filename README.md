@@ -135,26 +135,12 @@ smolcoder sends your code and prompts to the server you choose, and runs the too
 
 ## Web access
 
-Off by default. Turned on, the agent gets two more tools: **web_search**, which asks a [SearXNG](https://docs.searxng.org) you run for five results, and **web_fetch**, which reads a page as plain text. There is no browser: no cookies, no profile, nothing saved. While it is off the two tools are not sent to the model at all, so they cost no context.
+Off by default. Turned on, the agent gets two more tools: **web_search**, which returns five results, and **web_fetch**, which reads a page as plain text. There is no browser: no cookies, no profile, nothing saved. While it is off the two tools are not sent to the model at all, so they cost no context.
 
-**1. Run SearXNG on this computer.** It is a metasearch engine: it asks Google, Bing, Brave and others on your behalf, with no account. Save this as `~/.smolcoder/searxng/settings.yml` (use any long random string for the key):
+Turn it on in the web UI: the gear → **Web**. The switch takes effect from your next message, and `smol -p` follows it too. Reading pages needs nothing more; searching needs one of these:
 
-```yaml
-use_default_settings: true
-server:
-  secret_key: "replace-with-a-long-random-string"
-  limiter: false
-search:
-  formats: [html, json]
-```
-
-```bash
-docker run -d --name searxng --restart unless-stopped -p 127.0.0.1:8888:8080 -v ~/.smolcoder/searxng:/etc/searxng searxng/searxng
-```
-
-`json` has to be in `formats`: SearXNG ships with only HTML, and the agent reads JSON. `127.0.0.1` keeps it reachable from this computer only.
-
-**2. Turn it on.** In the web UI: the gear → **Web**. The page checks the address and tells you if SearXNG is missing or still has JSON off. The switch takes effect from your next message, and `smol -p` follows it too.
+- **Brave Search** (easiest). Get a key at [api-dashboard.search.brave.com](https://api-dashboard.search.brave.com/) and paste it into the Web tab, which checks it with one search before saving it. About 1,000 searches a month are free. Your searches go to Brave's servers. `BRAVE_API_KEY` works too.
+- **SearXNG** (most private). A search server you run yourself: it asks Google, Bing, Brave and others on your behalf, with no account. Its [settings.yml](https://docs.searxng.org/admin/settings/index.html) needs `json` under `search: formats:` (it ships with only HTML), and it should listen on `127.0.0.1`. Point the Web tab at its address; it tells you whether SearXNG answers and whether JSON is on.
 
 Page text is untrusted, so the rules are strict. web_fetch only reads a link that came from your message, a search result or a page it already read: text on a page cannot make the agent build a new address with your files in it. Private, local and link-local addresses are refused, redirects included, and the address is checked inside the connection itself. Neither tool exists in bypass mode, where commands run without asking.
 

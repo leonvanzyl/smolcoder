@@ -33,7 +33,7 @@ export interface Config {
   /** API keys by server URL, for servers that require one (oMLX, MTPLX). */
   keys?: Record<string, string>;
   /** Web search and page reading for the model. Off unless turned on. */
-  web?: { enabled?: boolean; searxng?: string };
+  web?: { enabled?: boolean; provider?: string; searxng?: string; braveKey?: string };
 }
 
 export function loadConfig(): Config {
@@ -98,9 +98,26 @@ export function setKeys(bases: string[], key?: string): void {
 
 export const DEFAULT_SEARXNG = "http://127.0.0.1:8888";
 
-/** Web access as saved, with junk falling back to off and the default address. */
-export function webSettings(cfg: Config = loadConfig()): { enabled: boolean; searxng: string } {
+export type SearchProvider = "searxng" | "brave";
+
+export interface WebSettings {
+  enabled: boolean;
+  /** Where web_search goes: a SearXNG the user runs, or Brave's API with a key. */
+  provider: SearchProvider;
+  searxng: string;
+  /** Saved from settings, else BRAVE_API_KEY. Never sent to the page. */
+  braveKey?: string;
+}
+
+/** Web access as saved, with junk falling back to off, SearXNG and the default address. */
+export function webSettings(cfg: Config = loadConfig()): WebSettings {
   const w = cfg.web && typeof cfg.web === "object" ? cfg.web : {};
   const url = typeof w.searxng === "string" && /^https?:\/\/[^\s/?#]+/.test(w.searxng) ? w.searxng.replace(/\/+$/, "") : DEFAULT_SEARXNG;
-  return { enabled: w.enabled === true, searxng: url };
+  const key = (typeof w.braveKey === "string" && w.braveKey.trim()) || process.env.BRAVE_API_KEY?.trim() || undefined;
+  return {
+    enabled: w.enabled === true,
+    provider: w.provider === "brave" ? "brave" : "searxng",
+    searxng: url,
+    ...(key ? { braveKey: key } : {}),
+  };
 }

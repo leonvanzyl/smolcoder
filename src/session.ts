@@ -13,7 +13,7 @@ import { findModelsOnNetwork, FlowUI, manageHosts } from "./network";
 import { Plan, PlanStep } from "./plan";
 import { buildSystemPrompt, loadAgentsMd } from "./prompt";
 import { LmStudioProvider } from "./providers/lmstudio";
-import { noteUrls } from "./tools/web";
+import { makeWebContext, noteUrls } from "./tools/web";
 import { mtplxApiKey } from "./mtplx";
 import { omlxApiKey } from "./omlx";
 import { OllamaProvider } from "./providers/ollama";
@@ -378,11 +378,9 @@ export class Session {
   /** Follow the web setting as it is now, so the settings toggle applies from
    * the next message. The set of fetchable links survives a toggle. */
   private syncWeb(): void {
-    const { enabled, searxng } = webSettings();
-    const known = this.toolCtx.web?.known ?? this.knownUrls;
-    this.knownUrls = known;
-    this.toolCtx.web = enabled ? { searxng, known } : undefined;
-    this.agent.setWeb(enabled, this.sysPrompt(this.agent.mode));
+    const w = webSettings();
+    this.toolCtx.web = makeWebContext(w, this.agent.mode, this.knownUrls);
+    this.agent.setWeb(w.enabled, this.sysPrompt(this.agent.mode));
   }
 
   private persist(): void {

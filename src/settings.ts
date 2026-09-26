@@ -4,7 +4,8 @@
 // state — it is the same config the pickers and flags already use, in one
 // place. API keys go in and never come back out.
 
-import { Config, loadConfig, savedKey, setKeys, updateConfig, webSettings } from "./config";
+import { Config, loadConfig, savedKey, SearchProvider, setKeys, updateConfig, webSettings } from "./config";
+import { webSearch } from "./tools/web";
 import { detectServers, identifyServer, ServerInfo } from "./detect";
 import { hostLabel, hostUrls, removeHost, renameHost } from "./hosts";
 import { addMachine, AddResult, BACKEND_NAMES, KEYED } from "./network";
@@ -120,10 +121,10 @@ export function saveDefaults(d: { model?: string; modelUrl?: string; effort?: st
   updateConfig(patch);
 }
 
-export type SearxngStatus = "ok" | "json-off" | "unreachable";
+export type WebStatus = "ok" | "json-off" | "unreachable" | "key-saved" | "no-key";
 
 /** Whether a SearXNG answers at `base` with the JSON the model needs. */
-export async function searxngStatus(base: string): Promise<SearxngStatus> {
+export async function searxngStatus(base: string): Promise<WebStatus> {
   try {
     const res = await fetch(`${base}/search?q=smolcoder&format=json`, { signal: AbortSignal.timeout(4000) });
     if (res.status === 403) return "json-off";
@@ -133,22 +134,50 @@ export async function searxngStatus(base: string): Promise<SearxngStatus> {
   }
 }
 
-export async function webView(): Promise<{ enabled: boolean; searxng: string; status: SearxngStatus }> {
-  const w = webSettings();
-  return { ...w, status: await searxngStatus(w.searxng) };
+export interface WebView {
+  enabled: boolean;
+  provider: SearchProvider;
+  searxng: string;
+  hasBraveKey: boolean;
+  status: WebStatus;
 }
 
-/** Turn web access on or off and/or change the SearXNG address. Only the
- * fields given change. */
-export async function saveWeb(d: { enabled?: boolean; searxng?: string }): Promise<{ enabled: boolean; searxng: string; status: SearxngStatus }> {
-  const now = webSettings();
-  let searxng = now.searxng;
+/** What the Web tab shows. Brave is not asked here: every question spends a
+ * search from the user's quota, so its key is only checked when it is saved. */
+export async function webView(): Promise<WebView> {
+  const w = webSettings();
+  const status = w.provider === "brave" ? (w.braveKey ? "key-saved" : "no-key") : await searxngStatus(w.searxng);
+  return { enabled: w.enabled, provider: w.provider, searxng: w.searxng, hasBraveKey: !!w.braveKey, status };
+}
+
+/** Change any of: the switch, the provider, the SearXNG address, the Brave
+ * key ("" removes it). A new Brave key is tried with one search first and
+ * kept only if Brave accepts it. */
+export async function saveWeb(
+  d: { enabled?: boolean; provider?: string; searxng?: string; braveKey?: string },
+  opts: { braveApi?: string } = {}
+): Promise<WebView> {
+  const saved = loadConfig().web ?? {};
+  const next = { ...saved };
+  if (d.enabled !== undefined) next.enabled = d.enabled === true;
+  if (d.provider !== undefined) {
+    if (d.provider !== "searxng" && d.provider !== "brave") throw new Error("provider must be searxng or brave");
+    next.provider = d.provider;
+  }
   if (d.searxng !== undefined) {
     const url = String(d.searxng).trim().replace(/\/+$/, "");
     if (!SERVER_URL.test(url)) throw new Error("not a server address — for example http://127.0.0.1:8888");
-    searxng = url;
+    next.searxng = url;
   }
-  const enabled = d.enabled === undefined ? now.enabled : d.enabled === true;
-  updateConfig({ web: { enabled, searxng } });
-  return webView();
+  if (d.braveKey !== undefined) {
+    const key = String(d.braveKey).trim().slice(0, 200);
+    if (key) {
+      const probe = await webSearch({ provider: "brave", braveKey: key, braveApi: opts.braveApi, searxng: "", known: new Set() }, { query: "smolcoder" });
+      if (/^Error: /.test(probe)) throw new Error(probe.replace(/^Error: /, "").replace(/ Tell the user.*$/, ""));
+      next.braveKey = key;
+    } else delete next.braveKey;
+  }
+  updateConfig({ web: next });
+  const view = await webView();
+  return d.braveKey ? { ...view, status: "ok" } : view;
 }

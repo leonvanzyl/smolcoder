@@ -185,9 +185,10 @@ test("settings: web access is saved validated, and the page is told whether Sear
   const good = await serveWith(200, JSON.stringify({ results: [] }));
   const locked = await serveWith(403, "Forbidden");
   try {
-    assert.deepEqual(await settings.webView(), { enabled: false, searxng: "http://127.0.0.1:8888", status: (await settings.webView()).status });
+    const fresh = await settings.webView();
+    assert.deepEqual({ ...fresh, status: "-" }, { enabled: false, provider: "searxng", searxng: "http://127.0.0.1:8888", hasBraveKey: false, status: "-" });
     assert.equal((await settings.saveWeb({ enabled: true, searxng: good.base })).status, "ok");
-    assert.deepEqual(loadConfig().web, { enabled: true, searxng: good.base });
+    assert.deepEqual(loadConfig().web, { enabled: true, searxng: good.base }, "only what changed is written; the provider defaults to SearXNG");
     assert.equal((await settings.saveWeb({ searxng: locked.base })).status, "json-off");
     assert.equal(loadConfig().web.enabled, true, "changing the address keeps the switch as it was");
     assert.equal((await settings.saveWeb({ searxng: "http://127.0.0.1:9" })).status, "unreachable");
@@ -196,5 +197,31 @@ test("settings: web access is saved validated, and the page is told whether Sear
   } finally {
     await good.close();
     await locked.close();
+  }
+});
+
+test("settings: a Brave key is checked with one search before it is kept, and never sent back", async () => {
+  saveConfig({});
+  const brave = http.createServer((req, res) => {
+    const ok = req.headers["x-subscription-token"] === "BSA-good";
+    res.writeHead(ok ? 200 : 401, { "content-type": "application/json" });
+    res.end(JSON.stringify(ok ? { web: { results: [] } } : {}));
+  });
+  await new Promise((r) => brave.listen(0, "127.0.0.1", r));
+  const braveApi = `http://127.0.0.1:${brave.address().port}`;
+  try {
+    await assert.rejects(settings.saveWeb({ provider: "brave", braveKey: "BSA-bad" }, { braveApi }), /Brave refused/);
+    assert.equal(loadConfig().web?.braveKey, undefined, "a rejected key is not kept");
+    const v = await settings.saveWeb({ enabled: true, provider: "brave", braveKey: "BSA-good" }, { braveApi });
+    assert.deepEqual({ p: v.provider, has: v.hasBraveKey, status: v.status }, { p: "brave", has: true, status: "ok" });
+    assert.equal(loadConfig().web.braveKey, "BSA-good");
+    assert.ok(!JSON.stringify(await settings.webView()).includes("BSA-good"), "the key never goes back to the page");
+    assert.equal((await settings.webView()).status, "key-saved", "viewing does not spend a search");
+    const cleared = await settings.saveWeb({ braveKey: "" });
+    assert.equal(cleared.hasBraveKey, false);
+    assert.equal(cleared.status, "no-key");
+    await assert.rejects(settings.saveWeb({ provider: "bing" }), /provider/);
+  } finally {
+    await new Promise((r) => brave.close(r));
   }
 });
