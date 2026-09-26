@@ -501,9 +501,47 @@ function show(sid) {
 function newSession(path) {
   post("/sessions/new", { workspace: path }).then((r) => { if (r.id) { pendingSelect = r.id; show(r.id); } else if (r.error) alert(r.error); });
 }
+// Renaming a session in place. The sidebar is rebuilt on every hub update and
+// on a timer, so the edit (which session, what is typed) lives here and each
+// rebuild draws the field again instead of losing the typing.
+let renaming = null;
+let sidebarRebuilding = false;
+function startRename(id, title) {
+  renaming = { id: id, value: title, fresh: true };
+  renderSidebar();
+}
+function endRename(save) {
+  const r = renaming;
+  renaming = null;
+  if (save && r && r.value.trim()) post("/sessions/rename", { id: r.id, title: r.value });
+  renderSidebar();
+}
+function renameField(s) {
+  const field = el("input", "stitle renaming");
+  field.type = "text"; field.value = renaming.value; field.maxLength = 80; field.dir = "auto";
+  field.setAttribute("aria-label", "New name for this session"); field.spellcheck = false;
+  field.oninput = () => { renaming.value = field.value; };
+  field.onclick = field.ondblclick = (e) => e.stopPropagation(); // not "open this session"
+  field.onkeydown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); endRename(true); }
+    // Esc stops here: the page-level handler would read it as "cancel the turn".
+    else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endRename(false); }
+  };
+  // Clicking away keeps what was typed, like any rename field.
+  field.onblur = () => { if (sidebarRebuilding) return; if (renaming && renaming.id === s.id && document.hasFocus()) endRename(true); };
+  setTimeout(() => {
+    field.focus();
+    if (renaming && renaming.fresh) { field.select(); renaming.fresh = false; } // first time: all selected; after a rebuild: the caret stays at the end
+  }, 0);
+  return field;
+}
 function renderSidebar() {
   const list = $("wslist");
+  // Removing a focused rename field fires blur in Chrome; that is a rebuild,
+  // not the user clicking away, so renameField's blur handler skips it.
+  sidebarRebuilding = true;
   list.innerHTML = "";
+  sidebarRebuilding = false;
   if (!hub.workspaces.length) return;
   for (const w of hub.workspaces) {
     const box = el("div", "ws");
@@ -521,8 +559,13 @@ function renderSidebar() {
       const v = views.get(s.id);
       const row = el("div", "sess " + (s.live ? s.status : "stored") + (active && active.sid === s.id ? " active" : "") + (v && v.unread ? " unread" : ""));
       row.appendChild(el("span", "dot"));
-      row.appendChild(el("span", "stitle" + (s.title ? "" : " untitled"), s.title || "new session"));
+      if (renaming && renaming.id === s.id) row.appendChild(renameField(s));
+      else row.appendChild(el("span", "stitle" + (s.title ? "" : " untitled"), s.title || "new session"));
       row.appendChild(el("span", "stime", rel(s.updatedAt)));
+      const pen = el("button", "iconbtn", "✎");
+      pen.title = "rename (or double-click)"; pen.setAttribute("aria-label", "Rename session");
+      pen.onclick = (e) => { e.stopPropagation(); startRename(s.id, s.title || ""); };
+      row.appendChild(pen);
       const x = el("button", "iconbtn", "×");
       x.title = s.live ? "close session (kept in the list)" : "delete session";
       x.onclick = (e) => {
@@ -533,7 +576,7 @@ function renderSidebar() {
       row.appendChild(x);
       row.title = (s.title || "new session") + (s.model ? " · " + s.model : "") + (s.live ? " · " + s.status : " · saved — click to resume");
       row.onclick = () => select(s.id);
-      row.ondblclick = () => { const t = prompt("Rename session", s.title || ""); if (t !== null && t.trim()) post("/sessions/rename", { id: s.id, title: t }); };
+      row.ondblclick = () => startRename(s.id, s.title || "");
       sl.appendChild(row);
     }
     box.appendChild(sl);
