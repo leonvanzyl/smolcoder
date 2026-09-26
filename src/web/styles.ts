@@ -68,7 +68,7 @@ export const STYLES = String.raw`
   .sess.unread .stitle::after { content: " •"; color: var(--accent); }
   .stitle { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .stitle.untitled { font-style: italic; }
-  .stitle.renaming { min-width: 0; background: #0b0e10; color: var(--fg); border: 1px solid var(--accent); border-radius: 3px; padding: 1px 5px; font: inherit; outline: none; }
+  .stitle.renaming { min-width: 0; background: var(--bg); color: var(--fg); border: 1px solid var(--accent); border-radius: 3px; padding: 1px 5px; font: inherit; outline: none; }
   .stime { font-size: 11px; color: var(--gray); flex: none; }
   .sess .iconbtn { visibility: hidden; padding: 0 5px; }
   .sess:hover .iconbtn { visibility: visible; }
