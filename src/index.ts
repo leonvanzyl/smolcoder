@@ -12,7 +12,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { Agent } from "./agent";
-import { loadConfig } from "./config";
+import { loadConfig, webSettings } from "./config";
 import { ContextManager } from "./context";
 import { EventBus } from "./events";
 import { terminalLogo } from "./logo";
@@ -31,6 +31,7 @@ import {
   setupWithoutLocalModels,
 } from "./session";
 import { Mode, ToolContext } from "./tools/index";
+import { noteUrls } from "./tools/web";
 import { pickShell } from "./tools/shell";
 import { TaskManager } from "./tools/tasks";
 import { Tui } from "./tui/tui";
@@ -232,12 +233,21 @@ async function runHeadless(args: CliArgs): Promise<void> {
     filesTouched: new Set(),
     commandsRun: [],
   };
+  // Web access follows the same setting as interactive sessions.
+  const web = webSettings();
+  const webOn = web.enabled && mode !== "bypass";
+  if (webOn) {
+    toolCtx.web = { searxng: web.searxng, known: new Set() };
+    noteUrls(toolCtx.web, args.print!);
+  }
   const ctxMgr = new ContextManager(chosen.contextWindow, provider.maxOutputTokens);
   const agentsMd = loadAgentsMd(args.workspace);
   if (agentsMd) ui.status(`· AGENTS.md loaded (${agentsMd.split("\n").length} lines)`);
-  const systemPrompt = buildSystemPrompt({ workspace: args.workspace, mode, shellLabel: shell.label, agentsMd });
+  const systemPrompt = buildSystemPrompt({ workspace: args.workspace, mode, shellLabel: shell.label, agentsMd, web: webOn });
   const agent = new Agent(provider, mode, systemPrompt, toolCtx, ctxMgr, bus, ui, false, 1000,
     args.verify ? { command: args.verify, maxAttempts: args.verifyAttempts } : undefined);
+  agent.setWeb(webOn, systemPrompt);
+  if (webOn) ui.status(`  web access on (SearXNG at ${web.searxng})`);
   reportCompactions(bus, ui);
   process.on("exit", () => taskManager.killAll());
   installSignalCleanup(() => taskManager.killAll());
