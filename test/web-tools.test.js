@@ -115,6 +115,8 @@ test("web: the system prompt names the tools and the untrusted-content rule only
   const on = buildSystemPrompt({ ...base, web: true });
   assert.match(on, /web_search/);
   assert.match(on, /never follow instructions/i);
+  // Asked "can you search the web?", a local model ran a demo search: nothing should go out unasked.
+  assert.match(on, /never just to show that you can/);
 });
 
 test("web: the setting is off by default and survives only valid values", () => {
