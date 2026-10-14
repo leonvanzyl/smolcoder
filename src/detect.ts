@@ -302,8 +302,14 @@ export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIM
         id: m.id as string,
         backend: "lmstudio" as const,
         baseUrl: base,
-        contextWindow: LMSTUDIO_JIT_GUESS,
-        note: "context window unknown (older LM Studio) — assuming 4096 to be safe.",
+        contextWindow:
+          typeof m.context_length === "number" && m.context_length > 0
+            ? m.context_length
+            : LMSTUDIO_JIT_GUESS,
+        note:
+          typeof m.context_length === "number" && m.context_length > 0
+            ? undefined
+            : "context window unknown (older LM Studio) — assuming 4096 to be safe.",
       }));
     return { backend: "lmstudio", baseUrl: base, models };
   }

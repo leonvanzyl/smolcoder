@@ -208,3 +208,38 @@ test("startup stops looking once the remembered model turns up", async () => {
     await Promise.all([fast.close(), new Promise((resolve) => hung.close(resolve))]);
   }
 });
+
+test("OpenAI-compatible server reports context length or falls back to 4096", async () => {
+  const server = await serve({
+    "/v1/models": {
+      object: "list",
+      data: [
+        { id: "openai-compatible-test", context_length: 262144 },
+        { id: "legacy-test" }
+      ]
+    }
+  });
+
+  try {
+    const info = await identifyServer(
+      `http://127.0.0.1:${server.port}`,
+      2000
+    );
+
+    assert.equal(info.backend, "lmstudio");
+
+    const compatible = info.models.find(
+      m => m.id === "openai-compatible-test"
+    );
+    assert.equal(compatible.contextWindow, 262144);
+    assert.equal(compatible.note, undefined);
+
+    const legacy = info.models.find(
+      m => m.id === "legacy-test"
+    );
+    assert.equal(legacy.contextWindow, 4096);
+    assert.match(legacy.note, /context window unknown/);
+  } finally {
+    await server.close();
+  }
+});
