@@ -116,6 +116,8 @@ export interface Provider {
   readonly maxOutputTokens: number;
   /** Whether the model accepts image input; undefined when the backend did not say. */
   readonly vision?: boolean;
+  /** false = the model cannot call tools and runs as plain chat; undefined when the backend did not say. */
+  readonly toolsSupported?: boolean;
   setEffort(effort: Effort | null): void;
   /** What the current effort setting actually does on this backend/model —
    * shown in the status line so "default" is never a mystery. null = nothing

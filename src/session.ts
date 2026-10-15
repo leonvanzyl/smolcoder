@@ -7,7 +7,7 @@ import * as os from "os";
 import { Agent } from "./agent";
 import { Config, loadConfig, updateConfig } from "./config";
 import { ContextManager } from "./context";
-import { detectAll, DetectedModel, resolveContextWindow } from "./detect";
+import { detectAll, DetectedModel, resolveContextWindow, withCapabilities } from "./detect";
 import { EventBus } from "./events";
 import { findModelsOnNetwork, FlowUI, manageHosts } from "./network";
 import { Plan, PlanStep } from "./plan";
@@ -180,9 +180,10 @@ export function pickModel(detected: DetectedModel[], prefs: SessionPrefs, cfg: C
 }
 
 /** The warnings a chosen model starts with: why it stands in for another,
- * then what its backend said about it. */
+ * what its backend said about it, then whether it can only chat. */
 export function modelNotes(m: DetectedModel): string[] {
-  return [m.fallbackNote, m.note].filter((n): n is string => !!n);
+  const chatOnly = m.toolsSupported === false ? `${m.id} can't use tools: it can chat, but can't read, edit or run anything here.` : undefined;
+  return [m.fallbackNote, m.note, chatOnly].filter((n): n is string => !!n);
 }
 
 /** Detect backends, pick a model and resolve its context window. Returns null
@@ -212,7 +213,8 @@ export function modelOptions(models: DetectedModel[], current?: DetectedModel): 
     label: m.id,
     hint:
       (m.backend === "ollama" ? "ollama" : m.backend === "omlx" || m.backend === "mtplx" ? `${m.backend} · ctx ${m.contextWindow.toLocaleString()}` : `lm studio${m.loaded ? ` · ctx ${m.contextWindow.toLocaleString()}` : " · not loaded"}`) +
-      (m.host ? ` · ${m.host}` : ""),
+      (m.host ? ` · ${m.host}` : "") +
+      (m.toolsSupported === false ? " · chat only" : ""),
     current: !!current && m.id === current.id && m.backend === current.backend && m.baseUrl === current.baseUrl,
   }));
 }
@@ -233,7 +235,7 @@ export async function setupWithoutLocalModels(ui: FlowUI, prefs: SessionPrefs): 
     if (pick === 0 && !(await findModelsOnNetwork(ui))) continue;
     ui.startSpinner("looking for model servers");
     const cfg = loadConfig();
-    const models = onBackend(await detectAll({ hosts: cfg.hosts }), prefs);
+    const models = await withCapabilities(onBackend(await detectAll({ hosts: cfg.hosts }), prefs));
     ui.stopSpinner();
     if (!models.length) {
       ui.warn("Still no model server answering.");
@@ -396,7 +398,13 @@ export class Session {
   }
 
   private sysPrompt(mode: Mode): string {
-    return buildSystemPrompt({ workspace: this.workspace, mode, shellLabel: this.shell.label, agentsMd: this.agentsMd });
+    return buildSystemPrompt({
+      workspace: this.workspace,
+      mode,
+      shellLabel: this.shell.label,
+      agentsMd: this.agentsMd,
+      chatOnly: this.chosen.toolsSupported === false,
+    });
   }
 
   private persist(): void {
@@ -595,7 +603,7 @@ export class Session {
     for (;;) {
       const hosts = loadConfig().hosts ?? [];
       ui.startSpinner("looking for models");
-      fresh = await detectAll({ hosts });
+      fresh = await withCapabilities(await detectAll({ hosts }));
       ui.stopSpinner();
       if (!fresh.length) ui.warn("No model server is answering right now.");
       const rows = [...modelOptions(fresh, this.chosen), FIND_ROW, ...(hosts.length ? [HOSTS_ROW] : [])];
@@ -618,11 +626,11 @@ export class Session {
     this.chosen = next;
     const p = makeProvider(next);
     p.setEffort(this.effort);
-    agent.setProvider(p);
+    agent.setProvider(p, this.sysPrompt(agent.mode));
     this.ctxMgr.setWindow(next.contextWindow, p.maxOutputTokens);
     this.persist();
     ui.println(sessionLine(next, agent.mode));
-    if (next.note) ui.warn(`  ${next.note}`);
+    for (const note of modelNotes(next)) ui.warn(`  ${note}`);
     const advice = effortAdvice(next, this.effort);
     if (advice) ui.warn(`  ${advice}`);
   }

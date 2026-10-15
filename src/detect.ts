@@ -471,6 +471,34 @@ export async function detectAll(opts: DetectOptions = {}): Promise<DetectedModel
 }
 
 const DEFAULT_OLLAMA_CTX_CAP = 32768; // avoid surprise VRAM blowups on huge-window models
+const CAPABILITY_TIMEOUT_MS = 2000;
+
+/** Newer Ollama lists what a model can do in /api/show: "vision" means it
+ * takes images and "tools" means it can call tools. A model without "tools"
+ * gets no tool schemas (it would answer 400 "does not support tools") and
+ * runs as plain chat. Older Ollama says nothing, and both stay unknown. */
+function ollamaCapabilities(info: any): Pick<DetectedModel, "vision" | "toolsSupported"> {
+  if (!Array.isArray(info?.capabilities)) return {};
+  const caps: string[] = info.capabilities;
+  return { vision: caps.includes("vision"), toolsSupported: caps.includes("tools") };
+}
+
+/** For the model pickers: ask Ollama what each listed model can do, so a
+ * chat-only one is marked before it is chosen. /api/show reads the model's
+ * metadata without loading it; one that does not answer in time stays unknown. */
+export async function withCapabilities(models: DetectedModel[]): Promise<DetectedModel[]> {
+  return Promise.all(
+    models.map(async (m) => {
+      if (m.backend !== "ollama" || m.toolsSupported !== undefined) return m;
+      const info = await tryFetchJson(
+        `${m.baseUrl}/api/show`,
+        { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: m.id }) },
+        CAPABILITY_TIMEOUT_MS
+      );
+      return { ...m, ...ollamaCapabilities(info) };
+    })
+  );
+}
 
 /**
  * Resolve the context window we will actually budget against for a chosen model.
@@ -493,14 +521,7 @@ export async function resolveContextWindow(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ model: model.id }),
     });
-    // Newer Ollama lists what the model can do; "vision" means it takes images
-    // and "tools" means it can call tools. Read both so the harness can drop
-    // tool schemas for models whose build does not support them instead of
-    // getting a 400 "does not support tools" mid-turn.
-    if (Array.isArray(info?.capabilities)) {
-      const caps: string[] = info.capabilities;
-      model = { ...model, vision: caps.includes("vision"), toolsSupported: caps.includes("tools") };
-    }
+    model = { ...model, ...ollamaCapabilities(info) };
     let max: number | undefined;
     const mi = info?.model_info;
     if (mi && typeof mi === "object") {

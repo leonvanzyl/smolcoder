@@ -3,7 +3,9 @@
 // the model needs lives in the tool schemas and in coaching error messages.
 // If the workspace has an AGENTS.md, its contents ride along directly after
 // the prompt (size-capped) — and because they are part of message[0], they
-// survive compaction the same way the system prompt does.
+// survive compaction the same way the system prompt does. A model that cannot
+// call tools gets a short chat prompt instead, so it never claims work it
+// could not have done.
 
 import * as fs from "fs";
 import * as path from "path";
@@ -35,9 +37,22 @@ export function buildSystemPrompt(opts: {
   shellLabel: string;
   /** Contents of the workspace AGENTS.md, when present. */
   agentsMd?: string | null;
+  /** The model cannot call tools: no tool instructions, and no claims of having used any. */
+  chatOnly?: boolean;
 }): string {
   const os =
     process.platform === "win32" ? "Windows" : process.platform === "darwin" ? "macOS" : "Linux";
+  const agentsMd = opts.agentsMd ? `\n\nWorkspace instructions from AGENTS.md — follow these:\n${opts.agentsMd}` : "";
+
+  if (opts.chatOnly) {
+    return (
+      `You are smolcoder, chatting with a developer about the project in ${opts.workspace} on ${os}. ` +
+      `This model has no tools here: you cannot read, search, create or edit files, or run commands, so you only know what the user tells you or pastes. ` +
+      `Answer questions, explain code, and when a change is needed show the code or the command for the user to apply themselves. ` +
+      `Never say or imply that you read, changed, created or ran anything. If you need to see a file, ask the user to paste it.` +
+      agentsMd
+    );
+  }
 
   const modeLine =
     opts.mode === "ro"
@@ -54,8 +69,6 @@ export function buildSystemPrompt(opts: {
     `Read relevant files before editing. Search narrowly and read small line ranges. Inspect a local module's actual exports before importing it. Make one tool call at a time; use small modules and write large files in parts. ` +
     `Read errors and change your approach when a call fails. Put test programs in files rather than long inline shell commands. Verify changes with the relevant test or command; a failed check is not success. ` +
     `Continue until the request is finished or explain the blocker. Summarize the result and verification briefly.` +
-    (opts.agentsMd
-      ? `\n\nWorkspace instructions from AGENTS.md — follow these:\n${opts.agentsMd}`
-      : "")
+    agentsMd
   );
 }

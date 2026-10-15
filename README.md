@@ -28,6 +28,8 @@ smol
 
 smolcoder finds your server, lists the models you already have, and opens a chat. It remembers the model and permission mode you used last time.
 
+An Ollama model without tool support (`gemma3:4b`, for example) still works, but only as a chat: the model picker marks it "chat only", and it can answer questions but can't read, edit or run anything in your project.
+
 All four servers are found with nothing to set up: on their usual ports, and on a port you changed (LM Studio's, oMLX's and MTPLX's are read from their own settings, Ollama's from `OLLAMA_HOST`). Ollama and LM Studio are also found inside Docker or Podman containers that publish the port, and on the host machine when smolcoder itself runs in WSL or a container.
 
 If your models run on a different computer, see [Using models on another machine](#using-models-on-another-machine).
@@ -83,7 +85,7 @@ smol -p "fix the failing test"  # headless: run one prompt, print the transcript
 smol -p "build the app" --verify "npm test"   # headless with an acceptance command
 ```
 
-With `--verify`, the command has to pass before the run counts as done. Failures go back to the agent to repair, six attempts by default. `--verify-attempts 12` allows more.
+With `--verify`, the command has to pass before the run counts as done. Failures go back to the agent to repair, six attempts by default. `--verify-attempts 12` allows more. It needs a model that can use tools; with a chat-only model the run stops straight away.
 
 ## Using models on another machine
 

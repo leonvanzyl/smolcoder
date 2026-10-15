@@ -83,21 +83,35 @@ export class Agent {
     this.verification = callerVerification;
     if (callerVerification && (!callerVerification.command.trim() || (callerVerification.maxAttempts !== undefined && (!Number.isSafeInteger(callerVerification.maxAttempts) || callerVerification.maxAttempts < 1)))) throw new Error("Verification needs a command and a positive attempt limit.");
     this.messages = [{ role: "system", content: systemPrompt }];
-    this.tools = buildToolSpecs(mode);
+    this.tools = this.toolsFor(mode);
     this.ctxMgr.setReplayThinking(provider.replaysThinking !== false);
+  }
+
+  /** A model that cannot call tools gets none: nothing to send, nothing to
+   * budget for, and any call it invents is rejected as unavailable. */
+  private toolsFor(mode: Mode): ToolSpec[] {
+    return this.chatOnly ? [] : buildToolSpecs(mode);
+  }
+
+  get chatOnly(): boolean {
+    return this.provider.toolsSupported === false;
   }
 
   setMode(mode: Mode, systemPrompt: string): void {
     this.ctxMgr.cancelBackground(true);
     this.ctxMgr.resetAnchor();
     this.mode = mode;
-    this.tools = buildToolSpecs(mode);
+    this.tools = this.toolsFor(mode);
     this.messages[0] = { role: "system", content: systemPrompt };
   }
 
-  setProvider(provider: Provider): void {
+  /** `systemPrompt` replaces the current one: a model without tools needs
+   * different instructions than one with them. */
+  setProvider(provider: Provider, systemPrompt?: string): void {
     this.ctxMgr.cancelBackground(true);
     this.provider = provider;
+    this.tools = this.toolsFor(this.mode);
+    if (systemPrompt !== undefined) this.messages[0] = { role: "system", content: systemPrompt };
     this.ctxMgr.setReplayThinking(provider.replaysThinking !== false);
   }
 
@@ -369,11 +383,14 @@ export class Agent {
               actionOnlyCalls = reasoningExhaustions === 1 ? 1 : Math.min(8, 2 ** Math.min(reasoningExhaustions, 3));
               this.ui.status(`· reasoning exhausted the reply budget — ${actionOnlyCalls} response${actionOnlyCalls === 1 ? "" : "s"} with thinking off, then restore the selected effort`);
             }
+            // A chat-only model made no tool call, so tool coaching would only confuse it.
             const nudgeText = burnedByThinking
-              ? `[Your reasoning used the entire output limit (${this.provider.maxOutputTokens} tokens) and produced no answer. Do not re-derive everything — reply now with your next tool call or a brief answer.]`
-              : noContent
-                ? `[${this.truncatedCallHint()}]`
-                : `[Your reply was cut off by the output length limit of ${this.provider.maxOutputTokens} tokens. Continue where you left off. If a file was too large for one write_file call, split the content into separate files — writing the same path again replaces it completely.]`;
+              ? `[Your reasoning used the entire output limit (${this.provider.maxOutputTokens} tokens) and produced no answer. Do not re-derive everything — reply now with ${this.chatOnly ? "a brief answer" : "your next tool call or a brief answer"}.]`
+              : this.chatOnly
+                ? `[Your reply was cut off by the output length limit of ${this.provider.maxOutputTokens} tokens. Continue where you left off.]`
+                : noContent
+                  ? `[${this.truncatedCallHint()}]`
+                  : `[Your reply was cut off by the output length limit of ${this.provider.maxOutputTokens} tokens. Continue where you left off. If a file was too large for one write_file call, split the content into separate files — writing the same path again replaces it completely.]`;
             this.messages.push({ role: "user", content: nudgeText });
             continue;
           }
@@ -382,8 +399,9 @@ export class Agent {
             this.ui.status("· empty reply — nudging the model");
             this.messages.push({
               role: "user",
-              content:
-                "[Your reply was empty. If the task is finished, summarize what you did. Otherwise make the next tool call now.]",
+              content: this.chatOnly
+                ? "[Your reply was empty. Answer the user's last message.]"
+                : "[Your reply was empty. If the task is finished, summarize what you did. Otherwise make the next tool call now.]",
             });
             continue;
           }
@@ -435,7 +453,9 @@ export class Agent {
             // HARD mode enforcement. The schemas sent to the model are only
             // advisory — a hallucinated or injected write_file/run_command in
             // read-only mode must be rejected here, at execution time.
-            output = `Error: the tool "${call.name}" is not available in ${MODE_LABELS[this.mode]} mode. Available tools: ${this.tools.map((t) => t.name).join(", ")}.`;
+            output = this.chatOnly
+              ? `Error: no tools are available to this model, so "${call.name}" did not run. Answer in plain text.`
+              : `Error: the tool "${call.name}" is not available in ${MODE_LABELS[this.mode]} mode. Available tools: ${this.tools.map((t) => t.name).join(", ")}.`;
           } else {
             this.toolCtx.resultCharLimit = this.ctxMgr.toolResultCharLimit();
             if (call.name === "run_command") {

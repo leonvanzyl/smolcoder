@@ -236,7 +236,13 @@ async function runHeadless(args: CliArgs): Promise<void> {
   const ctxMgr = new ContextManager(chosen.contextWindow, provider.maxOutputTokens);
   const agentsMd = loadAgentsMd(args.workspace);
   if (agentsMd) ui.status(`· AGENTS.md loaded (${agentsMd.split("\n").length} lines)`);
-  const systemPrompt = buildSystemPrompt({ workspace: args.workspace, mode, shellLabel: shell.label, agentsMd });
+  const systemPrompt = buildSystemPrompt({
+    workspace: args.workspace,
+    mode,
+    shellLabel: shell.label,
+    agentsMd,
+    chatOnly: chosen.toolsSupported === false,
+  });
   const agent = new Agent(provider, mode, systemPrompt, toolCtx, ctxMgr, bus, ui, false, 1000,
     args.verify ? { command: args.verify, maxAttempts: args.verifyAttempts } : undefined);
   reportCompactions(bus, ui);
@@ -249,6 +255,15 @@ async function runHeadless(args: CliArgs): Promise<void> {
   ui.status(`  effort ${provider.effortLabel() ?? effortSetting ?? "default"}`);
   const advice = effortAdvice(chosen, effortSetting);
   if (advice) ui.warn(`  ${advice}`);
+  if (args.verify && chosen.toolsSupported === false) {
+    // A model that can only chat cannot repair anything: every acceptance
+    // attempt would fail the same way. Stop before the first model call.
+    ui.error(`--verify needs a model that can use tools, and ${chosen.id} can only chat. Pick a tool-capable model with --model.`);
+    process.exitCode = 1;
+    taskManager.killAll();
+    ui.close();
+    return;
+  }
   try {
     await agent.runTurn(args.print!);
     if (agent.outcome !== "completed") process.exitCode = 1;
