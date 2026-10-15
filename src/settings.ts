@@ -6,7 +6,7 @@
 
 import { Config, loadConfig, savedKey, setKeys, updateConfig } from "./config";
 import { detectServers, identifyServer, ServerInfo } from "./detect";
-import { hostLabel, hostUrls, removeHost, renameHost } from "./hosts";
+import { hostLabel, hostUrls, isChosenServer, removeHost, renameHost } from "./hosts";
 import { addMachine, AddResult, BACKEND_NAMES, KEYED } from "./network";
 
 export { addMachine };
@@ -71,7 +71,10 @@ export async function setServerKey(
   key: string | null
 ): Promise<{ ok: true; server: ServerRow | null } | { ok: false; error: string }> {
   if (!SERVER_URL.test(baseUrl)) throw new Error("not a server address");
-  const host = (loadConfig().hosts ?? []).find((h) => hostUrls(h).includes(baseUrl));
+  const hosts = loadConfig().hosts ?? [];
+  // Keys go only to this computer or a machine the user added, as in the picker.
+  if (!isChosenServer(baseUrl, hosts)) throw new Error("keys are only saved for servers on this computer or a machine you added");
+  const host = hosts.find((h) => hostUrls(h).includes(baseUrl));
   const label = (info: ServerInfo) => row({ ...info, ...(host ? { host: hostLabel(host) } : {}) });
   const trimmed = (key ?? "").trim().slice(0, 500);
   if (!trimmed) {

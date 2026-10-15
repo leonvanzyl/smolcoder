@@ -173,3 +173,12 @@ test("settings: no top-level function in the page script is defined twice", () =
   assert.deepEqual(twice, [], `defined more than once: ${twice.join(", ")}`);
   assert.ok(names.includes("select"), "the client's select(id) is still there");
 });
+
+test("settings: a key is only ever sent to a server on this computer or on a machine the user added", async () => {
+  // The same rule the picker keeps: the page lists only those servers, but
+  // the endpoint must not trust that — a key typed for one address cannot be
+  // aimed at another.
+  saveConfig({});
+  await assert.rejects(settings.setServerKey("http://192.168.1.77:8000", "secret"), /this computer or a machine you added/);
+  assert.deepEqual(loadConfig().keys ?? {}, {});
+});
