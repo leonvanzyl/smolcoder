@@ -216,3 +216,14 @@ test("web: the saved setting carries the provider and a Brave key; junk falls ba
   assert.equal(read({ web: { provider: "google" } }).provider, "searxng");
   assert.equal(read({ web: { provider: "brave" } }, { BRAVE_API_KEY: "from-env" }).braveKey, "from-env", "BRAVE_API_KEY works when none is saved");
 });
+
+test("web: a model that cannot call tools is not told it can search", () => {
+  // Ollama models without tool support run as chat (#14): their tool schemas
+  // are dropped. Telling such a model "you can search with web_search" invites
+  // it to make up results, so web access is simply off for it.
+  const { makeWebContext } = require("../dist/tools/web");
+  const on = { enabled: true, provider: "searxng", searxng: "http://127.0.0.1:8888" };
+  assert.equal(makeWebContext(on, "edit", new Set(), false), undefined);
+  assert.ok(makeWebContext(on, "edit", new Set(), undefined), "unknown support keeps it, like the tool schemas");
+  assert.ok(makeWebContext(on, "edit", new Set(), true));
+});

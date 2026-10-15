@@ -53,9 +53,11 @@ function normalize(raw: string): string | null {
 }
 
 /** The web context for a session or a headless run, or undefined when web
- * access is off or the mode is bypass. The one place both build it from. */
-export function makeWebContext(w: WebSettings, mode: Mode, known: Set<string>): WebContext | undefined {
-  if (!w.enabled || mode === "bypass") return undefined;
+ * access is off, the mode is bypass, or the model cannot call tools at all
+ * (its schemas are dropped, and a model told it can search makes results
+ * up). The one place both build it from. */
+export function makeWebContext(w: WebSettings, mode: Mode, known: Set<string>, toolsSupported?: boolean): WebContext | undefined {
+  if (!w.enabled || mode === "bypass" || toolsSupported === false) return undefined;
   return { provider: w.provider, searxng: w.searxng, ...(w.braveKey ? { braveKey: w.braveKey } : {}), known };
 }
 

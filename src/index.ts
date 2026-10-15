@@ -236,7 +236,7 @@ async function runHeadless(args: CliArgs): Promise<void> {
   };
   // Web access follows the same setting as interactive sessions.
   const web = webSettings();
-  toolCtx.web = makeWebContext(web, mode, new Set());
+  toolCtx.web = makeWebContext(web, mode, new Set(), chosen.toolsSupported);
   const webOn = !!toolCtx.web;
   noteUrls(toolCtx.web, args.print!);
   const ctxMgr = new ContextManager(chosen.contextWindow, provider.maxOutputTokens);

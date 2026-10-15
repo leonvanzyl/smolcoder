@@ -407,8 +407,8 @@ export class Session {
    * the next message. The set of fetchable links survives a toggle. */
   private syncWeb(): void {
     const w = webSettings();
-    this.toolCtx.web = makeWebContext(w, this.agent.mode, this.knownUrls);
-    this.agent.setWeb(w.enabled, this.sysPrompt(this.agent.mode));
+    this.toolCtx.web = makeWebContext(w, this.agent.mode, this.knownUrls, this.chosen.toolsSupported);
+    this.agent.setWeb(!!this.toolCtx.web, this.sysPrompt(this.agent.mode));
   }
 
   private persist(): void {
