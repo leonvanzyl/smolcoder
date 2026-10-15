@@ -22,6 +22,7 @@ import { Effort } from "./providers/types";
 import {
   effortAdvice,
   makeProvider,
+  modelNotes,
   noBackendsMessage,
   prepareModel,
   reportCompactions,
@@ -243,7 +244,7 @@ async function runHeadless(args: CliArgs): Promise<void> {
   installSignalCleanup(() => taskManager.killAll());
 
   ui.println(sessionLine(chosen, mode));
-  if (chosen.note) ui.warn(`  ${chosen.note}`);
+  for (const note of modelNotes(chosen)) ui.warn(`  ${note}`);
   const effortSetting = args.effort !== undefined ? args.effort : (cfg.effort ?? null);
   ui.status(`  effort ${provider.effortLabel() ?? effortSetting ?? "default"}`);
   const advice = effortAdvice(chosen, effortSetting);

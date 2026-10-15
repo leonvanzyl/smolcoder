@@ -283,11 +283,62 @@ test("a resumed session whose server is gone continues on another one", () => {
   const resumed = { resumed: true, backend: "mtplx", model: "mtplx-qwen38", baseUrl: "http://127.0.0.1:8001" };
   const chosen = pickModel([omlx], resumed, {});
   assert.equal(chosen.id, "qwen3.8-27b");
-  assert.match(chosen.note, /mtplx-qwen38 is not available any more — continuing with qwen3\.8-27b/);
+  assert.match(chosen.fallbackNote, /mtplx-qwen38 is not available any more — continuing with qwen3\.8-27b/);
   // Still there: resumed exactly, no note.
   const mt = { id: "mtplx-qwen38", backend: "mtplx", baseUrl: "http://127.0.0.1:8001", contextWindow: 262144 };
   assert.deepEqual(pickModel([omlx, mt], resumed, {}), mt);
   // An explicit --model is a requirement, as before.
   assert.throws(() => pickModel([omlx], { model: "mtplx-qwen38" }, {}), /was not found/);
   assert.equal(pickModel([], resumed, {}), null);
+});
+
+/** A model server that answers each path with fixed JSON. */
+async function serveJson(routes) {
+  const server = http.createServer((req, res) => {
+    req.resume();
+    req.on("end", () => {
+      const body = routes[req.url.split("?")[0]];
+      res.writeHead(body ? 200 : 404, { "content-type": "application/json" });
+      res.end(JSON.stringify(body ?? { error: "not found" }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { base: `http://127.0.0.1:${server.address().port}`, close: () => new Promise((resolve) => server.close(resolve)) };
+}
+
+test("a resumed session's fallback warning survives the stand-in's own note and its loading", async () => {
+  const { modelNotes, pickModel } = require("../dist/session");
+  const { resolveContextWindow } = require("../dist/detect");
+  const resumed = { resumed: true, backend: "lmstudio", model: "gone-model" };
+  const gone = /gone-model is not available any more — continuing with /;
+
+  // The stand-in's backend note is kept, not replaced by the fallback warning.
+  const lm = { id: "qwen3-8b", backend: "lmstudio", baseUrl: "http://127.0.0.1:1", contextWindow: 4096, loaded: false, maxContext: 32768, note: "not loaded — assuming 4096" };
+  const notes = modelNotes(pickModel([lm], resumed, {}));
+  assert.equal(notes.length, 2);
+  assert.match(notes[0], gone, "why this model, first");
+  assert.equal(notes[1], "not loaded — assuming 4096");
+
+  // LM Studio loading it with --ctx clears the "not loaded" note, not the warning.
+  const studio = await serveJson({ "/api/v1/models/load": { instance_id: "qwen3-8b:2", load_config: { context_length: 8192 } } });
+  try {
+    const loaded = await resolveContextWindow(pickModel([{ ...lm, baseUrl: studio.base }], resumed, {}), 8192);
+    assert.equal(loaded.note, undefined);
+    assert.equal(loaded.contextWindow, 8192);
+    assert.deepEqual(modelNotes(loaded).map((n) => gone.test(n)), [true]);
+  } finally {
+    await studio.close();
+  }
+
+  // An older Ollama gets its own note; the warning stays beside it.
+  const ollama = await serveJson({ "/api/show": { model_info: { "qwen3.context_length": 32768 } }, "/api/chat": {}, "/api/ps": { models: [] } });
+  try {
+    const old = { id: "qwen3:8b", backend: "ollama", baseUrl: ollama.base, contextWindow: 0 };
+    const ready = await resolveContextWindow(pickModel([old], { ...resumed, backend: "ollama" }, {}));
+    const [why, said] = modelNotes(ready);
+    assert.match(why, gone);
+    assert.match(said, /older Ollama — setting the context/);
+  } finally {
+    await ollama.close();
+  }
 });

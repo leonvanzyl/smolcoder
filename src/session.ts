@@ -171,7 +171,13 @@ export function pickModel(detected: DetectedModel[], prefs: SessionPrefs, cfg: C
   const gone = prefs.resumed && prefs.model && !models.some((m) => m.id === prefs.model);
   if (!gone) return autoPickModel(models, prefs.model, cfg.lastModel, url);
   const other = autoPickModel(models, undefined, undefined);
-  return { ...other, note: `${prefs.model} is not available any more — continuing with ${other.id}.` };
+  return { ...other, fallbackNote: `${prefs.model} is not available any more — continuing with ${other.id}.` };
+}
+
+/** The warnings a chosen model starts with: why it stands in for another,
+ * then what its backend said about it. */
+export function modelNotes(m: DetectedModel): string[] {
+  return [m.fallbackNote, m.note].filter((n): n is string => !!n);
 }
 
 /** Detect backends, pick a model and resolve its context window. Returns null
@@ -440,7 +446,7 @@ export class Session {
   /** The opening lines: backend · model · mode, workspace, AGENTS.md, advice. */
   announce(): void {
     const ui = this.ui;
-    if (this.chosen.note) ui.warn(`  ${this.chosen.note}`);
+    for (const note of modelNotes(this.chosen)) ui.warn(`  ${note}`);
     const advice = effortAdvice(this.chosen, this.effort);
     if (advice) ui.warn(`  ${advice}`);
   }

@@ -44,7 +44,12 @@ export interface DetectedModel {
   reasoning?: ReasoningInfo;
   /** Whether the model accepts image input; undefined when the backend did not say. */
   vision?: boolean;
+  /** What the backend says about the model (context guessed, not loaded…).
+   * Rewritten as the model loads: resolveContextWindow replaces or clears it. */
   note?: string;
+  /** Why this model stands in for the one a resumed session asked for. Kept
+   * apart from `note` so loading the model never drops it. */
+  fallbackNote?: string;
 }
 
 const DEFAULT_OLLAMA_BASE = `http://127.0.0.1:${OLLAMA_PORT}`;
@@ -293,24 +298,24 @@ export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIM
 
   const v0 = parseLmStudioV0(await tryFetchJson(`${base}/api/v0/models`, undefined, timeoutMs), base);
   if (v0) return { backend: "lmstudio", baseUrl: base, models: v0 };
-  // Older LM Studio builds: fall back to the OpenAI-compat listing (no context info).
+  // No native listing: some other OpenAI-compatible server (or an LM Studio
+  // too old to have one), driven through the same OpenAI-style chat. Its
+  // /v1/models may report each model's context_length; without that, budget
+  // 4096 rather than overfill a window we cannot see.
   const compat = await tryFetchJson(`${base}/v1/models`, undefined, timeoutMs);
   if (compat && Array.isArray(compat.data)) {
     const models = compat.data
       .filter((m: any) => !String(m.id).includes("embed"))
-      .map((m: any) => ({
-        id: m.id as string,
-        backend: "lmstudio" as const,
-        baseUrl: base,
-        contextWindow:
-          typeof m.context_length === "number" && m.context_length > 0
-            ? m.context_length
-            : LMSTUDIO_JIT_GUESS,
-        note:
-          typeof m.context_length === "number" && m.context_length > 0
-            ? undefined
-            : "context window unknown (older LM Studio) — assuming 4096 to be safe.",
-      }));
+      .map((m: any) => {
+        const reported = typeof m.context_length === "number" && m.context_length > 0 ? (m.context_length as number) : undefined;
+        return {
+          id: m.id as string,
+          backend: "lmstudio" as const,
+          baseUrl: base,
+          contextWindow: reported ?? LMSTUDIO_JIT_GUESS,
+          note: reported ? undefined : "context window unknown (this OpenAI-compatible server does not report it) — assuming 4096 to be safe.",
+        };
+      });
     return { backend: "lmstudio", baseUrl: base, models };
   }
   return null;

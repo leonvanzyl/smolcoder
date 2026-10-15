@@ -525,6 +525,28 @@ function newSession(path) {
 // rebuild draws the field again instead of losing the typing.
 let renaming = null;
 let sidebarRebuilding = false;
+// A press on a sidebar row has to reach that row. A rebuild between the press
+// and its release (a rename saved on blur as the press moves focus, a hub
+// update, the timer) replaces the row under the pointer, and the browser then
+// drops the click. So rebuilds wait while a press is held and run once it is
+// released, after the click.
+let sidebarPressed = false, sidebarPending = false;
+$("wslist").addEventListener("pointerdown", () => { sidebarPressed = true; }, true);
+function releaseSidebar() {
+  if (!sidebarPressed) return;
+  sidebarPressed = false;
+  if (sidebarPending) { sidebarPending = false; setTimeout(renderSidebar, 0); }
+}
+window.addEventListener("pointerup", releaseSidebar, true);
+window.addEventListener("pointercancel", releaseSidebar, true);
+// The window losing focus mid-press may swallow the release. Not captured:
+// a captured blur would also fire for the rename field losing focus to the
+// press, and release the hold before the click.
+window.addEventListener("blur", (e) => { if (e.target === window) releaseSidebar(); });
+function sidebarHeld() {
+  if (sidebarPressed) sidebarPending = true;
+  return sidebarPressed;
+}
 function startRename(id, title) {
   renaming = { id: id, value: title, fresh: true };
   renderSidebar();
@@ -542,6 +564,10 @@ function renameField(s) {
   field.oninput = () => { renaming.value = field.value; };
   field.onclick = field.ondblclick = (e) => e.stopPropagation(); // not "open this session"
   field.onkeydown = (e) => {
+    // While an IME is composing (Chinese, Japanese, Korean), Enter picks the
+    // characters and Esc drops them: neither is ours, and neither may reach
+    // the page. Safari reports the closing Enter only as keyCode 229.
+    if (e.isComposing || e.keyCode === 229) { e.stopPropagation(); return; }
     if (e.key === "Enter") { e.preventDefault(); endRename(true); }
     // Esc stops here: the page-level handler would read it as "cancel the turn".
     else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); endRename(false); }
@@ -555,6 +581,7 @@ function renameField(s) {
   return field;
 }
 function renderSidebar() {
+  if (sidebarHeld()) return;
   const list = $("wslist");
   // Removing a focused rename field fires blur in Chrome; that is a rebuild,
   // not the user clicking away, so renameField's blur handler skips it.
