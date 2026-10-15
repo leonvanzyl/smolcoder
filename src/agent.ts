@@ -67,6 +67,9 @@ export class Agent {
   private sameVerificationFailures = 0;
   private canRefreshVerification = false;
 
+  /** web_search and web_fetch are offered (set through setWeb). */
+  private web = false;
+
   constructor(
     public provider: Provider,
     public mode: Mode,
@@ -83,7 +86,7 @@ export class Agent {
     this.verification = callerVerification;
     if (callerVerification && (!callerVerification.command.trim() || (callerVerification.maxAttempts !== undefined && (!Number.isSafeInteger(callerVerification.maxAttempts) || callerVerification.maxAttempts < 1)))) throw new Error("Verification needs a command and a positive attempt limit.");
     this.messages = [{ role: "system", content: systemPrompt }];
-    this.tools = buildToolSpecs(mode);
+    this.tools = buildToolSpecs(mode, this.web);
     this.ctxMgr.setReplayThinking(provider.replaysThinking !== false);
   }
 
@@ -91,7 +94,16 @@ export class Agent {
     this.ctxMgr.cancelBackground(true);
     this.ctxMgr.resetAnchor();
     this.mode = mode;
-    this.tools = buildToolSpecs(mode);
+    this.tools = buildToolSpecs(mode, this.web);
+    this.messages[0] = { role: "system", content: systemPrompt };
+  }
+
+  /** Web access on or off, effective from the next model call. */
+  setWeb(on: boolean, systemPrompt: string): void {
+    if (on === this.web) return;
+    this.ctxMgr.resetAnchor();
+    this.web = on;
+    this.tools = buildToolSpecs(this.mode, on);
     this.messages[0] = { role: "system", content: systemPrompt };
   }
 

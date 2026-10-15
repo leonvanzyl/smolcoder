@@ -133,6 +133,17 @@ smolcoder sends your code and prompts to the server you choose, and runs the too
 - The search covers the private network your computer is on. On a very large network it searches the 254 addresses around your own. Use **Enter an address** for anything further away.
 - A server that needs an API key is asked for it when you add it, and the key is saved for that server. A server behind a login page is not supported.
 
+## Web access
+
+Off by default. Turned on, the agent gets two more tools: **web_search**, which returns five results, and **web_fetch**, which reads a page as plain text. There is no browser: no cookies, no profile, nothing saved. While it is off the two tools are not sent to the model at all, so they cost no context.
+
+Turn it on in the web UI: the gear → **Web**. The switch takes effect from your next message, and `smol -p` follows it too. Reading pages needs nothing more; searching needs one of these:
+
+- **Brave Search** (easiest). Get a key at [api-dashboard.search.brave.com](https://api-dashboard.search.brave.com/) and paste it into the Web tab, which checks it with one search before saving it. About 1,000 searches a month are free. Your searches go to Brave's servers. `BRAVE_API_KEY` works too.
+- **SearXNG** (most private). A search server you run yourself: it asks Google, Bing, Brave and others on your behalf, with no account. Its [settings.yml](https://docs.searxng.org/admin/settings/index.html) needs `json` under `search: formats:` (it ships with only HTML), and it should listen on `127.0.0.1`. Point the Web tab at its address; it tells you whether SearXNG answers and whether JSON is on.
+
+Page text is untrusted, so the rules are strict. web_fetch only reads a link that came from your message, a search result or a page it already read: text on a page cannot make the agent build a new address with your files in it. Private, local and link-local addresses are refused, redirects included, and the address is checked inside the connection itself. Neither tool exists in bypass mode, where commands run without asking.
+
 ## The web UI
 
 `smol --web` opens a browser UI and prints a private link. The server only listens on your machine, and the link carries a random key.
