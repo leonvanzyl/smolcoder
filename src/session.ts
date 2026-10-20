@@ -5,7 +5,7 @@
 
 import * as os from "os";
 import { Agent } from "./agent";
-import { Config, loadConfig, updateConfig } from "./config";
+import { Config, loadConfig, updateConfig, webSettings } from "./config";
 import { ContextManager } from "./context";
 import { detectAll, DetectedModel, resolveContextWindow, withCapabilities } from "./detect";
 import { EventBus } from "./events";
@@ -13,6 +13,7 @@ import { findModelsOnNetwork, FlowUI, manageHosts } from "./network";
 import { Plan, PlanStep } from "./plan";
 import { buildSystemPrompt, loadAgentsMd } from "./prompt";
 import { LmStudioProvider } from "./providers/lmstudio";
+import { makeWebContext, noteUrls } from "./tools/web";
 import { mtplxApiKey } from "./mtplx";
 import { omlxApiKey } from "./omlx";
 import { OllamaProvider } from "./providers/ollama";
@@ -339,6 +340,8 @@ export class Session {
   effort: Effort | null;
   readonly agent: Agent;
   readonly toolCtx: ToolContext;
+  /** Links the model may fetch, kept while web access is toggled. */
+  private knownUrls = new Set<string>();
   readonly taskManager: TaskManager;
   readonly ctxMgr: ContextManager;
   readonly bus = new EventBus();
@@ -398,13 +401,23 @@ export class Session {
   }
 
   private sysPrompt(mode: Mode): string {
+    const web = !!this.toolCtx?.web && mode !== "bypass";
     return buildSystemPrompt({
       workspace: this.workspace,
       mode,
       shellLabel: this.shell.label,
       agentsMd: this.agentsMd,
       chatOnly: this.chosen.toolsSupported === false,
+      web,
     });
+  }
+
+  /** Follow the web setting as it is now, so the settings toggle applies from
+   * the next message. The set of fetchable links survives a toggle. */
+  private syncWeb(): void {
+    const w = webSettings();
+    this.toolCtx.web = makeWebContext(w, this.agent.mode, this.knownUrls, this.chosen.toolsSupported);
+    this.agent.setWeb(!!this.toolCtx.web, this.sysPrompt(this.agent.mode));
   }
 
   private persist(): void {
@@ -565,6 +578,8 @@ export class Session {
       }
 
       try {
+        this.syncWeb();
+        noteUrls(this.toolCtx.web, input);
         await agent.runTurn(input, attachments);
         this.onTurnDone?.();
       } catch (err: any) {

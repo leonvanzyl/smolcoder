@@ -1,4 +1,4 @@
-// Tool registry. Eight tools with flat parameters — no
+// Tool registry. Eight tools (ten with web access on) with flat parameters — no
 // nested objects or arrays: small models mangle them), an example call inside
 // every description (small models imitate better than they infer), and the
 // mode decides which schemas are sent. The agent rechecks mode at execution.
@@ -12,6 +12,7 @@ import { TaskManager } from "./tasks";
 import { resolveInWorkspace, SandboxError } from "../sandbox";
 import { truncateMiddle } from "../util";
 import { searchFilesBounded } from "./search-worker";
+import { WebContext, webFetch, webSearch } from "./web";
 
 export type Mode = "ro" | "edit" | "bypass";
 
@@ -23,7 +24,7 @@ export const MODE_LABELS: Record<Mode, string> = {
 
 const TOOL_RESULT_CAP = 10000; // chars — final safety net over per-tool caps
 
-export function buildToolSpecs(mode: Mode): ToolSpec[] {
+export function buildToolSpecs(mode: Mode, web = false): ToolSpec[] {
   const read: ToolSpec[] = [
     {
       name: "read_file",
@@ -139,9 +140,39 @@ export function buildToolSpecs(mode: Mode): ToolSpec[] {
     },
   ];
 
-  if (mode === "ro") return read;
-  return [...read, ...write, ...exec];
+  // Reading the web changes nothing here, so it belongs with the reads. Never
+  // in bypass mode: web text next to unapproved commands is how injection
+  // turns into damage. Off, the schemas are not sent and cost no context.
+  const online: ToolSpec[] = web && mode !== "bypass" ? WEB_TOOLS : [];
+  if (mode === "ro") return [...read, ...online];
+  return [...read, ...online, ...write, ...exec];
 }
+
+const WEB_TOOLS: ToolSpec[] = [
+  {
+    name: "web_search",
+    description:
+      'Search the web. Example: {"query": "vite config alias"}. Returns up to 5 results with title, link and snippet; read one with web_fetch.',
+    parameters: {
+      type: "object",
+      properties: { query: { type: "string", description: "What to search for" } },
+      required: ["query"],
+    },
+  },
+  {
+    name: "web_fetch",
+    description:
+      'Read a web page as text. Example: {"url": "https://vitejs.dev/config/"}. Only links from web_search results, a page you fetched, or the user\'s message. Long pages come in parts: pass "offset" to continue.',
+    parameters: {
+      type: "object",
+      properties: {
+        url: { type: "string", description: "The page to read" },
+        offset: { type: "number", description: "Character to continue from (optional)" },
+      },
+      required: ["url"],
+    },
+  },
+];
 
 export interface ToolContext {
   workspace: string;
@@ -152,6 +183,8 @@ export interface ToolContext {
   commandsRun: string[];
   /** Internal per-request cap; never a model-supplied tool argument. */
   resultCharLimit?: number;
+  /** Present only while web access is on. */
+  web?: WebContext;
 }
 
 export async function executeTool(
@@ -225,6 +258,11 @@ export async function executeTool(
         }
         break;
       }
+      case "web_search":
+      case "web_fetch":
+        if (!ctx.web) return "Error: web access is turned off. The user can turn it on in settings.";
+        result = name === "web_search" ? await webSearch(ctx.web, args, signal) : await webFetch(ctx.web, args, signal);
+        break;
       default:
         return `Error: unknown tool "${name}". Available tools are listed in your tool definitions — use one of those.`;
     }

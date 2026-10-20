@@ -23,7 +23,7 @@ export interface FlowUI {
   stopSpinner(): void;
 }
 
-const BACKEND_NAMES = { ollama: "Ollama", lmstudio: "LM Studio", omlx: "oMLX", mtplx: "MTPLX" } as const;
+export const BACKEND_NAMES = { ollama: "Ollama", lmstudio: "LM Studio", omlx: "oMLX", mtplx: "MTPLX" } as const;
 
 function describeServers(servers: { backend: keyof typeof BACKEND_NAMES; models: number }[]): string {
   return servers.map((s) => `${BACKEND_NAMES[s.backend]} · ${plural(s.models, "model")}`).join(" + ");
@@ -46,7 +46,7 @@ export function notFoundHelp(platform: NodeJS.Platform = process.platform): stri
 }
 
 // Servers that can require an API key.
-const KEYED: string[] = ["omlx", "mtplx"];
+export const KEYED: string[] = ["omlx", "mtplx"];
 const LOOPBACK_URL = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[::1\])(?=[:/]|$)/i;
 
 function askKey(ui: FlowUI, what: string): Promise<string | undefined> {
@@ -137,6 +137,50 @@ async function confirmOutsideNetwork(ui: FlowUI, hostname: string, url: string):
   if (url.startsWith("https://") || isPrivateHost(hostname)) return true;
   ui.warn(`${hostname} is outside your own network and the connection is plain http: your code and prompts would travel unencrypted.`);
   return (await ui.select(`Add ${hostname} anyway?`, [{ label: "Cancel" }, { label: "Add it anyway" }])) === 1;
+}
+
+export type AddResult =
+  | { status: "added"; name: string; summary: string }
+  | { status: "needs-key" | "bad-key"; name: string; host: string; message: string; secure: boolean }
+  | { status: "outside"; host: string; message: string }
+  | { status: "invalid" | "not-found"; message: string };
+
+/** "Add a machine" from the web settings page, which cannot ask questions
+ * mid-way: each answer it lacks comes back as a status (needs-key, outside)
+ * and the page calls again with it. The checks and the saving are the same
+ * as typing the address in the picker: unlock what the key opens, then
+ * saveFoundMachine saves the machine and its keys under its address. */
+export async function addMachine(typed: string, apiKey?: string, outsideOk = false): Promise<AddResult> {
+  let parsed;
+  try {
+    parsed = parseAddress(typed);
+  } catch (err: any) {
+    return { status: "invalid", message: String(err?.message ?? err) };
+  }
+  const found = (await Promise.all(parsed.urls.map((u) => identifyServer(u, 4000)))).filter((s): s is ServerInfo => !!s);
+  if (!found.length) return { status: "not-found", message: `Nothing answered at ${parsed.hostname} as a model server.` };
+  if (!outsideOk && !found[0].baseUrl.startsWith("https://") && !isPrivateHost(parsed.hostname))
+    return { status: "outside", host: parsed.hostname, message: `${parsed.hostname} is outside your own network and the connection is plain http: your code and prompts would travel unencrypted.` };
+  const servers: FoundServer[] = found.map((x) => ({ backend: x.backend, url: x.baseUrl, models: x.models.length }));
+  const locked = servers.filter((s) => KEYED.includes(s.backend) && !s.models);
+  const keys: { url: string; key: string }[] = [];
+  if (locked.length) {
+    const name = BACKEND_NAMES[locked[0].backend];
+    const secure = locked[0].url.startsWith("https://") || LOOPBACK_URL.test(locked[0].url);
+    if (!apiKey) return { status: "needs-key", name, host: parsed.hostname, secure, message: `${name} at ${parsed.hostname} needs its API key.` };
+    for (const s of locked) {
+      const again = await identifyServer(s.url, 4000, apiKey);
+      if (!again?.models.length) continue;
+      keys.push({ url: s.url, key: apiKey });
+      s.models = again.models.length;
+    }
+    if (!keys.length) return { status: "bad-key", name, host: parsed.hostname, secure, message: `${name} at ${parsed.hostname} did not accept that API key.` };
+  }
+  const said: string[] = [];
+  const quiet = { status: (s: string) => said.push(s.replace(/^[·\s]+/, "")), warn: (s: string) => said.push(s), select: async () => null, prompt: async () => null, startSpinner() {}, stopSpinner() {} };
+  if (!saveFoundMachine(quiet, { address: parsed.address, hostname: parsed.hostname, servers, keys }))
+    return { status: "not-found", message: said.join(" ") };
+  return { status: "added", name: parsed.hostname, summary: describeServers(servers) };
 }
 
 /** "Enter an address": returns true when a host was added. */

@@ -67,6 +67,9 @@ export class Agent {
   private sameVerificationFailures = 0;
   private canRefreshVerification = false;
 
+  /** web_search and web_fetch are offered (set through setWeb). */
+  private web = false;
+
   constructor(
     public provider: Provider,
     public mode: Mode,
@@ -90,7 +93,7 @@ export class Agent {
   /** A model that cannot call tools gets none: nothing to send, nothing to
    * budget for, and any call it invents is rejected as unavailable. */
   private toolsFor(mode: Mode): ToolSpec[] {
-    return this.chatOnly ? [] : buildToolSpecs(mode);
+    return this.chatOnly ? [] : buildToolSpecs(mode, this.web);
   }
 
   get chatOnly(): boolean {
@@ -102,6 +105,15 @@ export class Agent {
     this.ctxMgr.resetAnchor();
     this.mode = mode;
     this.tools = this.toolsFor(mode);
+    this.messages[0] = { role: "system", content: systemPrompt };
+  }
+
+  /** Web access on or off, effective from the next model call. */
+  setWeb(on: boolean, systemPrompt: string): void {
+    if (on === this.web) return;
+    this.ctxMgr.resetAnchor();
+    this.web = on;
+    this.tools = this.toolsFor(this.mode);
     this.messages[0] = { role: "system", content: systemPrompt };
   }
 
