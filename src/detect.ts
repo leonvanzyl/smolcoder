@@ -40,6 +40,9 @@ export interface DetectedModel {
   numCtx?: number;
   /** Model's architectural maximum, when known. */
   maxContext?: number;
+  /** Served by an OpenAI-compatible server with no native listing: we can
+   * neither see nor change the loaded window, so --ctx is taken at its word. */
+  compatible?: boolean;
   /** LM Studio only: whether the model is currently loaded. */
   loaded?: boolean;
   /** LM Studio only: reasoning levels the model supports and its default. */
@@ -308,6 +311,17 @@ function parseLmStudioV0(data: any, base: string): DetectedModel[] | null {
     });
 }
 
+/** The window an OpenAI-compatible listing reports for a model, under the
+ * names routers and servers use for it (OmniRoute and OpenRouter-style
+ * context_length / max_input_tokens, vLLM max_model_len). */
+function reportedContext(m: any): number | undefined {
+  for (const key of ["context_length", "max_input_tokens", "max_model_len", "context_window"]) {
+    const v = m?.[key];
+    if (Number.isSafeInteger(v) && v > 0) return v;
+  }
+  return undefined;
+}
+
 export interface ServerInfo {
   backend: BackendKind;
   baseUrl: string;
@@ -354,13 +368,15 @@ export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIM
     const models = compat.data
       .filter((m: any) => !String(m.id).includes("embed"))
       .map((m: any) => {
-        const reported = typeof m.context_length === "number" && m.context_length > 0 ? (m.context_length as number) : undefined;
+        const reported = reportedContext(m);
         return {
           id: m.id as string,
           backend: "lmstudio" as const,
           baseUrl: base,
           contextWindow: reported ?? LMSTUDIO_JIT_GUESS,
-          note: reported ? undefined : "context window unknown (this OpenAI-compatible server does not report it) — assuming 4096 to be safe.",
+          maxContext: reported,
+          compatible: true,
+          note: reported ? undefined : "context window unknown (this OpenAI-compatible server does not report it) — assuming 4096 to be safe (set it with --ctx).",
         };
       });
     return { backend: "lmstudio", baseUrl: base, models };
@@ -573,6 +589,11 @@ export async function resolveContextWindow(
       numCtx: window,
       note: `older Ollama — setting the context to ${window.toLocaleString()} explicitly (adjust with --ctx).`,
     };
+  }
+  // OpenAI-compatible server: nothing to load or read back, so --ctx sets the
+  // budget, capped only by a window the server itself reported.
+  if (model.compatible && ctxOverride) {
+    return { ...model, contextWindow: Math.min(ctxOverride, model.maxContext ?? ctxOverride), note: undefined };
   }
   if (model.loaded === false && ctxOverride) {
     const desired = Math.min(ctxOverride, model.maxContext ?? ctxOverride);
