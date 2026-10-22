@@ -14,6 +14,7 @@ import { Plan, PlanStep } from "./plan";
 import { buildSystemPrompt, loadAgentsMd } from "./prompt";
 import { LmStudioProvider } from "./providers/lmstudio";
 import { mtplxApiKey } from "./mtplx";
+import { lemonadeApiBase } from "./lemonade";
 import { omlxApiKey } from "./omlx";
 import { OllamaProvider } from "./providers/ollama";
 import { Effort, Msg, Provider } from "./providers/types";
@@ -69,6 +70,7 @@ export function makeProvider(m: DetectedModel): Provider {
   if (m.backend === "ollama") return new OllamaProvider(m.baseUrl, m.id, m.contextWindow, m.numCtx, maxOut, m.vision, m.toolsSupported);
   if (m.backend === "omlx") return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, undefined, m.vision, omlxApiKey(m.baseUrl), "oMLX");
   if (m.backend === "mtplx") return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, undefined, m.vision, mtplxApiKey(m.baseUrl), "MTPLX");
+  if (m.backend === "lemonade") return new LmStudioProvider(lemonadeApiBase(m.baseUrl), m.id, m.contextWindow, maxOut, undefined, m.vision, undefined, "Lemonade");
   return new LmStudioProvider(m.baseUrl, m.id, m.contextWindow, maxOut, m.reasoning, m.vision);
 }
 
@@ -212,7 +214,7 @@ export function modelOptions(models: DetectedModel[], current?: DetectedModel): 
   return models.map((m) => ({
     label: m.id,
     hint:
-      (m.backend === "ollama" ? "ollama" : m.backend === "omlx" || m.backend === "mtplx" ? `${m.backend} · ctx ${m.contextWindow.toLocaleString()}` : `lm studio${m.loaded ? ` · ctx ${m.contextWindow.toLocaleString()}` : " · not loaded"}`) +
+      (m.backend === "ollama" ? "ollama" : m.backend === "omlx" || m.backend === "mtplx" || m.backend === "lemonade" ? `${m.backend} · ctx ${m.contextWindow.toLocaleString()}` : `lm studio${m.loaded ? ` · ctx ${m.contextWindow.toLocaleString()}` : " · not loaded"}`) +
       (m.host ? ` · ${m.host}` : "") +
       (m.toolsSupported === false ? " · chat only" : ""),
     current: !!current && m.id === current.id && m.backend === current.backend && m.baseUrl === current.baseUrl,

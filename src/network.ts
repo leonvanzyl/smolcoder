@@ -23,7 +23,7 @@ export interface FlowUI {
   stopSpinner(): void;
 }
 
-const BACKEND_NAMES = { ollama: "Ollama", lmstudio: "LM Studio", omlx: "oMLX", mtplx: "MTPLX" } as const;
+const BACKEND_NAMES = { ollama: "Ollama", lmstudio: "LM Studio", omlx: "oMLX", mtplx: "MTPLX", lemonade: "Lemonade" } as const;
 
 function describeServers(servers: { backend: keyof typeof BACKEND_NAMES; models: number }[]): string {
   return servers.map((s) => `${BACKEND_NAMES[s.backend]} · ${plural(s.models, "model")}`).join(" + ");
@@ -37,6 +37,7 @@ export function notFoundHelp(platform: NodeJS.Platform = process.platform): stri
     "  · Ollama: turn on \"Expose Ollama to the network\" in its settings (Linux or headless: set OLLAMA_HOST=0.0.0.0 and restart it).\n" +
     "  · LM Studio: Developer tab → Local Server → turn on \"Serve on Local Network\".\n" +
     "  · oMLX: Settings → Server → Listen Address → the network option. MTPLX: mtplx serve --host 0.0.0.0 --api-key <key>.\n" +
+    "  · Lemonade: set \"host\" to \"0.0.0.0\" in its config.json (or start lemond with --host 0.0.0.0).\n" +
     "  · Windows: allow the server through the firewall for Private networks when it asks.\n" +
     (platform === "darwin"
       ? "On this Mac: System Settings → Privacy & Security → Local Network must allow your terminal app, or nothing on the network is visible.\n"

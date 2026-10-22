@@ -5,7 +5,7 @@
 // each one what it is. The ANSWER decides the backend, never the port, so
 // Ollama and LM Studio are found the same way wherever they listen.
 //
-// The two backends are asymmetric on context windows:
+// The backends are asymmetric on context windows:
 //   - Ollama: WE choose the window (num_ctx is a per-request option). Read the
 //     model's true maximum from /api/show and set num_ctx explicitly, because
 //     Ollama's defaults vary by version and silently truncate the prompt.
@@ -13,19 +13,22 @@
 //     UI. We READ it from /api/v1/models (or the older /api/v0) and adapt.
 //     The same endpoint tells us which reasoning levels the model supports
 //     and which one it defaults to — that default is often the MAXIMUM.
+//   - Lemonade: like LM Studio, the window is set when the model loads; its
+//     /api/v1/models listing reports it (see lemonade.ts).
 
 import { execFile } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { SavedHost } from "./config";
-import { hostLabel, hostUrls, LMSTUDIO_PORT, OLLAMA_PORT, OMLX_PORT } from "./hosts";
+import { hostLabel, hostUrls, LEMONADE_PORT, LMSTUDIO_PORT, OLLAMA_PORT, OMLX_PORT } from "./hosts";
+import { loadLemonadeModel, parseLemonadeModels } from "./lemonade";
 import { isMtplxHealth, mtplxHeaders, parseMtplxModels, readMtplxPort } from "./mtplx";
 import { isOmlxHealth, omlxHeaders, parseOmlxModels, readOmlxSettings } from "./omlx";
 import { ReasoningInfo } from "./providers/lmstudio";
 import { probeJson, tryFetchJson } from "./util";
 
-export type BackendKind = "ollama" | "lmstudio" | "omlx" | "mtplx";
+export type BackendKind = "ollama" | "lmstudio" | "omlx" | "mtplx" | "lemonade";
 
 export interface DetectedModel {
   id: string;
@@ -338,6 +341,10 @@ export async function identifyServer(base: string, timeoutMs = NETWORK_PROBE_TIM
   // LM Studio first: its listing names models by "key", which nothing else does.
   const lmKeyed = Array.isArray(v1.data?.models) && v1.data.models.length > 0 && v1.data.models.every((m: any) => typeof m?.key === "string");
   if (lmKeyed) return { backend: "lmstudio", baseUrl: base, models: parseLmStudioV1(v1.data, base) ?? [] };
+  // Lemonade before Ollama: it answers Ollama's routes too, but only its own
+  // /api/v1/models listing says what context each model runs at.
+  const lemonade = parseLemonadeModels(v1.data, base);
+  if (lemonade) return { backend: "lemonade", baseUrl: base, models: lemonade };
   const ollama = parseOllamaTags(tags.data, base);
   if (ollama) return { backend: "ollama", baseUrl: base, models: ollama };
   const lmV1 = parseLmStudioV1(v1.data, base);
@@ -425,9 +432,9 @@ export async function probeHosts(hosts: SavedHost[]): Promise<HostStatus[]> {
 
 export async function detectAll(opts: DetectOptions = {}): Promise<DetectedModel[]> {
   const lmPort = readLmStudioPort();
-  const ports = [OLLAMA_PORT, lmPort ?? LMSTUDIO_PORT, LMSTUDIO_PORT].filter((p, i, all) => all.indexOf(p) === i);
+  const ports = [OLLAMA_PORT, lmPort ?? LMSTUDIO_PORT, LMSTUDIO_PORT, LEMONADE_PORT].filter((p, i, all) => all.indexOf(p) === i);
   const local = groupServers(
-    [...ollamaBaseUrls(process.env.OLLAMA_HOST), ...lmStudioBaseUrls(lmPort), ...omlxBaseUrls(), ...hostMachineUrls(ports)],
+    [...ollamaBaseUrls(process.env.OLLAMA_HOST), ...lmStudioBaseUrls(lmPort), ...omlxBaseUrls(), ...loopbackAliases(`http://127.0.0.1:${LEMONADE_PORT}`), ...hostMachineUrls(ports)],
     LOCAL_PROBE_TIMEOUT_MS
   );
   const covered = new Set(local.flatMap((g) => g.urls));
@@ -574,6 +581,7 @@ export async function resolveContextWindow(
       note: `older Ollama — setting the context to ${window.toLocaleString()} explicitly (adjust with --ctx).`,
     };
   }
+  if (model.backend === "lemonade" && ctxOverride) return loadLemonadeModel(model, ctxOverride);
   if (model.loaded === false && ctxOverride) {
     const desired = Math.min(ctxOverride, model.maxContext ?? ctxOverride);
     const response = await fetch(`${model.baseUrl}/api/v1/models/load`, {
