@@ -10,6 +10,8 @@ const LOOPBACK_URL = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[::1\])(?=[:/]|$)/
 export const OLLAMA_PORT = 11434;
 export const LMSTUDIO_PORT = 1234;
 export const OMLX_PORT = 8000;
+/** Lemonade's default since v9 (v8 used 8000, which OMLX_PORT covers). */
+export const LEMONADE_PORT = 13305;
 
 export interface ParsedAddress {
   /** Normalized form to save. */
@@ -51,7 +53,7 @@ export function parseAddress(input: string): ParsedAddress {
     const base = `${url.protocol}//${url.host}${pathPart}`;
     return { address: base, hostname, urls: [base] };
   }
-  return { address: url.hostname, hostname, urls: [OLLAMA_PORT, LMSTUDIO_PORT, OMLX_PORT].map((port) => `http://${url.host}:${port}`) };
+  return { address: url.hostname, hostname, urls: [OLLAMA_PORT, LMSTUDIO_PORT, OMLX_PORT, LEMONADE_PORT].map((port) => `http://${url.host}:${port}`) };
 }
 
 /** Server URLs for a saved host; empty when the entry is unusable. */

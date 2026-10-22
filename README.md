@@ -2,7 +2,7 @@
 
 A smol coding agent for the models already running on your machine.
 
-If you have Ollama, LM Studio, oMLX or MTPLX running, you are two commands away from a coding assistant that reads your code, edits files, runs your tests and starts your dev server. No cloud account and no config file. Nothing leaves your machine except requests to the model server you chose. (oMLX and MTPLX have their own API keys; smolcoder reads a local one from the server's own settings and asks you for one on another machine.)
+If you have Ollama, LM Studio, Lemonade, oMLX or MTPLX running, you are two commands away from a coding assistant that reads your code, edits files, runs your tests and starts your dev server. No cloud account and no config file. Nothing leaves your machine except requests to the model server you chose. (oMLX and MTPLX have their own API keys; smolcoder reads a local one from the server's own settings and asks you for one on another machine.)
 
 ```bash
 npm install -g smolcoder
@@ -14,7 +14,7 @@ smol
 You need two things.
 
 1. **Node.js 18 or newer** from [nodejs.org](https://nodejs.org).
-2. **A local model server.** Either [Ollama](https://ollama.com) with a tool-capable model pulled (`ollama pull qwen3` is a good start), or [LM Studio](https://lmstudio.ai) with a model loaded and its local server running (Developer tab, then Start Server), or on Apple Silicon [oMLX](https://github.com/jundot/omlx) or [MTPLX](https://github.com/youssofal/MTPLX) with its server started.
+2. **A local model server.** Either [Ollama](https://ollama.com) with a tool-capable model pulled (`ollama pull qwen3` is a good start), or [LM Studio](https://lmstudio.ai) with a model loaded and its local server running (Developer tab, then Start Server), or [Lemonade](https://lemonade-server.ai) with a model downloaded, or on Apple Silicon [oMLX](https://github.com/jundot/omlx) or [MTPLX](https://github.com/youssofal/MTPLX) with its server started.
 
 Then install smolcoder and start it inside a project:
 
@@ -30,7 +30,7 @@ smolcoder finds your server, lists the models you already have, and opens a chat
 
 An Ollama model without tool support (`gemma3:4b`, for example) still works, but only as a chat: the model picker marks it "chat only", and it can answer questions but can't read, edit or run anything in your project.
 
-All four servers are found with nothing to set up: on their usual ports, and on a port you changed (LM Studio's, oMLX's and MTPLX's are read from their own settings, Ollama's from `OLLAMA_HOST`). Ollama and LM Studio are also found inside Docker or Podman containers that publish the port, and on the host machine when smolcoder itself runs in WSL or a container.
+All five servers are found with nothing to set up: on their usual ports, and on a port you changed (LM Studio's, oMLX's and MTPLX's are read from their own settings, Ollama's from `OLLAMA_HOST`). Lemonade is found on its default port 13305, and also when you moved it to Ollama's port 11434. smolcoder uses the context Lemonade reports for each model (its `ctx_size` setting); `smol --ctx 32768` loads the model at that size instead. Ollama and LM Studio are also found inside Docker or Podman containers that publish the port, and on the host machine when smolcoder itself runs in WSL or a container.
 
 If your models run on a different computer, see [Using models on another machine](#using-models-on-another-machine).
 
@@ -102,6 +102,7 @@ Ollama and LM Studio only answer their own computer until you tell them otherwis
 | LM Studio | Developer → Local Server → **Serve on Local Network** |
 | oMLX | Settings → Server → **Listen Address**: change it from "127.0.0.1 (Local only)" to the network option. smolcoder asks for its API key when you add the machine |
 | MTPLX | `mtplx serve --host 0.0.0.0 --api-key <key>`. smolcoder asks for that key when you add the machine |
+| Lemonade | Set `"host": "0.0.0.0"` in its `config.json`, or start `lemond --host 0.0.0.0` |
 
 On Windows the firewall asks the first time the server listens on the network. Allow it for Private networks.
 
@@ -109,7 +110,7 @@ On Windows the firewall asks the first time the server listens on the network. A
 
 Open the model picker: type `/models` in the terminal, or click the model name in the web UI. Choose **Find models on another machine**.
 
-- **Search my network** shows the range it is about to search, for example `192.168.1.0/24`, then looks for Ollama, LM Studio, oMLX and MTPLX on it. This takes a few seconds. Every machine it finds is listed with what it runs, such as `gpu-box (192.168.1.50) · Ollama · 12 models`. Pick one and its models join your list. Pick again to add more.
+- **Search my network** shows the range it is about to search, for example `192.168.1.0/24`, then looks for Ollama, LM Studio, Lemonade, oMLX and MTPLX on it. This takes a few seconds. Every machine it finds is listed with what it runs, such as `gpu-box (192.168.1.50) · Ollama · 12 models`. Pick one and its models join your list. Pick again to add more.
 - **Enter an address** is for machines a search cannot reach: a VPN or Tailscale address, another subnet, or a server on the internet. Type an IP (`192.168.1.50`), a name (`gpu-box.local`), a host and port (`gpu-box:4321`) or a URL (`https://llm.example.com`). For a bare IP or name, smolcoder tries every server's usual ports and works out which one is there.
 
 If no server is running on your own computer, smolcoder offers to find one on another machine at startup instead of exiting.

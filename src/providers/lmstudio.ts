@@ -28,6 +28,7 @@ import {
 import { responseLines, streamJson, withDeadline } from "./transport";
 import { scheduleInference } from "./scheduler";
 import { imageDataUrl } from "../attachments";
+import { loadedLemonadeContext } from "../lemonade";
 import { tryFetchJson } from "../util";
 
 export interface ReasoningInfo {
@@ -130,6 +131,9 @@ export class LmStudioProvider implements Provider {
   }
 
   async loadedContextWindow(): Promise<number | undefined> {
+    // Lemonade says which context it loaded the model with on /health
+    // (this.baseUrl is already its /api root).
+    if (this.serverName === "Lemonade") return loadedLemonadeContext(await tryFetchJson(`${this.baseUrl}/v1/health`, undefined, 1500), this.modelId);
     // LM Studio's own catalog, which the other OpenAI-compatible servers do
     // not have: asking them costs a request per turn and can only fail.
     if (this.serverName !== "LM Studio") return undefined;
