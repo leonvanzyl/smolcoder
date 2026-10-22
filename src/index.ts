@@ -128,7 +128,8 @@ ${c.bold("Options:")}
                                commands inside the workspace; anything reaching
                                outside it asks y/n. bypass: no approvals at all.
   --model <name>               pick a model by (partial) name
-  --ctx <tokens>               force a context window (Ollama: sends num_ctx)
+  --ctx <tokens>               force a context window (Ollama: sends num_ctx;
+                               other OpenAI-compatible servers: taken as given)
   --verify <command>           headless acceptance gate; automatically repair failures
   --verify-attempts <count>     maximum acceptance checks (default 6; requires --verify)
   --effort <level>             reasoning effort: off, low, medium, high, default

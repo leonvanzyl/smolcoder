@@ -8,6 +8,7 @@ const {
   detectAll,
   groupServers,
   identifyServer,
+  resolveContextWindow,
   lmStudioBaseUrls,
   ollamaBaseUrls,
   parseDefaultGateway,
@@ -239,6 +240,34 @@ test("OpenAI-compatible server reports context length or falls back to 4096", as
     );
     assert.equal(legacy.contextWindow, 4096);
     assert.match(legacy.note, /context window unknown/);
+  } finally {
+    await server.close();
+  }
+});
+
+test("--ctx sets the window of an OpenAI-compatible server (OmniRoute), capped by what it reports", async () => {
+  const server = await serve({
+    "/v1/models": {
+      object: "list",
+      data: [
+        { id: "free-stack", object: "model", owned_by: "combo", max_input_tokens: 128000 },
+        { id: "silent" }
+      ]
+    }
+  });
+  try {
+    const info = await identifyServer(`http://127.0.0.1:${server.port}`, 2000);
+    const routed = info.models.find((m) => m.id === "free-stack");
+    assert.equal(routed.contextWindow, 128000);
+    assert.equal((await resolveContextWindow(routed, 64000)).contextWindow, 64000);
+    assert.equal((await resolveContextWindow(routed, 200000)).contextWindow, 128000);
+
+    const silent = info.models.find((m) => m.id === "silent");
+    assert.equal(silent.contextWindow, 4096);
+    const forced = await resolveContextWindow(silent, 128000);
+    assert.equal(forced.contextWindow, 128000);
+    assert.equal(forced.note, undefined);
+    assert.equal((await resolveContextWindow(silent)).contextWindow, 4096);
   } finally {
     await server.close();
   }
