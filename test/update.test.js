@@ -25,6 +25,13 @@ const { WebHub } = require("../dist/web/hub");
 function tmpdir(p) {
   return fs.mkdtempSync(path.join(scratch, p));
 }
+/** A lone Esc is only taken as Esc after a short wait for a follow-up byte,
+ * on a timer that does not keep Node alive (stdin does that in real use).
+ * Wait it out here, or the event loop can run dry first (seen on Node 22). */
+async function pressEsc(t) {
+  t.keys("\x1b");
+  await sleep(120);
+}
 async function until(fn, ms = 4000, label = "condition") {
   const t0 = Date.now();
   for (;;) {
@@ -549,7 +556,7 @@ test("tui: /update says 'Later' leaves a note, source checkouts get the git comm
     await until(() => (later.flush(), later.has("Update to 0.9.1")), 2000, "panel");
     later.keys("\r");
     await until(() => (later.flush(), later.has("Restart now")), 2000, "restart offer");
-    later.keys("\x1b");
+    await pressEsc(later);
     await flow;
     later.flush();
     assert.ok(later.has("0.9.1 is installed"), later.screen());
@@ -570,7 +577,7 @@ test("tui: /update says 'Later' leaves a note, source checkouts get the git comm
     await until(() => (src.flush(), src.has("Running from source")), 2000, "source message");
     assert.ok(src.has("git pull && npm run build"), src.screen());
     assert.ok(!src.has("Update to 0.9.1"), "nothing to run");
-    src.keys("\x1b");
+    await pressEsc(src);
     await flow;
     assert.equal(ran, false);
   } finally {
@@ -588,7 +595,7 @@ test("tui: /update says 'Later' leaves a note, source checkouts get the git comm
     await until(() => (fail.flush(), fail.has("Update to 0.9.1")), 2000, "panel");
     fail.keys("\r");
     await until(() => (fail.flush(), fail.has("sudo npm install -g smolcoder@latest")), 2000, "sudo advice");
-    fail.keys("\x1b");
+    await pressEsc(fail);
     await flow;
   } finally {
     fail.close();
