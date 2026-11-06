@@ -78,36 +78,3 @@ test("tui: /model + enter opens the model picker; values only after tab or a typ
   assert.equal(await submit(["/models ", "\r"]), "/models", "a trailing space with no value still opens the picker");
   assert.equal(await submit(["/mod", "\t", "ne", "\r"]), "/models next", "tab completes, then a value can be picked");
 });
-
-test("tui: /model + enter opens the model picker; values only after tab or a typed space", async () => {
-  const cmds = [
-    { name: "models", desc: "Switch model", aliases: ["model"], args: () => [{ label: "next" }] },
-    { name: "help", desc: "Show help" },
-  ];
-  const submit = async (typed) => {
-    // Redraws also land on timers, so swallow output for the whole exchange.
-    const real = process.stdout.write;
-    process.stdout.write = () => true;
-    try {
-      return await submitQuiet(typed);
-    } finally {
-      process.stdout.write = real;
-    }
-  };
-  const submitQuiet = async (typed) => {
-    const tui = new Tui({ historyFile: null });
-    tui.slashCommands = cmds;
-    let p;
-    capture(() => { tui.start(); p = tui.readInput(); });
-    for (const k of typed) {
-      capture(() => keys(k));
-      await new Promise((r) => setTimeout(r, 60)); // arg values load asynchronously
-    }
-    const text = await p;
-    capture(() => tui.close());
-    return String(text).trim();
-  };
-  assert.equal(await submit(["/model", "\r"]), "/models", "enter on the highlighted command runs it bare");
-  assert.equal(await submit(["/models ", "\r"]), "/models", "a trailing space with no value still opens the picker");
-  assert.equal(await submit(["/mod", "\t", "ne", "\r"]), "/models next", "tab completes, then a value can be picked");
-});
