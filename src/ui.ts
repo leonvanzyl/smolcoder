@@ -5,7 +5,7 @@
 import * as readline from "readline";
 import { UserInput } from "./attachments";
 import { Plan } from "./plan";
-import { c } from "./util";
+import { c, fmtDuration } from "./util";
 
 /** What the agent loop needs from a UI — implemented by the plain UI (used in
  * -p / non-TTY mode) and by the interactive Tui. */
@@ -20,7 +20,11 @@ export interface AgentUI {
   token(text: string): void;
   thinking(text: string): void;
   toolCall(name: string, args: Record<string, any>): void;
-  toolResult(result: string): void;
+  /** `outcome` is UI-only metadata (timing, diff); it never enters the model's context. */
+  toolResult(result: string, outcome?: ToolOutcome): void;
+  /** While the model streams a tool call's arguments (e.g. a long write_file),
+   * the provider reports how many argument characters have arrived so far. */
+  toolArgsProgress?(name: string, chars: number): void;
   println(s?: string): void;
   status(s: string): void;
   warn(s: string): void;
@@ -35,15 +39,47 @@ export interface AgentUI {
   planUpdated(plan: Plan): void;
 }
 
+/** UI-only details about a finished tool call. Never sent to the model. */
+export interface ToolOutcome {
+  ok: boolean;
+  /** Absent when it is not known (a replayed saved transcript). */
+  durationMs?: number;
+  /** edit_file: the replaced snippet and its replacement. write_file: before
+   * is the previous file content ("" for a new file), after the new content. */
+  diff?: { path: string; before: string; after: string };
+}
+
 export interface SlashCommand {
   name: string;
   desc: string;
+  /** Extra words the fuzzy matcher searches (not shown). */
+  aliases?: string[];
+  /** Palette / help grouping, e.g. "Session", "Model", "Settings". */
+  group?: string;
+  /** Shortcut shown next to the command, e.g. "shift+tab". Display only. */
+  key?: string;
+  /** When present the command takes an argument: choosing it inserts
+   * "/name " and the menu then offers these values. */
+  args?: () => SelectOption[] | Promise<SelectOption[]>;
 }
 
 export interface SelectOption {
   label: string;
   hint?: string;
   current?: boolean;
+  /** Section header the row is listed under (rows with the same group are
+   * kept together, headers drawn in order of first appearance). */
+  group?: string;
+  /** Extra text the fuzzy filter searches. */
+  keywords?: string;
+  /** Shown as ★ when true. */
+  starred?: boolean;
+}
+
+export interface SelectOpts {
+  /** When set, the picker offers a "star" action (TUI: ctrl+f, web: star
+   * button) on the highlighted row. It returns the refreshed option list. */
+  onStar?: (index: number) => SelectOption[];
 }
 
 /** The full surface the interactive session loop drives — implemented by the
@@ -59,10 +95,14 @@ export interface SessionUI extends AgentUI {
   close(): void;
   /** The next user turn: plain text, or text plus attachments from the web UI. */
   readInput(): Promise<string | UserInput>;
-  select(title: string, options: SelectOption[]): Promise<number | null>;
+  select(title: string, options: SelectOption[], opts?: SelectOpts): Promise<number | null>;
   /** Ask for one line of text (an address, a name, a key); null when cancelled. */
   prompt(title: string, placeholder?: string, opts?: PromptOptions): Promise<string | null>;
   refresh(): void;
+  /** An undoable turn starts now (the web UI marks where its events begin). */
+  turnStarted?(): void;
+  /** /undo took the last turn back (the web UI drops its events). */
+  turnUndone?(): void;
 }
 
 /** Shared checklist renderer: ✔ done (dim) · ▶ current (cyan) · ○ pending. */
@@ -132,15 +172,19 @@ export class UI implements AgentUI {
       return;
     }
     this.stopSpinner();
-    const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    // Old Windows consoles (no Windows Terminal, no VS Code) lack braille glyphs.
+    const ascii = process.platform === "win32" && !process.env.WT_SESSION && !process.env.TERM_PROGRAM;
+    const frames = ascii ? ["|", "/", "-", "\\"] : ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
     let i = 0;
     const started = Date.now();
     this.spinnerActive = true;
     this.spinnerTimer = setInterval(() => {
       const secs = Math.floor((Date.now() - started) / 1000);
-      process.stdout.write(
-        `\r${c.cyan(frames[i++ % frames.length])} ${c.dim(label + (secs > 2 ? ` ${secs}s` : ""))}   `
-      );
+      // Clipped to the terminal width, so a narrow pane never wraps it.
+      const room = Math.max(4, (process.stdout.columns || 80) - 3);
+      let text = label + (secs > 2 ? ` ${secs}s` : "");
+      if (text.length > room) text = text.slice(0, room - 1) + "…";
+      process.stdout.write(`\r\x1b[2K${c.cyan(frames[i++ % frames.length])} ${c.dim(text)}`);
     }, 100);
   }
 
@@ -150,7 +194,7 @@ export class UI implements AgentUI {
       this.spinnerTimer = null;
     }
     if (this.spinnerActive) {
-      process.stdout.write("\r" + " ".repeat(60) + "\r");
+      process.stdout.write("\r\x1b[2K");
       this.spinnerActive = false;
     }
   }
@@ -180,19 +224,25 @@ export class UI implements AgentUI {
   /** Headless mode: reasoning noise is suppressed — automations want the answer. */
   thinking(_text: string): void {}
 
+  private toolStart = 0;
+
   toolCall(name: string, args: Record<string, any>): void {
     const summary = summarizeArgs(name, args);
+    this.toolStart = Date.now();
     this.meta(`${c.cyan("→")} ${c.bold(name)} ${c.dim(summary)}`);
   }
 
-  toolResult(result: string): void {
+  toolResult(result: string, outcome?: ToolOutcome): void {
     const firstLine = result.split("\n")[0] ?? "";
-    const isError = firstLine.startsWith("Error");
+    const isError = outcome ? !outcome.ok : firstLine.startsWith("Error");
     const lines = result.split("\n").length;
+    const ms = outcome ? outcome.durationMs : this.toolStart ? Date.now() - this.toolStart : undefined;
+    this.toolStart = 0;
+    const took = ms === undefined ? "" : c.dim(` · ${fmtDuration(Math.round(ms))}`);
     const label = isError
       ? c.red(firstLine.slice(0, 120))
       : c.dim(firstLine.slice(0, 100) + (lines > 1 ? ` (+${lines - 1} lines)` : ""));
-    this.meta(`  ${isError ? c.red("✗") : c.green("✓")} ${label}`);
+    this.meta(`  ${isError ? c.red("✗") : c.green("✓")} ${label}${took}`);
   }
 
   println(s = ""): void {

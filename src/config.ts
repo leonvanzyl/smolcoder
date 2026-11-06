@@ -32,6 +32,41 @@ export interface Config {
   hosts?: SavedHost[];
   /** API keys by server URL, for servers that require one (oMLX, MTPLX). */
   keys?: Record<string, string>;
+  /** Models picked lately, newest first (at most RECENT_LIMIT). */
+  recentModels?: ModelRef[];
+  /** Models starred in the model picker (ctrl+f / the star button). */
+  favoriteModels?: ModelRef[];
+  /** Reasoning effort chosen per model id; null means "the model's default". */
+  effortByModel?: Record<string, Effort | null>;
+}
+
+/** One model on one server: the same id can be served by several machines. */
+export interface ModelRef {
+  id: string;
+  baseUrl: string;
+  /** Backend kind when known, so the model can be found again without a rescan. */
+  backend?: string;
+}
+
+export const RECENT_LIMIT = 10;
+const EFFORTS = ["off", "low", "medium", "high"];
+
+function modelRefs(v: unknown): ModelRef[] {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set<string>();
+  const out: ModelRef[] = [];
+  for (const r of v) {
+    if (!r || typeof r.id !== "string" || !r.id || typeof r.baseUrl !== "string") continue;
+    const key = `${r.baseUrl}|${r.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ id: r.id, baseUrl: r.baseUrl, ...(typeof r.backend === "string" && r.backend ? { backend: r.backend } : {}) });
+  }
+  return out;
+}
+
+export function sameModel(a: { id: string; baseUrl: string }, b: { id: string; baseUrl: string }): boolean {
+  return a.id === b.id && a.baseUrl === b.baseUrl;
 }
 
 export function loadConfig(): Config {
@@ -55,6 +90,13 @@ export function loadConfig(): Config {
     cfg.keys = Object.fromEntries(
       Object.entries(cfg.keys && typeof cfg.keys === "object" ? cfg.keys : {}).filter(([u, v]) => /^https?:\/\//.test(u) && typeof v === "string" && v)
     ) as Record<string, string>;
+    cfg.recentModels = modelRefs(cfg.recentModels).slice(0, RECENT_LIMIT);
+    cfg.favoriteModels = modelRefs(cfg.favoriteModels);
+    cfg.effortByModel = Object.fromEntries(
+      Object.entries(cfg.effortByModel && typeof cfg.effortByModel === "object" ? cfg.effortByModel : {}).filter(
+        ([id, e]) => id && (e === null || EFFORTS.includes(e as string))
+      )
+    ) as Record<string, Effort | null>;
     return cfg;
   } catch {
     return {};
@@ -93,4 +135,26 @@ export function setKeys(bases: string[], key?: string): void {
     else delete keys[base];
   }
   updateConfig({ keys });
+}
+
+/** Put a model at the front of the recent list (kept to RECENT_LIMIT). */
+export function recordRecentModel(m: ModelRef): ModelRef[] {
+  const ref: ModelRef = { id: m.id, baseUrl: m.baseUrl, ...(m.backend ? { backend: m.backend } : {}) };
+  const recentModels = [ref, ...(loadConfig().recentModels ?? []).filter((r) => !sameModel(r, ref))].slice(0, RECENT_LIMIT);
+  updateConfig({ recentModels });
+  return recentModels;
+}
+
+/** Star or unstar a model; returns whether it is now a favorite. */
+export function toggleFavoriteModel(m: ModelRef): boolean {
+  const favs = loadConfig().favoriteModels ?? [];
+  const had = favs.some((f) => sameModel(f, m));
+  const favoriteModels = had ? favs.filter((f) => !sameModel(f, m)) : [{ id: m.id, baseUrl: m.baseUrl, ...(m.backend ? { backend: m.backend } : {}) }, ...favs];
+  updateConfig({ favoriteModels });
+  return !had;
+}
+
+/** Remember the reasoning effort for a model id. */
+export function saveModelEffort(modelId: string, effort: Effort | null): void {
+  updateConfig({ effortByModel: { ...(loadConfig().effortByModel ?? {}), [modelId]: effort } });
 }

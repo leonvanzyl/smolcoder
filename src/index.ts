@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // smolcoder — a smol, zero-config CLI coding agent for local models.
 //
-// Interactive: an opencode-style inline TUI. No upfront questions — the last
+// Interactive: an inline TUI. No upfront questions — the last
 // (or first) detected model is picked automatically; switch with /models,
 // cycle modes with shift+tab, set reasoning effort with /effort.
 // Web: smol --web serves a browser UI with a workspace sidebar — many
@@ -12,7 +12,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { Agent } from "./agent";
-import { loadConfig } from "./config";
+import { commandHelp } from "./commands";
+import { DATA_DIR, loadConfig } from "./config";
 import { ContextManager } from "./context";
 import { EventBus } from "./events";
 import { terminalLogo } from "./logo";
@@ -25,6 +26,7 @@ import {
   modelNotes,
   noBackendsMessage,
   prepareModel,
+  refreshModels,
   reportCompactions,
   Session,
   SessionPrefs,
@@ -38,6 +40,7 @@ import { Tui } from "./tui/tui";
 import { UI } from "./ui";
 import { c } from "./util";
 import { askHubToOpen, pingHub, readHubRecord, WebHub } from "./web/hub";
+import { SessionStore } from "./web/store";
 
 const VERSION = require("../package.json").version as string;
 const DEFAULT_WEB_PORT = 7433;
@@ -140,18 +143,10 @@ ${c.bold("Options:")}
   -h, --help                   this help
   -v, --version                version
 
-${c.bold("Keys:")}
-  shift+tab   cycle mode (read-only → edit → bypass permissions)
-  /           slash commands (autocomplete menu)
-  esc         cancel a running turn · clear the input
-  ctrl+c ×2   quit
+${commandHelp()}
 
-${c.bold("Slash commands:")}
-  /models     switch model         /tasks        background tasks
-  /mode       set mode             /logs <id>    task output
-  /effort     reasoning effort     /stop <id>    kill a task
-  /context    context usage        /clear        reset conversation
-  /compact    compact now          /exit         quit
+Custom commands: /commands new saves a prompt template you then run as /name
+(this workspace or all of them). Sessions are saved; /sessions resumes one.
 `;
 
 /** Node fires 'exit' on normal termination but NOT on a killing signal, so
@@ -332,9 +327,21 @@ async function runInteractive(args: CliArgs): Promise<void> {
   }
 
   const session = new Session(tui, { workspace: args.workspace, chosen, prefs: prefsOf(args), cfg, help: HELP });
+  // Saved where the web UI keeps its sessions: /sessions (and the web
+  // sidebar) list them per workspace.
+  try {
+    session.persistTo(new SessionStore(DATA_DIR));
+  } catch {
+    /* no writable data folder: the session just is not saved */
+  }
   session.onExit = () => process.exit(0);
   process.on("exit", () => session.taskManager.killAll());
   installSignalCleanup(() => {
+    try {
+      session.saveNow();
+    } catch {
+      /* best effort */
+    }
     session.taskManager.killAll();
     try {
       tui.close(); // restore the raw-mode terminal on signal death
@@ -346,6 +353,9 @@ async function runInteractive(args: CliArgs): Promise<void> {
   tui.start();
   session.announce();
   tui.println("");
+  // Scan this computer and added machines once in the background, so the
+  // model picker and F2 open on a full list without waiting.
+  void refreshModels();
   await session.run();
 }
 
