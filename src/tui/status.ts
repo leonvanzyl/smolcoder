@@ -66,6 +66,59 @@ export function fitStatus(status: string, width: number): string {
   return fitSegments(splitStatus(status), width);
 }
 
+export interface StatusInfo {
+  mode: "ro" | "edit" | "bypass" | "";
+  /** "Edit", "Read-only", "Bypass". */
+  modeLabel: string;
+  model: string;
+  backend: string;
+  effort: string;
+  /** e.g. "12.3k". */
+  tokens: string;
+  pct: number | null;
+  /** e.g. "2/5". */
+  plan: string;
+  /** Running background tasks. */
+  tasks: number;
+}
+
+/** The session's status row ("edit · model backend · high · 12.3k (34%) ·
+ * plan 2/5 · 1 task") as fields. */
+export function parseStatus(s: string): StatusInfo {
+  const info: StatusInfo = { mode: "", modeLabel: "", model: "", backend: "", effort: "", tokens: "", pct: null, plan: "", tasks: 0 };
+  const segs = splitStatus(s || "");
+  if (!segs.length) return info;
+  const mode = stripAnsi(segs[0]).trim().toLowerCase();
+  if (mode.startsWith("read")) info.mode = "ro";
+  else if (mode.startsWith("bypass")) info.mode = "bypass";
+  else if (mode === "edit") info.mode = "edit";
+  info.modeLabel = info.mode === "ro" ? "Read-only" : info.mode === "bypass" ? "Bypass" : info.mode === "edit" ? "Edit" : stripAnsi(segs[0]).trim();
+  if (segs[1] !== undefined) {
+    const raw = segs[1];
+    const dimAt = raw.indexOf("\x1b[2m");
+    if (dimAt >= 0) {
+      info.model = stripAnsi(raw.slice(0, dimAt)).trim();
+      info.backend = stripAnsi(raw.slice(dimAt)).trim();
+    } else {
+      const plain = stripAnsi(raw).trim();
+      const sp = plain.indexOf(" ");
+      info.model = sp < 0 ? plain : plain.slice(0, sp);
+      info.backend = sp < 0 ? "" : plain.slice(sp + 1).trim();
+    }
+  }
+  for (const seg of segs.slice(2)) {
+    const plain = stripAnsi(seg).trim();
+    let m: RegExpExecArray | null;
+    if ((m = /^(\S+) \((\d+)%\)$/.exec(plain))) {
+      info.tokens = m[1];
+      info.pct = Number(m[2]);
+    } else if ((m = /^plan (\d+\/\d+)$/.exec(plain))) info.plan = m[1];
+    else if ((m = /^(\d+) tasks?$/.exec(plain))) info.tasks = Number(m[1]);
+    else if (!info.effort && plain) info.effort = plain;
+  }
+  return info;
+}
+
 /** The context percentage in a status string, e.g. "34%", or "". */
 export function ctxPercent(status: string): string {
   const m = /(\d+)%/.exec(stripAnsi(status));

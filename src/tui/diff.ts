@@ -1,8 +1,11 @@
-// Compact unified diffs for tool rows: a line diff (LCS on the changed middle,
-// after trimming the common head and tail), rendered with line numbers and
-// red/green tints, capped at a few rows with "… +N more". UI only — nothing
-// here reaches the model.
+// Diffs for edit rows: a line diff (LCS on the changed middle, after
+// trimming the common head and tail), laid out as rows with line numbers and
+// red/green background tints — unified, or side by side when there is room —
+// capped at a few rows with "… N more lines". UI only: nothing here reaches
+// the model.
 
+import { Row, span } from "./rows";
+import { highlightLine, HlState, langOf } from "./highlight";
 import { theme } from "./theme";
 import { expandTabs, truncateWidth } from "./width";
 
@@ -80,51 +83,126 @@ export function diffCounts(before: string, after: string): { added: number; remo
 
 export interface DiffRenderOptions {
   width: number;
+  /** Rows shown before the rest is cut (the caller says how many were cut). */
   maxRows?: number;
   /** Line number of the snippet's first line in the file, if known. */
   firstLine?: number;
   /** Context lines kept around each change. */
   context?: number;
-  indent?: string;
+  /** Side by side (old left, new right). */
+  split?: boolean;
+  /** The file, for syntax colours. */
+  path?: string;
 }
 
-/** Rows of a compact unified diff. */
-export function renderDiff(before: string, after: string, o: DiffRenderOptions): string[] {
+export interface DiffRows {
+  rows: Row[];
+  /** Rows cut by maxRows. */
+  hidden: number;
+  added: number;
+  removed: number;
+}
+
+interface Numbered extends DiffOp {
+  oldNo: number;
+  newNo: number;
+}
+
+/** The diff as display rows with line numbers and tinted backgrounds. */
+export function renderDiffRows(before: string, after: string, o: DiffRenderOptions): DiffRows {
   const t = theme;
-  const maxRows = o.maxRows ?? 12;
-  const ctx = o.context ?? 1;
-  const indent = o.indent ?? "  ";
-  const ops = lineDiff(before, after, o.firstLine ?? 1);
-  const changed = ops.map((x) => x.op !== " ");
-  if (!changed.some(Boolean)) return [];
-  // Keep context lines within `ctx` of a change; mark gaps.
-  const keep = ops.map((_, i) => {
+  const p = t.p;
+  const ctx = o.context ?? 2;
+  const first = o.firstLine ?? 1;
+  const ops = lineDiff(before, after, first);
+  let a = first;
+  let b = first;
+  const num: Numbered[] = ops.map((x) => {
+    const r = { ...x, oldNo: a, newNo: b };
+    if (x.op === " ") {
+      a++;
+      b++;
+    } else if (x.op === "-") a++;
+    else b++;
+    return r;
+  });
+  const changed = num.map((x) => x.op !== " ");
+  const added = num.filter((x) => x.op === "+").length;
+  const removed = num.filter((x) => x.op === "-").length;
+  if (!changed.some(Boolean)) return { rows: [], hidden: 0, added, removed };
+  const keep = num.map((_, i) => {
     for (let d = -ctx; d <= ctx; d++) if (changed[i + d]) return true;
     return false;
   });
-  const shown: (DiffOp | null)[] = [];
-  ops.forEach((x, i) => {
+  const shown: (Numbered | null)[] = [];
+  num.forEach((x, i) => {
     if (keep[i]) shown.push(x);
     else if (shown.length && shown[shown.length - 1] !== null) shown.push(null);
   });
   while (shown.length && shown[shown.length - 1] === null) shown.pop();
+
+  const ext = (o.path ?? "").split(".").pop() ?? "";
+  const lang = langOf(ext);
+  const hlOld: HlState = {};
+  const hlNew: HlState = {};
+  const code = (s: string, st: HlState) => highlightLine(expandTabs(s), lang, st);
   const numbered = o.firstLine !== undefined;
-  const numW = numbered ? String(Math.max(...ops.map((x) => x.no))).length : 0;
-  const rows: string[] = [];
-  const room = Math.max(10, o.width - indent.length - numW - 3);
-  for (const x of shown) {
-    if (rows.length >= maxRows) break;
-    if (x === null) {
-      rows.push(indent + t.dim(" ".repeat(numW) + (numW ? " " : "") + t.g.ellipsis));
-      continue;
+  const numW = numbered ? Math.max(2, String(Math.max(a, b)).length) : 0;
+  const gutW = numbered ? numW + 2 : 1;
+
+  const bgFor = (op: string) => (op === "+" ? p.diffAddBg : op === "-" ? p.diffDelBg : p.panel);
+  const lnFor = (op: string) => (op === "+" ? p.diffAddLnBg : op === "-" ? p.diffDelLnBg : p.panel);
+
+  /** One side's cells for an op; `x` and `w` are its column range. */
+  const side = (x: number, w: number, d: Numbered | null | undefined, which: "old" | "new" | "uni"): Row => {
+    if (d === undefined) return [{ x, fill: w, style: { bg: t.cell(p.panel) } }];
+    if (d === null)
+      return [{ x, fill: w, style: { bg: t.cell(p.panel), fg: t.cell(p.faint) }, text: " ".repeat(Math.max(0, gutW - 1)) + t.g.ellipsis }];
+    const op = d.op;
+    const no = which === "old" || op === "-" ? d.oldNo : d.newNo;
+    const sign = op === "+" ? "+" : op === "-" ? "-" : " ";
+    const signFg = op === "+" ? p.diffAddFg : op === "-" ? p.diffDelFg : p.faint;
+    const room = Math.max(1, w - gutW - 2);
+    const st = op === "-" || which === "old" ? hlOld : hlNew;
+    const body = truncateWidth(code(d.text, st), room, t.g.ellipsis);
+    if (op === " " && which === "uni") code(d.text, hlOld);
+    const bg = t.cell(bgFor(op));
+    const fg = t.cell(op === " " ? p.muted : p.text);
+    const row: Row = [];
+    if (numbered)
+      row.push({ x, fill: gutW, style: { bg: t.cell(lnFor(op)), fg: t.cell(op === " " ? p.lineNo : signFg) }, text: " " + String(no).padStart(numW) });
+    else row.push({ x, fill: gutW, style: { bg: t.cell(lnFor(op)) } });
+    row.push({ x: x + gutW, fill: w - gutW, style: { bg, fg } });
+    row.push(span(x + gutW, sign, { bg, fg: t.cell(signFg) }));
+    row.push(span(x + gutW + 2, body, { bg, fg }));
+    return row;
+  };
+
+  const rows: Row[] = [];
+  const W = o.width;
+  if (o.split && W >= 60) {
+    const lw = Math.floor((W - 1) / 2);
+    const rw = W - 1 - lw;
+    const rx = lw + 1;
+    for (let i = 0; i < shown.length; ) {
+      const d = shown[i];
+      if (d === null || d.op === " ") {
+        rows.push([...side(0, lw, d, "old"), ...side(rx, rw, d, "new")]);
+        i++;
+        continue;
+      }
+      const dels: Numbered[] = [];
+      const adds: Numbered[] = [];
+      while (i < shown.length && shown[i] && shown[i]!.op === "-") dels.push(shown[i++]!);
+      while (i < shown.length && shown[i] && shown[i]!.op === "+") adds.push(shown[i++]!);
+      for (let k = 0; k < Math.max(dels.length, adds.length); k++)
+        rows.push([...side(0, lw, dels[k], "old"), ...side(rx, rw, adds[k], "new")]);
     }
-    const num = numbered ? t.dim(String(x.no).padStart(numW)) + " " : "";
-    const text = truncateWidth(expandTabs(x.text), room, t.g.ellipsis);
-    if (x.op === " ") rows.push(indent + num + t.dim("  " + text));
-    else if (x.op === "-") rows.push(indent + num + t.del("- " + text));
-    else rows.push(indent + num + t.add("+ " + text));
+  } else {
+    for (const d of shown) rows.push(side(0, W, d, "uni"));
   }
-  const total = shown.length;
-  if (total > rows.length) rows.push(indent + t.dim(`${t.g.ellipsis} +${total - rows.length} more`));
-  return rows;
+  const max = o.maxRows ?? Infinity;
+  if (rows.length > max) return { rows: rows.slice(0, max), hidden: rows.length - max, added, removed };
+  return { rows, hidden: 0, added, removed };
 }
+

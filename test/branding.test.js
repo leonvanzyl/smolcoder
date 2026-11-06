@@ -33,6 +33,26 @@ test('terminal banner falls back to the plain name on a narrow terminal', () => 
   for (const r of LOGO_ROWS) assert.ok(!lines[0].includes(r.trimEnd()));
 });
 
+test('the full-screen TUI opens on a home screen with the block logo', () => {
+  const { makeTui } = require('./tui-harness');
+  require('../dist/tui/theme').setTheme({ ascii: false, color: true });
+  for (const [cols, rows] of [[80, 24], [120, 36]]) {
+    const t = makeTui({ cols, rows, props: { version: '9.9.9' } });
+    t.tui.readInput();
+    for (const r of LOGO_ROWS) assert.ok(t.has(r.trimEnd()), `missing row at ${cols}x${rows}: ` + r);
+    assert.ok(t.has('coder v9.9.9'), 'version tail missing');
+    // The logo is the home screen's: it goes once the conversation starts.
+    t.keys('hello\r');
+    assert.ok(!t.has(LOGO_ROWS[0].trimEnd()));
+    t.close();
+  }
+  // Too small for the art: the name still shows.
+  const small = makeTui({ cols: 36, rows: 12, props: { version: '9.9.9' } });
+  small.tui.readInput();
+  assert.match(small.screen(), /smolcoder v9\.9\.9/);
+  small.close();
+});
+
 test('web welcome screen and sidebar header carry the logo', () => {
   assert.ok(PAGE_HTML.includes('<div id="logo"'), 'welcome logo element missing');
   assert.ok(PAGE_HTML.includes(LOGO_TEXT), 'welcome logo text missing');

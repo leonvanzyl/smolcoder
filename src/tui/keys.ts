@@ -45,13 +45,30 @@ export type KeyType =
   | "ctrlf"
   | "ctrll"
   | "f2"
+  | "shiftup" // scroll the transcript a line
+  | "shiftdown"
+  | "ctrlhome" // jump to the top / bottom of the transcript
+  | "ctrlend"
+  | "mouse" // an SGR mouse report (see Key.mouse)
   | "alt" // alt+<text> that has no binding
   | "osc" // a terminal reply to an OSC query; text is the body
   | "da"; // a device-attributes reply (used as a "no more replies" sentinel)
 
+export interface MouseEvent {
+  /** 0 left, 1 middle, 2 right; 64 wheel up, 65 wheel down. */
+  button: number;
+  /** 0-based cell. */
+  x: number;
+  y: number;
+  /** "press", "release", or "drag" (motion with a button held). */
+  action: "press" | "release" | "drag" | "move";
+  shift: boolean;
+}
+
 export interface Key {
   type: KeyType;
   text?: string;
+  mouse?: MouseEvent;
 }
 
 /** Final byte (or "N~") of a CSI sequence → key, before modifiers. */
@@ -118,8 +135,15 @@ function normalizePaste(s: string): string {
 /** Apply CSI modifier (1 + shift 1 + alt 2 + ctrl 4) to a base key. */
 function withMod(base: KeyType, mod: number): KeyType {
   const m = mod - 1;
+  const shift = (m & 1) !== 0;
   const alt = (m & 2) !== 0;
   const ctrl = (m & 4) !== 0;
+  if (ctrl && base === "home") return "ctrlhome";
+  if (ctrl && base === "end") return "ctrlend";
+  if (shift && !ctrl && !alt) {
+    if (base === "up") return "shiftup";
+    if (base === "down") return "shiftdown";
+  }
   if (ctrl || alt) {
     if (base === "left") return "wordleft";
     if (base === "right") return "wordright";
@@ -236,6 +260,11 @@ export class KeyDecoder {
       if (j >= s.length) return -1;
       const body = s.slice(i + 2, j);
       const final = s[j];
+      // Legacy X10 mouse report (ESC [ M b x y): three raw bytes follow.
+      if (final === "M" && body === "") {
+        if (j + 4 > s.length) return -1;
+        return j + 4;
+      }
       out.push(...this.csi(body, final));
       return j + 1;
     }
@@ -304,6 +333,18 @@ export class KeyDecoder {
     if (body.startsWith("?") && final === "c") return [{ type: "da" }];
     if (final === "R") return []; // cursor position report
     if ((final === "I" || final === "O") && body === "") return []; // focus in/out
+    // SGR mouse: CSI < b ; x ; y M (press/motion) or m (release).
+    if (body.startsWith("<") && (final === "M" || final === "m")) {
+      const [bs, xs, ys] = body.slice(1).split(";");
+      const b = Number(bs);
+      const x = Number(xs) - 1;
+      const y = Number(ys) - 1;
+      if (!Number.isFinite(b) || !Number.isFinite(x) || !Number.isFinite(y)) return [];
+      const motion = (b & 32) !== 0;
+      const button = b & ~(4 | 8 | 16 | 32);
+      const action = final === "m" ? "release" : motion ? (button === 3 ? "move" : "drag") : "press";
+      return [{ type: "mouse", mouse: { button, x, y, action, shift: (b & 4) !== 0 } }];
+    }
     // CSI-u / modifyOtherKeys: "13;2u" (shift+enter), "27;3;13~"
     if (final === "u") {
       const [code, mod = "1"] = body.split(";");
