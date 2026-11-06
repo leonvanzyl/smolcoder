@@ -48,7 +48,7 @@ import { StatusInfo, parseStatus } from "./status";
 import { DEFAULT, luminance, oscColor, setTheme, theme } from "./theme";
 import { middleTruncate, stringWidth, stripAnsi, truncateWidth, wrapAnsi } from "./width";
 
-type State = "hidden" | "idle" | "select" | "confirm" | "prompt";
+type State = "hidden" | "idle" | "select" | "confirm" | "prompt" | "panel";
 
 const MENU_ROWS = 8;
 const LIST_ROWS = 18;
@@ -179,6 +179,49 @@ interface Toast {
   until: number;
 }
 
+/** One line of a panel's info block: a label column and its value. */
+export interface PanelLine {
+  label?: string;
+  text: string;
+  tone?: "text" | "muted" | "accent" | "success" | "warning" | "error";
+}
+
+export interface PanelAction {
+  label: string;
+  /** Shown on the right; a single character is also its hotkey, "esc" answers esc. */
+  key: string;
+}
+
+export type PanelLevel = "success" | "warn" | "error" | "info";
+
+/** A long-running dialog (the updater): info lines, streamed output, a
+ * status line and a choice. Opened with Tui.openPanel. */
+export interface PanelHandle {
+  info(lines: PanelLine[]): void;
+  /** Append output (a child process's stdout/stderr). */
+  log(chunk: string): void;
+  /** A spinner and what is happening, or null when nothing runs. */
+  busy(label: string | null): void;
+  status(level: PanelLevel, text: string): void;
+  /** Offer actions; resolves with the chosen index (esc: the "esc" action, else null). */
+  choose(actions: PanelAction[]): Promise<number | null>;
+  close(): void;
+}
+
+interface PanelState {
+  title: string;
+  lines: PanelLine[];
+  log: string[];
+  /** A partial last output line (no newline yet). */
+  logTail: string;
+  busy: string | null;
+  busySince: number;
+  status: { level: PanelLevel; text: string } | null;
+  actions: PanelAction[];
+  index: number;
+  resolve: ((i: number | null) => void) | null;
+}
+
 interface Rect {
   x: number;
   y: number;
@@ -219,6 +262,12 @@ export class Tui implements SessionUI {
   workspace = "";
   /** Shown beside the logo on the home screen. */
   version = "";
+  /** A newer version: a line under the logo on the home screen. */
+  private updateBadge: { version: string; installed: boolean } | null = null;
+  private updateToastShown = false;
+  private panelState: PanelState | null = null;
+  /** The state a panel interrupted, restored when it closes. */
+  private panelReturn: State = "hidden";
 
   private out: TermOut;
   private inp: TermIn;
@@ -494,6 +543,9 @@ export class Tui implements SessionUI {
           break;
         case "prompt":
           this.keyPrompt(key);
+          break;
+        case "panel":
+          this.keyPanel(key);
           break;
         case "hidden":
           this.keyBusy(key);
@@ -1170,6 +1222,13 @@ export class Tui implements SessionUI {
       if (m.action === "press" && m.button === 0 && this.hit.dialog && !inside(this.hit.dialog, m.x, m.y)) this.keyPrompt({ type: "esc" });
       return;
     }
+    if (this.state === "panel") {
+      if (m.action === "press" && m.button === 0) {
+        const row = this.hit.dialogRows.find((r) => r.y === m.y);
+        if (row) this.answerPanel(row.index);
+      }
+      return;
+    }
     // The completion popup.
     if (this.state === "idle" && m.action === "press" && m.button === 0) {
       const row = this.hit.menuRows.find((r) => r.y === m.y);
@@ -1448,8 +1507,7 @@ export class Tui implements SessionUI {
     return { W: Math.max(20, this.out.columns || 80), H: Math.max(8, this.out.rows || 24) };
   }
 
-  private toast(text: string, level: Toast["level"] = "info"): void {
-    const ms = level === "warn" || level === "error" ? 6000 : 3000;
+  private toast(text: string, level: Toast["level"] = "info", ms = level === "warn" || level === "error" ? 6000 : 3000): void {
     this.toasts.push({ text: stripAnsi(text).replace(/^\s*[·•]\s*/, ""), level, until: Date.now() + ms });
     if (this.toasts.length > 3) this.toasts.shift();
     this.startTick();
@@ -1492,7 +1550,7 @@ export class Tui implements SessionUI {
     const menu = this.currentMenu();
     if (menu) this.drawMenu(g, menu, promptRect, W);
 
-    if (this.state === "select" || this.state === "prompt" || this.state === "confirm") {
+    if (this.state === "select" || this.state === "prompt" || this.state === "confirm" || this.state === "panel") {
       g.dim(theme.opts.light ? 0.42 : 0.55, theme.p.text, theme.p.bg, theme.opts.color);
       cursor = this.drawDialog(g, W, H);
     }
@@ -1509,7 +1567,7 @@ export class Tui implements SessionUI {
   }
 
   private needsTick(): boolean {
-    return this.busy || this.spinLabel !== null || this.toasts.length > 0 || this.notice !== null || !!this.runningTool();
+    return this.busy || this.spinLabel !== null || !!this.panelState?.busy || this.toasts.length > 0 || this.notice !== null || !!this.runningTool();
   }
 
   private schedule(): void {
@@ -1596,9 +1654,14 @@ export class Tui implements SessionUI {
       const tail = `coder${this.version ? " v" + this.version : ""}`;
       g.text(lx + LOGO_WIDTH - stringWidth(tail) - 1, y, tail, this.st(p.muted));
       y += 1;
+      // A newer version: one quiet line under the version, right-aligned with it.
+      const badge = this.badgeText();
+      if (badge) g.text(lx + LOGO_WIDTH - stringWidth(badge) - 1, y, badge, this.st(p.faint));
     } else {
       const brand = `smol${t.reset}${t.fgCode(p.muted)}coder${this.version ? " v" + this.version : ""}`;
-      g.text(Math.floor((W - 10 - (this.version ? this.version.length + 2 : 0)) / 2), y, brand, this.st(p.accent, -2, A_BOLD));
+      const badge = this.badgeText();
+      const w = 10 + (this.version ? this.version.length + 2 : 0) + (badge ? 5 + stringWidth(badge) : 0);
+      g.text(Math.floor((W - w) / 2), y, brand + (badge ? `${t.reset}${t.fgCode(p.faint)}  ${t.g.dot}  ${t.reset}${badge}` : ""), this.st(p.accent, -2, A_BOLD));
       y += 1;
     }
     y += 2;
@@ -2086,6 +2149,7 @@ export class Tui implements SessionUI {
     if (this.state === "select" && this.sel) return this.drawSelect(g, W, H);
     if (this.state === "prompt" && this.promptState) return this.drawPromptDialog(g, W, H);
     if (this.state === "confirm" && this.confirmState) return this.drawConfirm(g, W, H);
+    if (this.state === "panel" && this.panelState) return this.drawPanel(g, W, H);
     return null;
   }
 
@@ -2252,6 +2316,205 @@ export class Tui implements SessionUI {
       this.hit.dialogRows.push({ y, index: i });
       g.text(r.x + 5, y, truncateWidth(label, r.w - 12, t.g.ellipsis), this.st(main, rowBg, on ? A_BOLD : 0));
       g.text(r.x + r.w - 4, y, key, this.st(on ? main : p.faint, rowBg));
+      if (on) this.invert(g, r.x + 1, y, r.w - 2);
+      y++;
+    });
+    return null;
+  }
+
+  // ---- updates and the panel ---------------------------------------------------------
+
+  /** A newer version is out (null: none). The home screen shows a line
+   * under the version; in a session it is a one-time toast. */
+  setUpdateAvailable(version: string | null, toast = true): void {
+    if (this.updateBadge?.installed) return;
+    this.updateBadge = version ? { version, installed: false } : null;
+    if (version && !this.updateToastShown) {
+      this.updateToastShown = true;
+      if (toast && !this.isHome()) this.toast(`smolcoder ${version} is available ${theme.g.dot} /update`, "info", 8000);
+    }
+    this.schedule();
+  }
+
+  /** The update is installed but this process still runs the old code. */
+  setUpdateInstalled(version: string): void {
+    this.updateBadge = { version, installed: true };
+    this.updateToastShown = true;
+    this.schedule();
+  }
+
+  /** A quiet line in the transcript (or under the home prompt). */
+  note(text: string): void {
+    this.finishStreams();
+    this.add({ kind: "note", level: "status", text, id: 0, ver: 0 });
+    this.render();
+  }
+
+  /** A toast from outside (the updater). */
+  notify(text: string, level: Toast["level"] = "info", ms?: number): void {
+    this.toast(text, level, ms);
+  }
+
+  /** The update text on the home screen: "↑ 0.9.1 available · /update". */
+  private badgeText(): string {
+    const b = this.updateBadge;
+    if (!b) return "";
+    const t = theme;
+    const p = t.p;
+    if (b.installed) return `${t.fgCode(p.success)}${t.g.ok} ${b.version} installed${t.reset}${t.fgCode(p.faint)} ${t.g.dot} restart smol to use it`;
+    return `${t.fgCode(p.accent)}${t.g.up} ${b.version} available${t.reset}${t.fgCode(p.faint)} ${t.g.dot} ${t.reset}${t.fgCode(p.muted)}/update`;
+  }
+
+  /** A dialog that stays up while something runs (the updater). */
+  openPanel(title: string): PanelHandle {
+    if (this.state !== "panel") this.panelReturn = this.state === "idle" ? "idle" : "hidden";
+    const ps: PanelState = { title, lines: [], log: [], logTail: "", busy: null, busySince: 0, status: null, actions: [], index: 0, resolve: null };
+    this.panelState = ps;
+    this.state = "panel";
+    this.render();
+    const live = () => this.panelState === ps;
+    return {
+      info: (lines) => {
+        ps.lines = lines;
+        if (live()) this.schedule();
+      },
+      log: (chunk) => {
+        const parts = (ps.logTail + stripAnsi(chunk).replace(/\t/g, "  ")).split(/\r?\n/);
+        ps.logTail = parts.pop() ?? "";
+        // A carriage return redraws a progress line: keep its last state.
+        for (const l of parts) ps.log.push(l.slice(l.lastIndexOf("\r") + 1));
+        if (ps.log.length > 400) ps.log.splice(0, ps.log.length - 400);
+        if (live()) this.schedule();
+      },
+      busy: (label) => {
+        if (label && !ps.busy) ps.busySince = Date.now();
+        ps.busy = label;
+        if (label) this.startTick();
+        if (live()) this.schedule();
+      },
+      status: (level, text) => {
+        ps.status = { level, text };
+        if (live()) this.schedule();
+      },
+      choose: (actions) =>
+        new Promise<number | null>((resolve) => {
+          ps.actions = actions;
+          ps.index = 0;
+          ps.resolve = resolve;
+          if (live()) this.render();
+          else resolve(null);
+        }),
+      close: () => {
+        if (!live()) return;
+        ps.resolve?.(null);
+        this.panelState = null;
+        this.state = this.panelReturn;
+        this.render();
+      },
+    };
+  }
+
+  private answerPanel(index: number | null): void {
+    const ps = this.panelState;
+    if (!ps?.resolve) return;
+    const r = ps.resolve;
+    ps.resolve = null;
+    ps.actions = [];
+    this.render();
+    r(index);
+  }
+
+  private keyPanel(key: Key): void {
+    const ps = this.panelState!;
+    const n = ps.actions.length;
+    if (!ps.resolve || !n) return; // running: nothing to answer yet
+    if (key.type === "up" || key.type === "shifttab") ps.index = (ps.index + n - 1) % n;
+    else if (key.type === "down" || key.type === "tab") ps.index = (ps.index + 1) % n;
+    else if (key.type === "enter") return this.answerPanel(ps.index);
+    else if (key.type === "esc" || key.type === "ctrlc") {
+      const i = ps.actions.findIndex((a) => a.key === "esc");
+      return this.answerPanel(i >= 0 ? i : null);
+    } else if (key.type === "char") {
+      const i = ps.actions.findIndex((a) => a.key.length === 1 && a.key === key.text!.toLowerCase());
+      if (i >= 0) return this.answerPanel(i);
+    }
+    this.render();
+  }
+
+  private drawPanel(g: Grid, W: number, H: number): null {
+    const t = theme;
+    const p = t.p;
+    const ps = this.panelState!;
+    const dw = Math.min(76, W - 4);
+    const iw = dw - 6;
+    const tone = (x?: PanelLine["tone"]) =>
+      x === "accent" ? p.accent : x === "success" ? p.success : x === "warning" ? p.warning : x === "error" ? p.error : x === "muted" ? p.muted : p.text;
+    const labelW = Math.max(0, ...ps.lines.map((l) => (l.label ? stringWidth(l.label) + 2 : 0)));
+    const statusLines = ps.status ? ps.status.text.split("\n").flatMap((l, i) => wrapAnsi(l, iw - (i === 0 ? 2 : 2))).slice(0, 8) : [];
+    const busyRows = ps.busy ? 1 : 0;
+    // Output as it reads best in a small box: no leading or doubled blank lines.
+    const log: string[] = [];
+    for (const l of ps.logTail ? [...ps.log, ps.logTail] : ps.log) {
+      const blank = !l.trim();
+      if (blank && (!log.length || !log[log.length - 1].trim())) continue;
+      log.push(blank ? "" : l.replace(/\s+$/, ""));
+    }
+    if (log.length && !log[log.length - 1]) log.pop();
+    const fixed = 3 + (ps.lines.length ? ps.lines.length + 1 : 0) + (statusLines.length ? statusLines.length + 1 : 0) + (busyRows ? 2 : 0) + (ps.actions.length ? ps.actions.length + 1 : 0);
+    const logRows = log.length ? Math.max(1, Math.min(8, log.length, H - 2 - fixed - 3)) : 0;
+    const h = fixed + (logRows ? logRows + 3 : 0);
+    const r = this.dialogFrame(g, W, H, dw, h);
+    const x = r.x + 3;
+    const icon = ps.status?.level === "error" ? { ch: t.g.fail, fg: p.error } : ps.status?.level === "warn" ? { ch: t.g.warn, fg: p.warning } : { ch: t.g.up, fg: p.accent };
+    g.text(x, r.y + 1, icon.ch, this.st(icon.fg, p.panel, A_BOLD));
+    g.text(x + 2, r.y + 1, truncateWidth(ps.title, r.w - 12, t.g.ellipsis), this.st(p.text, p.panel, A_BOLD));
+    if (ps.actions.some((a) => a.key === "esc")) g.text(r.x + r.w - 6, r.y + 1, "esc", this.st(p.faint, p.panel));
+    let y = r.y + 3;
+    for (const l of ps.lines) {
+      if (y >= r.y + r.h - 1) break;
+      if (l.label) g.text(x, y, l.label, this.st(p.muted, p.panel));
+      g.text(x + labelW, y++, truncateWidth(l.text, iw - labelW, t.g.ellipsis), this.st(tone(l.tone), p.panel));
+    }
+    if (ps.lines.length) y++;
+    if (logRows) {
+      // The command's output in an inset box, newest lines at the bottom.
+      g.fill(x, y, iw, logRows + 2, this.st(p.text, p.element));
+      y++;
+      for (const l of log.slice(-logRows)) {
+        const cmdLine = l.startsWith("$ ");
+        g.text(x + 2, y++, truncateWidth(l, iw - 4, t.g.ellipsis), this.st(cmdLine ? p.text : p.muted, p.element, cmdLine ? A_BOLD : 0));
+      }
+      y += 2;
+    }
+    if (ps.busy) {
+      const since = fmtElapsed(Date.now() - ps.busySince);
+      g.text(x, y, `${t.fgCode(p.accent)}${this.spin()}${t.reset} ${t.fgCode(p.text)}${ps.busy}${t.reset}${t.fgCode(p.faint)} ${t.g.dot} ${since}`, this.st(p.text, p.panel));
+      y += 2;
+    }
+    if (statusLines.length) {
+      const s = ps.status!;
+      const c = s.level === "error" ? p.error : s.level === "warn" ? p.warning : s.level === "success" ? p.success : p.accent;
+      const ic = s.level === "error" ? t.g.fail : s.level === "warn" ? t.g.warn : s.level === "success" ? t.g.ok : t.g.info;
+      statusLines.forEach((l, i) => {
+        if (i === 0) {
+          g.text(x, y, ic, this.st(c, p.panel, A_BOLD));
+          g.text(x + 2, y++, l, this.st(p.text, p.panel, A_BOLD));
+        } else {
+          // Indented lines are commands to copy: keep them prominent.
+          const cmdLine = /^\s{2}\S/.test(l);
+          g.text(x + 2, y++, l, this.st(cmdLine ? p.text : p.muted, p.panel));
+        }
+      });
+      y++;
+    }
+    ps.actions.forEach((a, i) => {
+      const on = i === ps.index;
+      const rowBg = on ? p.accent : p.panel;
+      const main = on ? p.onAccent : p.text;
+      if (on) g.fill(r.x + 1, y, r.w - 2, 1, this.st(main, rowBg));
+      this.hit.dialogRows.push({ y, index: i });
+      g.text(r.x + 5, y, truncateWidth(a.label, r.w - 14, t.g.ellipsis), this.st(main, rowBg, on ? A_BOLD : 0));
+      g.text(r.x + r.w - 3 - stringWidth(a.key), y, a.key, this.st(on ? main : p.faint, rowBg));
       if (on) this.invert(g, r.x + 1, y, r.w - 2);
       y++;
     });

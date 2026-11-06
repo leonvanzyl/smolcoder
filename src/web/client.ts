@@ -112,7 +112,7 @@ function placeToasts() {
   box.style.zIndex = "";
   const b = box.getBoundingClientRect();
   const overlays = [];
-  for (const n of document.querySelectorAll(".chooser.palette, .chooser.popover, .sb-menu, #menu, dialog[open], #modal:not([hidden]) .dlg")) {
+  for (const n of document.querySelectorAll(".chooser.palette, .chooser.popover, .sb-menu, .upd-pop, #menu, dialog[open], #modal:not([hidden]) .dlg")) {
     const r = n.getBoundingClientRect();
     if (r.width && r.height && r.left < b.right && r.right > b.left) overlays.push(r);
   }
@@ -733,6 +733,7 @@ function handle(m) {
   replayEvent = !!m.replay;
   if (m.t === "hub") { onHub(m); return; }
   if (m.t === "reset") { resetViews(); return; }
+  if (m.t === "update_open") { openUpdPop(false); return; }
   if (m.t === "synced") { replaying = false; if (active) renderState(active); return; }
   if (m.t === "closed") { dropView(m.sid); return; }
   // /undo shortened this session's transcript: it is redrawn from the replay that follows.
@@ -1027,6 +1028,8 @@ function onHub(m) {
   for (const w of m.workspaces) for (const s of w.sessions) sessInfo.set(s.id, Object.assign({ workspace: w.path, wsname: w.name }, s));
   for (const v of views.values()) reconcileTerms(v);
   $("ver").textContent = "v" + m.version;
+  renderUpdate(m.update);
+  updAfterSnapshot();
   if (pendingSelect && sessInfo.has(pendingSelect)) { const id = pendingSelect; pendingSelect = null; show(id); }
   else if (!active) {
     const h = location.hash.slice(1);
@@ -2616,13 +2619,173 @@ function notify(v, title, body) {
   } catch (e) { /* some browsers only allow notifications from a service worker */ }
 }
 
+// ---- updates: a pill next to the version, a popover with the details --------
+// The hub checks the registry (at most every 12 hours) and runs the package
+// manager; the page only shows it. "Restart server" brings a new hub up on
+// the same port with the same key: the stream reconnects by itself and the
+// replay lands back on the open session.
+let upd = null;            // the hub's update state (hub snapshot .update)
+let updPop = null;         // the open popover
+let updRestart = null;     // { from, at } while the server restarts
+const updPill = $("updpill");
+const ICON_UP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>';
+const ICON_EXT = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M8 7h9v9"/></svg>';
+function updBusy(u) { return !!u && (u.phase === "running" || u.phase === "checking" || u.phase === "restarting"); }
+function renderUpdate(u) {
+  upd = u || null;
+  // Shown when a newer version is out (and notices are on), and whenever
+  // the updater has something to say.
+  const show = !!upd && ((upd.newer && upd.enabled) || (upd.phase !== "idle" && upd.phase !== "checking") || (upd.newer && !!updPop));
+  updPill.hidden = !show;
+  if (show) {
+    const done = upd.phase === "done" || upd.phase === "restarting";
+    updPill.classList.toggle("done", done);
+    updPill.querySelector(".sb-updlabel").textContent = done ? "Restart to update" : upd.phase === "running" ? "Updating" : upd.phase === "failed" ? "Update failed" : "Update available";
+    updPill.querySelector(".sb-updver").textContent = upd.installed || upd.latest || "";
+    const what = done ? "Restart to use " + (upd.installed || upd.latest) : "Update available: " + upd.latest;
+    updPill.title = what; updPill.setAttribute("aria-label", what);
+  }
+  if (updPop) drawUpdPop();
+}
+function closeUpdPop() {
+  if (!updPop) return;
+  updPop.root.remove(); document.removeEventListener("mousedown", updPop.outside, true);
+  updPop = null; renderUpdate(upd); placeToasts();
+}
+function openUpdPop(check) {
+  if (updPop) { drawUpdPop(); return; }
+  closePicker(null);
+  const root = el("div", "upd-pop"); root.setAttribute("role", "dialog"); root.setAttribute("aria-label", "Update smolcoder"); root.tabIndex = -1;
+  const outside = (e) => { if (!root.contains(e.target) && !updPill.contains(e.target) && !$("ver").contains(e.target)) closeUpdPop(); };
+  document.addEventListener("mousedown", outside, true);
+  document.body.appendChild(root);
+  updPop = { root, outside };
+  if (check && !updBusy(upd)) { if (upd) upd = Object.assign({}, upd, { phase: "checking" }); post("/update/check"); }
+  renderUpdate(upd);
+  placeUpdPop();
+  const first = root.querySelector("button.primary") || root.querySelector("button");
+  (first || root).focus({ preventScroll: true });
+}
+function placeUpdPop() {
+  if (!updPop) return;
+  const a = (!updPill.hidden ? updPill : $("ver")).getBoundingClientRect();
+  const r = updPop.root;
+  const w = Math.min(340, window.innerWidth - 16);
+  r.style.width = w + "px";
+  r.style.left = Math.max(8, Math.min(a.left - 8, window.innerWidth - w - 8)) + "px";
+  r.style.bottom = Math.max(8, window.innerHeight - a.top + 8) + "px";
+}
+window.addEventListener("resize", placeUpdPop);
+function updCode(text) {
+  const row = el("div", "upd-code");
+  row.appendChild(el("code", "", text));
+  const b = el("button", "upd-copy", "Copy"); b.type = "button"; b.title = "Copy the command";
+  b.onclick = () => copyText(text, "Command");
+  row.appendChild(b);
+  return row;
+}
+function drawUpdPop() {
+  const r = updPop.root, u = upd || { phase: "checking", current: hub.version };
+  const focused = document.activeElement && r.contains(document.activeElement) ? document.activeElement.dataset.act : null;
+  r.innerHTML = "";
+  const newer = !!u.newer && !!u.latest;
+  const title = u.phase === "restarting" ? "Restarting…" : u.phase === "done" ? "Update installed" : u.phase === "running" ? "Updating smolcoder" : u.phase === "failed" ? "Update failed" : u.phase === "checking" && !newer ? "Checking for updates…" : newer ? "Update available" : u.latest ? "smolcoder is up to date" : "Updates";
+  const hdr = el("div", "upd-hdr");
+  hdr.appendChild(el("span", "upd-title", title));
+  const x = el("button", "iconbtn upd-x", "×"); x.type = "button"; x.title = "Close"; x.setAttribute("aria-label", "Close"); x.onclick = closeUpdPop;
+  hdr.appendChild(x);
+  r.appendChild(hdr);
+  // current → latest
+  const vers = el("div", "upd-vers");
+  vers.appendChild(el("span", "upd-cur", "v" + (u.current || hub.version)));
+  if (newer || u.installed) {
+    vers.appendChild(el("span", "upd-arrow", "→"));
+    vers.appendChild(el("span", "upd-new", "v" + (u.installed || u.latest)));
+  } else if (u.latest) vers.appendChild(el("span", "upd-note", "latest"));
+  r.appendChild(vers);
+  if (newer || u.installed) {
+    const a = el("a", "upd-link"); a.href = u.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+    a.appendChild(el("span", "", "What's new in " + (u.installed || u.latest)));
+    a.insertAdjacentHTML("beforeend", ICON_EXT);
+    r.appendChild(a);
+  }
+  if (u.install && (u.phase === "running" || u.phase === "done" || u.phase === "failed")) {
+    // The output's first line is the command: only say how it is installed.
+    r.appendChild(el("div", "upd-meta", u.install.label + (u.install.command && !u.log ? " · " + u.install.command : "")));
+  }
+  if (u.log && (u.phase === "running" || u.phase === "failed" || u.phase === "done")) {
+    const pre = el("pre", "upd-log", u.log.replace(/\s+$/, ""));
+    r.appendChild(pre);
+    pre.scrollTop = pre.scrollHeight;
+  }
+  const msg = (text, kind) => {
+    if (!text) return;
+    const lines = String(text).split("\n");
+    const box = el("div", "upd-msg" + (kind ? " " + kind : ""));
+    box.appendChild(el("div", "upd-msgline", lines[0]));
+    for (const l of lines.slice(1)) {
+      if (/^\s{2}\S/.test(l)) box.appendChild(updCode(l.trim()));
+      else if (l.trim()) box.appendChild(el("div", "upd-msgsub", l.trim()));
+    }
+    r.appendChild(box);
+  };
+  const acts = el("div", "upd-acts");
+  const btn = (label, cls, act, run) => { const b = el("button", cls, label); b.type = "button"; b.dataset.act = act; b.onclick = run; acts.appendChild(b); return b; };
+  const spin = (label) => { const s = el("div", "upd-busy"); s.appendChild(el("span", "upd-spin")); s.appendChild(el("span", "", label)); acts.appendChild(s); };
+  switch (u.phase) {
+    case "checking": spin("Asking the npm registry…"); break;
+    case "running": spin("Installing " + u.latest + "…"); break;
+    case "restarting":
+      spin(updRestart && Date.now() - updRestart.at > 30000 ? "Still waiting. Check the terminal running smol --web" : "The page reconnects by itself");
+      break;
+    case "done":
+      msg("Restart the server to use it. Open sessions are saved and reopen where they were.", "ok");
+      if (u.canRestart) btn("Restart server", "primary", "restart", () => { updRestart = { from: hub.version, at: Date.now() }; upd = Object.assign({}, upd, { phase: "restarting" }); drawUpdPop(); post("/update/restart").then((res) => { if (res && res.error) { updRestart = null; toastError(res.error); } }); });
+      btn("Later", "ghost", "later", closeUpdPop);
+      break;
+    case "manual":
+      msg(((u.install && u.install.reason) || "This copy cannot update itself") + "\n  " + ((u.install && u.install.manualCommand) || "npm install -g smolcoder@latest"));
+      btn("Close", "ghost", "close", closeUpdPop);
+      break;
+    case "failed":
+      msg(u.message, "err");
+      btn("Try again", "primary", "update", () => post("/update/run"));
+      btn("Close", "ghost", "close", closeUpdPop);
+      break;
+    default:
+      if (u.message) msg(u.message, "err");
+      if (newer) { btn("Update", "primary", "update", () => post("/update/run")); btn("Not now", "ghost", "later", closeUpdPop); }
+      else btn("Check again", "ghost", "check", () => { upd = Object.assign({}, upd, { phase: "checking" }); drawUpdPop(); post("/update/check"); });
+  }
+  if (acts.children.length) r.appendChild(acts);
+  // The opt-out, where people look for it.
+  const opt = el("label", "upd-opt");
+  const cb = el("input"); cb.type = "checkbox"; cb.checked = !(u && u.enabled === false); cb.dataset.act = "notices";
+  cb.onchange = () => post("/update/notices", { on: cb.checked }).then(() => toast(cb.checked ? "Update notices on" : "Update notices off: the palette's Check for updates still works"));
+  opt.appendChild(cb); opt.appendChild(el("span", "", "Tell me when a new version is out"));
+  r.appendChild(opt);
+  if (focused) { const f = r.querySelector('[data-act="' + focused + '"]'); if (f) f.focus({ preventScroll: true }); }
+  placeUpdPop();
+}
+updPill.onclick = () => { if (updPop) closeUpdPop(); else openUpdPop(false); };
+// After a restart: the new server's first snapshot says how it went.
+function updAfterSnapshot() {
+  if (!updRestart || !upd || upd.phase === "restarting") return;
+  const from = updRestart.from;
+  updRestart = null;
+  closeUpdPop();
+  toast(hub.version !== from ? "Updated to v" + hub.version + ". Sessions reopened where they were" : "Server restarted", { kind: "success", ms: 6000 });
+}
+
 // ---- command palette (ctrl+k) ------------------------------------------------
 let palette = null;
 function paletteItems() {
   const items = [];
   const v = active;
   if (v) {
+    // The updater has its own actions below (they work without a session).
     for (const c of cmdList()) {
+      if (c.name === "update" || c.name === "update-check") continue;
       items.push({
         group: c.group || "Commands", label: "/" + c.name, hint: c.desc, key: c.key, keywords: (c.aliases || []).join(" "),
         run: () => { if (c.args) setInput("/" + c.name + " "); else post("/msg", { sid: v.sid, text: "/" + c.name }); },
@@ -2646,6 +2809,10 @@ function paletteItems() {
   const here = curProject(), hw = here && hub.workspaces.find((w) => w.path === here);
   if (hw) items.push({ group: "Actions", label: "New session on a branch…", hint: hw.name + " · git worktree", keywords: "worktree", run: () => { const r = sbNewBtn.getBoundingClientRect(); branchPrompt(hw, { x: r.left, y: r.bottom + 4 }); } });
   items.push({ group: "Actions", label: "Desktop notifications: " + (notifyOn ? "on" : "off"), hint: notifyOn ? "turn off" : "tell me when a turn ends or needs me", keywords: "notify alerts toggle", run: () => setNotify(!notifyOn) });
+  const newer = upd && upd.newer && upd.latest;
+  items.push({ group: "Actions", label: newer ? "Update smolcoder to " + upd.latest : "Check for updates", hint: "smolcoder v" + hub.version, keywords: "update upgrade version release new", run: () => openUpdPop(true) });
+  const notices = !(upd && upd.enabled === false);
+  items.push({ group: "Actions", label: "Update notices: " + (notices ? "on" : "off"), hint: notices ? "turn off" : "tell me when a new version is out", keywords: "update upgrade check toggle", run: () => post("/update/notices", { on: !notices }).then(() => toast(notices ? "Update notices off" : "Update notices on")) });
   items.push({ group: "Actions", label: "Toggle sidebar", key: "ctrl+b", run: () => setSide(!sideEl.classList.contains("collapsed")) });
   if (v) {
     items.push({ group: "Actions", label: "Toggle terminal", key: "ctrl+\`", run: () => togglePanelKind("term") });
@@ -2688,6 +2855,7 @@ $("keys").onclick = showKeys;
 document.addEventListener("keydown", (e) => {
   if (sidebarKey(e)) return;
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "k") { e.preventDefault(); if (palette) palette.ch.cancel(); else openPalette(); return; }
+  if (e.key === "Escape" && updPop) { e.preventDefault(); closeUpdPop(); return; }
   if (e.key === "Escape" && document.activeElement !== input) {
     if (sbMenu) closeMenu();
     else if (addProj) addProj.close();
@@ -2717,7 +2885,17 @@ function resetViews() {
     for (const t of v.terms.values()) { t.out.innerHTML = ""; t.cur = null; t.lines = 0; }
   }
 }
-const es = new EventSource("/events?k=" + k);
-es.onmessage = (e) => handle(JSON.parse(e.data));
-es.onerror = () => { $("status").textContent = "reconnecting…"; };
+// The browser reconnects by itself; should it give up (a server that was
+// gone for a while), start a new stream.
+let es = null;
+function connect() {
+  es = new EventSource("/events?k=" + k);
+  es.onmessage = (e) => handle(JSON.parse(e.data));
+  es.onerror = () => {
+    $("status").textContent = "reconnecting…";
+    if (es.readyState === 2) setTimeout(connect, 1500);
+    if (updRestart && updPop) drawUpdPop();
+  };
+}
+connect();
 `;

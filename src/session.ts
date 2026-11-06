@@ -19,6 +19,7 @@ import {
   modeArgs,
   MODELS_ARGS,
   taskArgs,
+  updateCheckArgs,
 } from "./commands";
 import {
   Config,
@@ -60,6 +61,16 @@ import { pickShell } from "./tools/shell";
 import { TaskManager } from "./tools/tasks";
 import { renderPlan, SelectOption, SessionUI, SlashCommand } from "./ui";
 import { c, truncateEnd } from "./util";
+import { setUpdateChecks, updateChecksSetting } from "./update";
+
+/** What the host (terminal or web hub) does for /update and /update-check.
+ * Kept outside the session: updating replaces the program, not a turn. */
+export interface UpdateHost {
+  /** /update: check now, offer the update, run it, offer a restart. */
+  run(): Promise<void>;
+  /** /update-check on|off was chosen (already saved to the config). */
+  noticesChanged?(on: boolean): void;
+}
 
 /** Per-session preferences from the command line. `effort: null` means an
  * explicit "default"; undefined means "whatever the config remembers". */
@@ -500,6 +511,8 @@ export class Session {
   /** Host hook: fired after each completed user turn (the web hub names the
    * session after the first one). */
   onTurnDone: (() => void) | null = null;
+  /** Host hook: /update and /update-check (see UpdateHost). */
+  updateHost: UpdateHost | null = null;
   /** Custom commands found at the last look (.smolcoder/commands/*.md). */
   customCommands: CustomCommand[] = [];
 
@@ -586,6 +599,8 @@ export class Session {
           return { ...cmd, args: () => MODELS_ARGS };
         case "commands":
           return { ...cmd, args: () => COMMANDS_ARGS };
+        case "update-check":
+          return { ...cmd, args: () => updateCheckArgs(updateChecksSetting()) };
         default:
           return cmd;
       }
@@ -933,6 +948,17 @@ export class Session {
         if (arg === "new") await this.newCustomCommand();
         else this.listCustomCommands();
         break;
+      case "update":
+        if (this.updateHost) await this.updateHost.run();
+        else ui.status("· to update: npm install -g smolcoder@latest");
+        break;
+      case "update-check": {
+        const on = arg === "on" ? true : arg === "off" ? false : !updateChecksSetting();
+        setUpdateChecks(on);
+        this.updateHost?.noticesChanged?.(on);
+        ui.status(on ? "· update notices on: smolcoder looks for a new version every 12 hours" : "· update notices off: /update still checks when you ask");
+        break;
+      }
       default:
         ui.warn(`Unknown command /${slash.name} — try /help`);
     }

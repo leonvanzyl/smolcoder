@@ -95,29 +95,37 @@ export function fuzzyScore(query: string, text: string): number | null {
   if (!q) return 0;
   const t = text.toLowerCase();
   if (t.startsWith(q)) return 1000 - t.length;
-  let score = 0;
-  let ti = 0;
-  let prev = -2;
-  for (let qi = 0; qi < q.length; qi++) {
-    const ch = q[qi];
-    let found = -1;
-    // Prefer a word-start occurrence ahead of the cursor, else the next one.
-    for (let k = ti; k < t.length; k++) {
-      if (t[k] !== ch) continue;
-      const before = k === 0 ? " " : t[k - 1];
-      if (/[^a-z0-9]/.test(before)) { found = k; break; }
-      if (found < 0) found = k;
+  // Two passes: preferring word starts first; when that greedy choice runs
+  // out of text ("update notices" jumping to the "o" of a later "on"), the
+  // plain in-order match.
+  for (let pass = 0; pass < 2; pass++) {
+    let score = 0;
+    let ti = 0;
+    let prev = -2;
+    let ok = true;
+    for (let qi = 0; qi < q.length; qi++) {
+      const ch = q[qi];
+      let found = -1;
+      // Prefer a word-start occurrence ahead of the cursor, else the next one.
+      for (let k = ti; k < t.length; k++) {
+        if (t[k] !== ch) continue;
+        const before = k === 0 ? " " : t[k - 1];
+        if (pass === 1 || /[^a-z0-9]/.test(before)) { found = k; break; }
+        if (found < 0) found = k;
+      }
+      if (found < 0) { ok = false; break; }
+      const before = found === 0 ? " " : t[found - 1];
+      score += 1;
+      if (/[^a-z0-9]/.test(before)) score += 8;
+      if (found === prev + 1) score += 5;
+      prev = found;
+      ti = found + 1;
     }
-    if (found < 0) return null;
-    const before = found === 0 ? " " : t[found - 1];
-    score += 1;
-    if (/[^a-z0-9]/.test(before)) score += 8;
-    if (found === prev + 1) score += 5;
-    prev = found;
-    ti = found + 1;
+    if (!ok) continue;
+    if (t.includes(q)) score += 40;
+    return score - t.length * 0.05;
   }
-  if (t.includes(q)) score += 40;
-  return score - t.length * 0.05;
+  return null;
 }
 
 /** Rank items by the best fuzzy score over their fields; earlier fields weigh

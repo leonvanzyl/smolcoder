@@ -17,10 +17,12 @@ const { VT, toHTML } = require("../test/vt");
 const { Tui } = require("../dist/tui/tui");
 const { setTheme, theme } = require("../dist/tui/theme");
 const { BUILTIN_COMMANDS } = require("../dist/commands");
+const { runUpdateFlow } = require("../dist/tui/updater");
 
 const OUT = path.resolve(process.argv[2] || path.join(os.tmpdir(), "smol-tui-shots"));
 fs.mkdirSync(OUT, { recursive: true });
 const ONLY = process.env.SHOTS_ONLY ? process.env.SHOTS_ONLY.split(",") : null;
+const PREFIX = process.env.SHOTS_PREFIX || "tui2";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const hex = (n) => "#" + n.toString(16).padStart(6, "0");
@@ -163,7 +165,65 @@ async function session(t, opts = {}) {
   tui.turnEnd("14.2s · 6 tools · 1.4k tok @ 52 tok/s");
 }
 
+// /update with a fake registry answer, install and package manager; `stop`
+// says where the panel is left: "offer", "running" or "done".
+async function updatePanel(t, stop) {
+  t.tui.version = "0.9.0";
+  const gate = { open: null };
+  const ran = new Promise((r) => (gate.open = r));
+  const npm = { kind: "npm", label: "npm · global", packageDir: "/usr/local/lib/node_modules/smolcoder", manifest: "/usr/local/lib/node_modules/smolcoder/package.json", command: { file: "npm", args: ["install", "-g", "smolcoder@latest"], display: "npm install -g smolcoder@latest" } };
+  void runUpdateFlow(t.tui, {
+    current: "0.9.0",
+    check: async () => ({ current: "0.9.0", latest: "0.9.1", newer: true, checkedAt: Date.now() }),
+    detect: async () => npm,
+    run: async (info, o) => {
+      o.onOutput("$ npm install -g smolcoder@latest\n");
+      o.onOutput("npm warn deprecated inflight@1.0.6: not supported\n");
+      o.onOutput("\nchanged 1 package in 3s\n");
+      if (stop === "running") await new Promise(() => {});
+      o.onOutput("\n1 package is looking for funding\n  run `npm fund` for details\n");
+      await ran;
+      return { ok: true, version: "0.9.1", message: "Updated to 0.9.1" };
+    },
+    restart: () => new Promise(() => {}),
+  });
+  await sleep(10);
+  if (stop === "offer") return;
+  await t.keys("\r", 10);
+  if (stop === "running") {
+    t.tui["panelState"].busySince -= 3200;
+    return;
+  }
+  gate.open();
+  await sleep(10);
+}
+
 const SCENARIOS = {
+  async "update-home"(t) {
+    t.tui.version = "0.9.0";
+    t.tui.readInput();
+    t.tui.setUpdateAvailable("0.9.1");
+    await sleep(5);
+  },
+  async "update-toast"(t) {
+    t.tui.version = "0.9.0";
+    await session(t);
+    t.tui.readInput();
+    t.tui.setUpdateAvailable("0.9.1");
+    await sleep(5);
+  },
+  async "update-offer"(t) {
+    await session(t);
+    await updatePanel(t, "offer");
+  },
+  async "update-running"(t) {
+    await session(t);
+    await updatePanel(t, "running");
+  },
+  async "update-done"(t) {
+    await session(t);
+    await updatePanel(t, "done");
+  },
   async home(t) {
     t.tui.readInput();
     await sleep(5);
@@ -256,7 +316,7 @@ async function main() {
         const t = await setup(cols, rows, light);
         await SCENARIOS[name](t);
         t.tui["render"]();
-        const file = `tui2-${name}-${cols}x${rows}-${light ? "light" : "dark"}${process.env.SHOTS_MODE ? "-" + process.env.SHOTS_MODE : ""}`;
+        const file = `${PREFIX}-${name}-${cols}x${rows}-${light ? "light" : "dark"}${process.env.SHOTS_MODE ? "-" + process.env.SHOTS_MODE : ""}`;
         const html = toHTML(t.vt, { fg: hex(theme.p.text), bg: hex(theme.p.bg), frame: light ? "#e8e8ed" : "#000000" });
         fs.writeFileSync(path.join(OUT, file + ".html"), html);
         fs.writeFileSync(path.join(OUT, file + ".txt"), t.vt.text());

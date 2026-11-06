@@ -38,6 +38,8 @@ export interface Config {
   favoriteModels?: ModelRef[];
   /** Reasoning effort chosen per model id; null means "the model's default". */
   effortByModel?: Record<string, Effort | null>;
+  /** false: never look for a new smolcoder version by itself (/update-check). */
+  updateCheck?: boolean;
 }
 
 /** One model on one server: the same id can be served by several machines. */
@@ -97,6 +99,7 @@ export function loadConfig(): Config {
         ([id, e]) => id && (e === null || EFFORTS.includes(e as string))
       )
     ) as Record<string, Effort | null>;
+    if (typeof cfg.updateCheck !== "boolean") delete cfg.updateCheck;
     return cfg;
   } catch {
     return {};

@@ -18,6 +18,9 @@ const ICON_SIDEBAR =
   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>';
 const ICON_KEYS =
   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="20" height="14" x="2" y="5" rx="2"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 15h6"/></svg>';
+// The arrow on the sidebar's "Update available" row.
+const ICON_UPDATE =
+  '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 4-4 4 4"/><path d="M12 16V8"/></svg>';
 const ICON_TERMINAL =
   '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>';
 
@@ -48,6 +51,7 @@ ${SIDEBAR_STYLES}</style>
   </div>
   <button id="openfolder" class="ghost">+ Open folder…</button>
   <div id="wslist"></div>
+  <button id="updpill" class="sb-update" type="button" hidden><span class="sb-updicon">${ICON_UPDATE}</span><span class="sb-updlabel">Update available</span><span class="sb-updver"></span></button>
   <div class="sidefoot"><span class="sidefoot-brand">smolcoder</span><span id="ver"></span><span class="grow"></span><button class="iconbtn" id="keys" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">${ICON_KEYS}</button></div>
 </aside>
 <div id="sidescrim" hidden></div>

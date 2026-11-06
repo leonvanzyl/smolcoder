@@ -68,6 +68,8 @@ The line under the input shows the mode, the model, the reasoning effort, how fu
 | `/compact` | Compact the conversation now |
 | `/tasks`, `/logs <id>`, `/stop <id>` | Inspect and stop background tasks such as dev servers |
 | `/clear` | Start a fresh conversation |
+| `/update` | Update smolcoder to the latest version, then restart (see [Updating](#updating)) |
+| `/update-check` | Turn update notices on or off |
 | `/help`, `/exit` | Help and quit |
 
 **Custom commands** are saved prompts. `/commands new` asks for a name and the text; `$ARGUMENTS` (or `$1`, `$2`, …) is replaced by what you type after the command. They live in `.smolcoder/commands/` for one project or `~/.smolcoder/commands/` for all of them, and run as `/name`.
@@ -97,6 +99,14 @@ smol -p "build the app" --verify "npm test"   # headless with an acceptance comm
 ```
 
 With `--verify`, the command has to pass before the run counts as done. Failures go back to the agent to repair, six attempts by default. `--verify-attempts 12` allows more. It needs a model that can use tools; with a chat-only model the run stops straight away.
+
+### Updating
+
+smolcoder checks npm for a new version in the background, at most every 12 hours, and never in `-p` runs or CI. When one is out, the home screen says so under the version (`0.9.1 available · /update`), a session shows it once, and the web UI shows an **Update available** row above the sidebar footer.
+
+`/update` (also in both palettes) shows what will change and what it will run, then updates with the package manager you installed it with (`npm`, `pnpm`, `yarn` or `bun`, global installs), shows its output, and offers **Restart now**. The restart reopens the session you were in; in the web UI, **Restart server** brings the server back on the same address and every open session with it. If you installed with `npx`, from a git checkout, or somewhere smolcoder can't write without `sudo`, it shows the exact command to run yourself instead.
+
+`/update-check off` (or **Update notices** in the web palette, or the checkbox in the update popover) turns the notices off; `/update` still checks when you ask.
 
 ## Using models on another machine
 
@@ -158,6 +168,7 @@ smolcoder sends your code and prompts to the server you choose, and runs the too
 - **Browser and terminal panels.** Preview the dev server the agent started, or open a shell in the workspace, next to the chat.
 - **While it works.** Edits show as diffs, file reads are grouped, and messages you send while it is busy wait in a queue you can edit. Desktop notifications (turn them on in the palette) tell you when a session finishes or needs you.
 - **One server for everything.** Running `smol --web` in another folder adds it to the UI that is already open.
+- **Updates.** A row above the sidebar footer says when a new version is out. Its popover updates smolcoder and restarts the server; the page reconnects by itself and lands back on the same session.
 
 ## Why it works well with local models
 

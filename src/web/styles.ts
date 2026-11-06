@@ -576,6 +576,34 @@ export const STYLES = String.raw`
   .toast:hover .toast-x, .toast:focus-within .toast-x { opacity: 1; }
   .toast-x:hover { color: var(--color-text); background: var(--color-surface-hover); }
 
+  /* ---- the update popover, over the sidebar footer ---- */
+  .upd-pop { position: fixed; z-index: 70; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); background: var(--color-surface-raised); color: var(--color-text); border: var(--hairline); border-radius: var(--radius-card); box-shadow: var(--shadow-popover); font-size: var(--text-compact); line-height: var(--leading-compact); outline: 0; animation: rise var(--motion-base) var(--ease-out); }
+  .upd-hdr { display: flex; align-items: center; gap: var(--space-2); margin: -6px -8px -6px 0; }
+  .upd-title { flex: 1; min-width: 0; font-size: var(--text-ui); font-weight: var(--weight-semibold); }
+  .upd-x { font-size: 18px; }
+  .upd-vers { display: flex; align-items: baseline; gap: var(--space-2); font-size: var(--text-title); line-height: var(--leading-title); font-weight: var(--weight-medium); letter-spacing: var(--tracking-title); font-variant-numeric: tabular-nums; }
+  .upd-cur, .upd-arrow { color: var(--color-text-muted); }
+  .upd-note { font-size: var(--text-meta); font-weight: var(--weight-regular); color: var(--color-text-muted); letter-spacing: 0; }
+  .upd-link { display: inline-flex; align-items: center; gap: var(--space-1); align-self: flex-start; color: var(--color-accent); font-weight: var(--weight-medium); text-decoration: none; }
+  .upd-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+  .upd-link svg { display: block; }
+  .upd-meta { font-size: var(--text-meta); line-height: var(--leading-meta); color: var(--color-text-muted); overflow-wrap: anywhere; }
+  .upd-log { margin: 0; max-height: 132px; overflow: auto; padding: var(--space-2) var(--space-3); background: var(--color-surface); border-radius: var(--radius-control); font-family: var(--font-mono); font-size: var(--text-micro); line-height: 1.5; color: var(--color-text-muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .upd-msg { display: flex; flex-direction: column; gap: var(--space-2); }
+  .upd-msg.err .upd-msgline { color: var(--color-danger); }
+  .upd-msgsub { font-size: var(--text-meta); color: var(--color-text-muted); }
+  .upd-code { display: flex; align-items: center; gap: var(--space-2); padding: 4px 4px 4px var(--space-3); background: var(--color-surface); border-radius: var(--radius-control); }
+  .upd-code code { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--text-meta); overflow-wrap: anywhere; }
+  .upd-copy { flex: none; height: 24px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius-row); background: transparent; color: var(--color-accent); font-size: var(--text-meta); font-weight: var(--weight-medium); cursor: pointer; }
+  .upd-copy:hover { background: var(--color-surface-hover); }
+  .upd-acts { display: flex; align-items: center; gap: var(--space-2); }
+  .upd-busy { display: flex; align-items: center; gap: var(--space-2); min-height: var(--size-hit); color: var(--color-text-muted); }
+  .upd-spin { flex: none; width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--color-border); border-top-color: var(--color-accent); animation: upd-spin .8s linear infinite; }
+  @keyframes upd-spin { to { transform: rotate(360deg); } }
+  .upd-opt { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1); padding-top: var(--space-3); border-top: var(--hairline); font-size: var(--text-meta); color: var(--color-text-muted); cursor: pointer; user-select: none; }
+  .upd-opt input { margin: 0; accent-color: var(--color-accent-fill); }
+  @media (prefers-reduced-motion: reduce) { .upd-pop { animation: none; } .upd-spin { animation-duration: 2.4s; } }
+
   /* ---- right panel: browser + terminal tabs ---- */
   #panel { flex: none; width: 520px; min-width: 300px; max-width: 80vw; border-left: var(--hairline); display: flex; flex-direction: column; min-height: 0; position: relative; background: var(--color-bg); }
   #panel[hidden] { display: none; }
