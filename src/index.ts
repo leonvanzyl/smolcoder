@@ -396,7 +396,7 @@ async function runInteractive(args: CliArgs): Promise<void> {
           session.taskManager.killAll();
           tui.close();
           handedOver = true;
-          relaunch(restartEntry(install), restartArgs(process.argv.slice(2), saved ? id : null));
+          relaunch(restartEntry(install), restartArgs(process.argv.slice(2), saved ? id : null, session.agent.mode));
           return new Promise<void>(() => {});
         },
       }),

@@ -472,16 +472,19 @@ export function runUpdate(info: InstallInfo, o: RunOptions = {}): Promise<RunRes
 // ---- restarting -------------------------------------------------------------------
 
 /** The CLI arguments for the restarted copy: the same ones without an
- * earlier --resume, then --resume <id> when there is a session to reopen. */
-export function restartArgs(argv: string[], sessionId: string | null): string[] {
+ * earlier --resume, then --resume <id> when there is a session to reopen.
+ * `mode` is the session's current mode (shift+tab may have changed it since
+ * launch); it replaces any --mode given on the command line. */
+export function restartArgs(argv: string[], sessionId: string | null, mode?: string): string[] {
   const out: string[] = [];
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--resume") {
+    if (argv[i] === "--resume" || (mode && (argv[i] === "--mode" || argv[i] === "-m"))) {
       i++;
       continue;
     }
     out.push(argv[i]);
   }
+  if (mode) out.push("--mode", mode);
   if (sessionId) out.push("--resume", sessionId);
   return out;
 }

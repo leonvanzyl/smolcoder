@@ -435,6 +435,7 @@ test("restart: same arguments plus --resume <id>, launched with inherited stdio"
   assert.deepEqual(U.restartArgs(["~/proj", "--mode", "ro"], "ab12cd34"), ["~/proj", "--mode", "ro", "--resume", "ab12cd34"]);
   assert.deepEqual(U.restartArgs(["--resume", "old", "--web", "8080"], null), ["--web", "8080"], "an earlier --resume is dropped");
   assert.deepEqual(U.restartArgs(["--resume", "old"], "new1"), ["--resume", "new1"]);
+  assert.deepEqual(U.restartArgs(["~/proj", "-m", "ro"], "s1", "bypass"), ["~/proj", "--mode", "bypass", "--resume", "s1"], "the live mode (after shift+tab) replaces the launch one");
 
   const pkg = fakePackage("0.9.1");
   assert.equal(U.restartEntry({ manifest: pkg.manifest }), path.join(pkg.dir, "dist", "index.js"));
