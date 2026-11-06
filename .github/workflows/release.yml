@@ -1,0 +1,94 @@
+name: Release
+
+# Publishes the npm package, started either way:
+# - the "Run workflow" button (Actions > Release): bumps the version on main, tests, pushes the commit and tag, publishes;
+# - a version tag pushed from a laptop (`npm version patch -m "Release %s"` + `git push --follow-tags`).
+# npm trusts this workflow file (trusted publishing), so the repo holds no npm token. Renaming this file breaks
+# publishing until the package's trusted publisher on npmjs.com is updated to match.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: write # the button pushes the release commit and tag; both ways create the GitHub release
+  id-token: write # trusted publishing: npm swaps the run's OIDC token for a one-time publish token
+
+# One release at a time, and never cancel one halfway.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # The button only releases main.
+    if: github.event_name == 'push' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # tags, for the release notes' starting point
+          # No push credentials while dependencies install; the push step passes the token itself.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          # No dependency cache in a job that can publish.
+          package-manager-cache: false
+
+      - name: Bump the version
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          npm version "$BUMP" -m "Release smolcoder %s"
+
+      - id: version
+        name: Check the version
+        run: |
+          tag="v$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version ($tag)"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - run: npm ci
+      # npm test builds dist/ first, so the smoke test checks exactly what gets published.
+      - run: npm test
+      - run: node scripts/smoke-package.mjs
+
+      # Atomic: if main moved since the button was pressed, nothing is pushed or published; press it again.
+      # Pushed with the workflow's own token, so the tag doesn't start this workflow a second time.
+      - name: Push the release commit and tag
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: git push --atomic "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main "$TAG"
+
+      # Tests and build already ran above, so skip prepublishOnly: what gets published is what was smoke-tested.
+      - run: npm publish --ignore-scripts
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          previous=$(git describe --tags --abbrev=0 --match 'v*' "$TAG^" 2>/dev/null || true)
+          if [ -n "$previous" ]; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --notes-start-tag "$previous"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes
+          fi
