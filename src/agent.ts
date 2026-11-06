@@ -17,7 +17,9 @@ import {
 } from "./tools/index";
 import { AgentUI } from "./ui";
 import { c, fmtDuration } from "./util";
-import { commandEscapesWorkspace } from "./sandbox";
+import { commandEscapesWorkspace, relPath, resolveInWorkspace } from "./sandbox";
+import * as fs from "fs";
+import * as path from "path";
 import { abortableDelay } from "./providers/transport";
 import { truncateMiddle } from "./util";
 import { createHash } from "crypto";
@@ -66,6 +68,8 @@ export class Agent {
   private progressFailure = "";
   private sameVerificationFailures = 0;
   private canRefreshVerification = false;
+  /** One entry per user turn, newest last: what /undo puts back. */
+  private undoStack: TurnSnapshot[] = [];
 
   constructor(
     public provider: Provider,
@@ -85,6 +89,10 @@ export class Agent {
     this.messages = [{ role: "system", content: systemPrompt }];
     this.tools = this.toolsFor(mode);
     this.ctxMgr.setReplayThinking(provider.replaysThinking !== false);
+    // Harness hooks that run project code (the TypeScript check) follow
+    // run_command's rules, minus the question: what would ask is skipped.
+    this.toolCtx.mayRunUnasked = (command) => this.mode === "bypass" ||
+      commandEscapesWorkspace(command, this.toolCtx.workspace) === null || isAutoApproved(command, this.alwaysAllowed);
   }
 
   /** A model that cannot call tools gets none: nothing to send, nothing to
@@ -131,6 +139,7 @@ export class Agent {
     // cleared conversation would assert work the new task never did.
     this.toolCtx.filesTouched.clear();
     this.toolCtx.commandsRun.length = 0;
+    this.undoStack = [];
     this.ctxMgr.resetAnchor();
   }
 
@@ -142,6 +151,7 @@ export class Agent {
     this.originalRequest = originalRequest;
     this.currentRequest = currentRequest;
     this.planNudged = false;
+    this.undoStack = [];
     this.ctxMgr.resetAnchor();
     this.repairTranscript("[Tool execution was interrupted by a restart. Its outcome is unknown. Inspect files or command state before retrying; do not assume it failed or rerun it blindly.]");
   }
@@ -149,6 +159,85 @@ export class Agent {
   cancel(): void {
     this.abort?.abort();
     this.ctxMgr.cancelBackground(true);
+  }
+
+  /** Keep a file's content from before this turn first touched it (null:
+   * the turn created it), so /undo can put it back. */
+  private recordPreImage(userPath: string): void {
+    const snap = this.undoStack[this.undoStack.length - 1];
+    if (!snap) return;
+    let abs: string;
+    try { abs = resolveInWorkspace(this.toolCtx.workspace, userPath); } catch { return; }
+    const key = process.platform === "win32" ? abs.toLowerCase() : abs;
+    if (snap.files.has(key)) return;
+    let before: Buffer | null | "unsaved" = null;
+    try {
+      const stat = fs.statSync(abs);
+      if (!stat.isFile()) return;
+      before = stat.size > UNDO_MAX_FILE_BYTES ? "unsaved" : fs.readFileSync(abs);
+    } catch (err: any) {
+      if (err?.code !== "ENOENT") return;
+    }
+    snap.files.set(key, { abs, rel: relPath(this.toolCtx.workspace, abs), before });
+  }
+
+  /**
+   * Undo the most recent user turn: put back every file write_file/edit_file
+   * changed (deleting files the turn created) and trim the transcript to
+   * before that turn. Returns a one-line summary, or null when there is
+   * nothing to undo. Commands the turn ran are not undone.
+   */
+  async undoLastTurn(): Promise<string | null> {
+    if (this.abort) return "Nothing undone: a turn is still running.";
+    const snap = this.undoStack.pop();
+    if (!snap) return null;
+    await this.ctxMgr.foreground();
+    this.ctxMgr.cancelBackground(true);
+    const restored: string[] = [];
+    const deleted: string[] = [];
+    const failed: string[] = [];
+    for (const { abs, rel, before } of snap.files.values()) {
+      try {
+        if (before === "unsaved") { failed.push(rel); continue; }
+        if (before === null) {
+          if (fs.existsSync(abs) && fs.statSync(abs).isFile()) { fs.rmSync(abs, { force: true }); deleted.push(rel); }
+          continue;
+        }
+        const current = fs.existsSync(abs) ? fs.readFileSync(abs) : null;
+        if (current && current.equals(before)) continue;
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, before);
+        restored.push(rel);
+      } catch {
+        failed.push(rel);
+      }
+    }
+    this.messages = [this.messages[0], ...snap.messages.slice(1)];
+    this.originalRequest = snap.originalRequest;
+    this.currentRequest = snap.currentRequest;
+    try { this.toolCtx.plan.steps = JSON.parse(snap.plan); } catch { /* keep the current plan */ }
+    // The compaction state note and pending stale reads must not describe
+    // work that no longer exists (undone writes made those reads true again).
+    this.toolCtx.filesTouched.clear();
+    for (const f of snap.filesTouched) this.toolCtx.filesTouched.add(f);
+    this.toolCtx.commandsRun.splice(0, this.toolCtx.commandsRun.length, ...snap.commandsRun);
+    this.ctxMgr.restorePendingStaleReads(snap.staleReads);
+    this.planNudged = false;
+    this.outcome = "idle";
+    this.lastError = null;
+    this.verificationResult = null;
+    this.ctxMgr.resetAnchor();
+    const parts: string[] = [];
+    if (restored.length) parts.push(`restored ${listNames(restored)}`);
+    if (deleted.length) parts.push(`deleted ${listNames(deleted)}`);
+    if (failed.length) parts.push(`could not restore ${listNames(failed)}`);
+    const files = parts.length ? `: ${parts.join("; ")}` : " (no file changes)";
+    return `Undid the last turn${files}.${snap.ranCommands ? " Effects of commands it ran are not undone." : ""}`;
+  }
+
+  /** How many turns /undo can still take back. */
+  get undoDepth(): number {
+    return this.undoStack.length;
   }
 
   contextPercent(): number {
@@ -173,17 +262,40 @@ export class Agent {
     if (!command) return false;
     this.ui.status("· checking implementation progress");
     this.ui.toolCall("verification", { command });
-    this.ctxMgr.prepareBackground(this.messages, this.tools, this.provider, this.compactState());
+    this.prepareCompaction();
+    const t0 = Date.now();
     const output = await runCommand(command, this.toolCtx.workspace, signal);
     if (signal.aborted) throw abortError();
     const passed = !output.startsWith("Error") && /\[exit code 0 in [^\]]+\]\s*$/.test(output);
     this.progressFailure = passed ? "" : output;
-    this.ui.toolResult(output);
+    this.ui.toolResult(output, { ok: passed, durationMs: Date.now() - t0 });
     await this.bus.emit("post_progress_check", { command, passed, output });
-    this.messages.push({ role: "user", content: passed
+    this.pushFeedback(passed
       ? `[Project checks passed: ${command}. Continue the remaining work in the original request.]`
-      : `[Progress checks failed. Fix the first concrete failure before further investigation. Continue the same task.\nCommand: ${command}\n${truncateMiddle(output, this.ctxMgr.toolResultCharLimit())}]` });
+      : `[Progress checks failed. Fix the first concrete failure before further investigation. Continue the same task.\nCommand: ${command}\n${truncateMiddle(output, this.ctxMgr.toolResultCharLimit())}]`);
     return true;
+  }
+
+  /** Prepare a background compaction while a command runs. The snapshot stops
+   * before the latest tool group: its results are still being written (and
+   * pushFeedback appends to the last one), and manage() only accepts a
+   * snapshot that is still an exact prefix of the transcript. */
+  private prepareCompaction(): void {
+    let end = this.messages.length - 1;
+    while (this.messages[end]?.role === "tool") end--;
+    this.ctxMgr.prepareBackground(this.messages.slice(0, end), this.tools, this.provider, this.compactState());
+  }
+
+  /**
+   * Harness feedback (check results, "passed" notes) is not a user turn. A
+   * new user message would move the turn boundary, so providers would drop
+   * this turn's reasoning and the prefix would change. Ride on the pending
+   * tool result when there is one; otherwise send a flagged message.
+   */
+  private pushFeedback(text: string): void {
+    const last = this.messages[this.messages.length - 1];
+    if (last?.role === "tool") last.content += `\n\n${text}`;
+    else this.messages.push({ role: "user", content: text, harnessNote: true });
   }
 
   private verificationInstruction(): string {
@@ -209,6 +321,7 @@ export class Agent {
     if (attempts > (check.maxAttempts ?? 6)) throw new Error("Acceptance attempt limit reached before the agent finished. The task is incomplete.");
     this.ui.status(`· checking acceptance (${attempts}/${check.maxAttempts ?? 6})`);
     this.ui.toolCall("verification", { command: check.command });
+    const t0 = Date.now();
     const output = await runCommand(check.command, this.toolCtx.workspace, signal);
     if (signal.aborted) throw abortError();
     const passed = !output.startsWith("Error") && /\[exit code 0 in [^\]]+\]\s*$/.test(output);
@@ -216,12 +329,12 @@ export class Agent {
       : this.verificationResult && !this.verificationResult.passed && failureSignature(this.verificationResult.output) === failureSignature(output)
         ? this.sameVerificationFailures + 1 : 1;
     this.verificationResult = { attempts, passed, output };
-    this.ui.toolResult(output);
+    this.ui.toolResult(output, { ok: passed, durationMs: Date.now() - t0 });
     await this.bus.emit("post_verify", this.verificationResult);
     if (passed) { this.ui.status("· acceptance checks passed"); return true; }
     if (attempts >= (check.maxAttempts ?? 6)) throw new Error(`Acceptance checks still fail after ${attempts} attempts. The task is incomplete.\n${truncateMiddle(output, 1600)}`);
     this.ui.status("· acceptance failed — continuing repairs automatically");
-    this.messages.push({ role: "user", content: `[Acceptance failed; the task is not complete. Repair the first failing behavior. The harness will rerun acceptance automatically. Do not skip tests or report success.${check.source === "project" ? `\nCommand: ${check.command}` : ""}\n${truncateMiddle(output, this.ctxMgr.toolResultCharLimit())}]` });
+    this.pushFeedback(`[Acceptance failed; the task is not complete. Repair the first failing behavior. The harness will rerun acceptance automatically. Do not skip tests or report success.${check.source === "project" ? `\nCommand: ${check.command}` : ""}\n${truncateMiddle(output, this.ctxMgr.toolResultCharLimit())}]`);
     if (this.sameVerificationFailures === 2 && this.canRefreshVerification) {
       this.ui.status("· same check failed again — refreshing working context");
       // Repeating an unchanged hypothesis in a larger transcript is not
@@ -273,6 +386,20 @@ export class Agent {
     const request = userInput || (attachments.length ? `See the attached ${attachments.length === 1 ? "file" : "files"}.` : "");
     // Compaction keeps the request text, so the file names ride along with it.
     const requestNote = attachments.length ? `${request} [attached: ${attachments.map((a) => a.name).join(", ")}]` : request;
+    this.undoStack.push({
+      // A deep copy: the turn edits messages in place (feedback appended to
+      // a tool result, evictions), and undo must put back the originals.
+      messages: structuredClone(this.messages),
+      originalRequest: this.originalRequest,
+      currentRequest: this.currentRequest,
+      plan: JSON.stringify(this.toolCtx.plan.steps),
+      files: new Map(),
+      ranCommands: false,
+      filesTouched: [...this.toolCtx.filesTouched],
+      commandsRun: [...this.toolCtx.commandsRun],
+      staleReads: this.ctxMgr.pendingStaleReads(),
+    });
+    if (this.undoStack.length > UNDO_TURNS) this.undoStack.shift();
     if (!this.originalRequest) this.originalRequest = requestNote;
     this.currentRequest = requestNote; // the task compaction must never lose
     this.messages.push({
@@ -441,6 +568,8 @@ export class Agent {
 
           let output: string;
           let observedOutput: string | undefined;
+          let durationMs = 0;
+          this.toolCtx.lastChange = undefined;
           if (call.parseError) {
             // LM Studio streams the partial arguments of a cut-off call, so
             // the overflow surfaces here as unparseable JSON.
@@ -458,20 +587,25 @@ export class Agent {
               : `Error: the tool "${call.name}" is not available in ${MODE_LABELS[this.mode]} mode. Available tools: ${this.tools.map((t) => t.name).join(", ")}.`;
           } else {
             this.toolCtx.resultCharLimit = this.ctxMgr.toolResultCharLimit();
-            if (call.name === "run_command") {
-              let end = this.messages.length - 1;
-              while (this.messages[end]?.role === "tool") end--;
-              this.ctxMgr.prepareBackground(this.messages.slice(0, end), this.tools, this.provider, this.compactState());
+            if (call.name === "run_command") this.prepareCompaction();
+            if ((call.name === "write_file" || call.name === "edit_file") && typeof call.args?.path === "string") this.recordPreImage(call.args.path);
+            if (call.name === "run_command" || (call.name === "task" && call.args?.action === "start")) {
+              const snap = this.undoStack[this.undoStack.length - 1];
+              if (snap) snap.ranCommands = true;
             }
+            const started = Date.now();
             output = await this.gateAndExecute(call.name, call.args, signal);
+            durationMs = Date.now() - started;
             observedOutput = output; // fingerprint real evidence before coaching/reminders
             toolCallsThisTurn++;
             stats.toolCalls++;
-            // Tier-0 context hygiene: a full overwrite makes every earlier
-            // read of that file wrong. Stub them out right away.
-            if ((call.name === "write_file" || call.name === "edit_file") && !output.startsWith("Error") && typeof call.args?.path === "string") {
+            if ((call.name === "write_file" || call.name === "edit_file") && lastDiff(this.toolCtx) && typeof call.args?.path === "string") {
               wroteThisTurn = true;
-              this.ctxMgr.evictStaleReads(this.messages, call.args.path);
+              // A full overwrite makes every earlier read of that file wrong.
+              // Stub them at the next compaction, not now: rewriting a read
+              // mid-transcript forces a re-prefill of everything after it.
+              // edit_file reads stay: most of the file is still true.
+              if (call.name === "write_file") this.ctxMgr.noteStaleReads(this.messages, call.args.path);
               repeatedReads.clear();
               readsSinceAction = 0;
             }
@@ -523,7 +657,8 @@ export class Agent {
           ) {
             this.ui.planUpdated(this.toolCtx.plan);
           } else {
-            this.ui.toolResult(output);
+            const diff = lastDiff(this.toolCtx);
+            this.ui.toolResult(output, { ok: !output.startsWith("Error"), durationMs, ...(diff ? { diff } : {}) });
           }
           this.messages.push({
             role: "tool",
@@ -560,7 +695,7 @@ export class Agent {
             }
             // Passing acceptance does not authorize dropping the remaining
             // task: ask for a final requirements review before completion.
-            this.messages.push({role:"user",content:"[Acceptance passed. Review the original request, finish any remaining work, and summarize the verified result.]"});
+            this.pushFeedback("[Acceptance passed. Review the original request, finish any remaining work, and summarize the verified result.]");
             repeatedReads.clear(); repeats = 0; failedCalls = 0; readsSinceAction = 0; lastProgressCheck = toolCallsThisTurn;
             continue agentLoop;
           }
@@ -576,7 +711,7 @@ export class Agent {
           if (this.verification && this.verificationResult) {
             // Once acceptance has found a real failure, keep checking THAT
             // behavior. Passing a weaker build check cannot resolve it.
-            if (await runAcceptance()) this.messages.push({role:"user",content:"[Acceptance checks passed. Finish your response with the verified result.]"});
+            if (await runAcceptance()) this.pushFeedback("[Acceptance checks passed. Finish your response with the verified result.]");
             readsSinceAction = 0; repeatedReads.clear(); repeats = 0; failedCalls = 0;
           } else if (await this.checkProgress(signal)) {
             readsSinceAction = 0; repeatedReads.clear(); repeats = 0; failedCalls = 0;
@@ -626,7 +761,18 @@ export class Agent {
    * unchanged between attempts, so a retry is always safe. */
   private async chatWithRetry(signal: AbortSignal, actionOnly = false): Promise<ChatResult> {
     let lastErr: any;
-    let recoveredContext = false;
+    let contextRecoveries = 0;
+    // UI-only progress while a long tool call (a whole write_file) streams;
+    // about ten updates a second at most.
+    let argsShownAt = 0;
+    const onToolArgs = this.ui.toolArgsProgress
+      ? (name: string, chars: number) => {
+          const now = Date.now();
+          if (now - argsShownAt < 100) return;
+          argsShownAt = now;
+          this.ui.toolArgsProgress?.(name, chars);
+        }
+      : undefined;
     for (let attempt = 1; attempt <= 3; attempt++) {
       let streamed = false;
       try {
@@ -636,14 +782,21 @@ export class Agent {
           maxTokens: Math.min(this.provider.maxOutputTokens, this.contextBudget().reserve),
           onToken: (t) => { streamed = true; this.ui.token(t); },
           onThinking: (t) => { streamed = true; this.ui.thinking(t); },
+          ...(onToolArgs ? { onToolArgs } : {}),
         });
       } catch (err: any) {
         if (err?.name === "AbortError" || signal.aborted) throw err;
         lastErr = err;
         if (streamed) this.ui.resetResponse?.();
-        if (!recoveredContext && CONTEXT_ERROR.test(String(err?.message ?? err))) {
-          recoveredContext = true;
-          this.ui.status("· backend context limit — reducing history and retrying");
+        if (contextRecoveries < 3 && CONTEXT_ERROR.test(String(err?.message ?? err))) {
+          // The backend counts more tokens than we estimated. Budget against
+          // a smaller share of the window each time (0.85, 0.7, 0.5), so a
+          // second overflow does not repeat the same compaction.
+          const shrunk = this.ctxMgr.shrinkForOverflow();
+          if (!shrunk && contextRecoveries > 0) throw err;
+          contextRecoveries++;
+          attempt--; // context recovery does not use up a transient retry
+          this.ui.status(`· backend context limit — budgeting ${Math.round(this.ctxMgr.overflowShare * 100)}% of the window and retrying`);
           await this.compactNow(true, true);
           this.ctxMgr.assertFits(this.messages, this.tools);
           continue;
@@ -729,6 +882,34 @@ export class Agent {
       `ctx ${pct}% of ${this.provider.contextWindow.toLocaleString()} · ${this.provider.label} · ${this.mode}${taskPart}`
     );
   }
+}
+
+/** /undo keeps this many turns, and pre-images up to this size per file. */
+const UNDO_TURNS = 20;
+const UNDO_MAX_FILE_BYTES = 8 * 1024 * 1024;
+
+interface TurnSnapshot {
+  /** The transcript before the turn (a deep copy). */
+  messages: Msg[];
+  filesTouched: string[];
+  commandsRun: string[];
+  /** ContextManager's pending stale reads before the turn. */
+  staleReads: [string, string][];
+  originalRequest: string;
+  currentRequest: string;
+  plan: string;
+  /** Content before the turn first wrote each file; null = the turn created it. */
+  files: Map<string, { abs: string; rel: string; before: Buffer | null | "unsaved" }>;
+  ranCommands: boolean;
+}
+
+/** The UI diff of the tool call that just ran (set by executeTool). */
+function lastDiff(ctx: ToolContext) {
+  return ctx.lastChange?.diff;
+}
+
+function listNames(names: string[]): string {
+  return names.length <= 4 ? names.join(", ") : `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
 }
 
 export interface TurnStats {

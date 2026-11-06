@@ -85,3 +85,57 @@ export async function tryFetchJson(
     clearTimeout(t);
   }
 }
+
+/** Fuzzy match score for pickers and menus: the query's characters must appear
+ * in order. Higher is better; null means no match. Bonuses for a prefix match,
+ * matches at word starts and runs of adjacent characters. Self-contained (no
+ * outside references) so the web client can embed it via `fuzzyScore.toString()`. */
+export function fuzzyScore(query: string, text: string): number | null {
+  const q = query.toLowerCase().replace(/\s+/g, "");
+  if (!q) return 0;
+  const t = text.toLowerCase();
+  if (t.startsWith(q)) return 1000 - t.length;
+  let score = 0;
+  let ti = 0;
+  let prev = -2;
+  for (let qi = 0; qi < q.length; qi++) {
+    const ch = q[qi];
+    let found = -1;
+    // Prefer a word-start occurrence ahead of the cursor, else the next one.
+    for (let k = ti; k < t.length; k++) {
+      if (t[k] !== ch) continue;
+      const before = k === 0 ? " " : t[k - 1];
+      if (/[^a-z0-9]/.test(before)) { found = k; break; }
+      if (found < 0) found = k;
+    }
+    if (found < 0) return null;
+    const before = found === 0 ? " " : t[found - 1];
+    score += 1;
+    if (/[^a-z0-9]/.test(before)) score += 8;
+    if (found === prev + 1) score += 5;
+    prev = found;
+    ti = found + 1;
+  }
+  if (t.includes(q)) score += 40;
+  return score - t.length * 0.05;
+}
+
+/** Rank items by the best fuzzy score over their fields; earlier fields weigh
+ * more (field i is scaled by 1 / (i + 1)). Ties keep the original order. */
+export function fuzzyFilter<T>(query: string, items: T[], fields: (item: T) => (string | undefined)[]): T[] {
+  if (!query.trim()) return items.slice();
+  const scored: { item: T; score: number; i: number }[] = [];
+  items.forEach((item, i) => {
+    let best: number | null = null;
+    fields(item).forEach((f, fi) => {
+      if (!f) return;
+      const s = fuzzyScore(query, f);
+      if (s === null) return;
+      const w = s / (fi + 1);
+      if (best === null || w > best) best = w;
+    });
+    if (best !== null) scored.push({ item, score: best, i });
+  });
+  scored.sort((a, b) => b.score - a.score || a.i - b.i);
+  return scored.map((s) => s.item);
+}

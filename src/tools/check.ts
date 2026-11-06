@@ -3,13 +3,16 @@
 // brace gets a blank page and no idea why; catching the parse error in the
 // tool result (with the line number) turns that into a one-step fix. Only
 // parsers we can trust are used: node's own for JS (and inline <script> in
-// HTML), JSON.parse, python's compiler when python is on PATH. Nothing runs
-// the code.
+// HTML), JSON.parse, python's compiler when python is on PATH, and for
+// TypeScript the project's own node_modules/typescript (syntax only, run in a
+// child node under run_command's trust rules, skipped when the project has
+// none). Nothing runs the written code.
 
 import { spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { commandEscapesWorkspace } from "../sandbox";
 
 const CHECK_TIMEOUT_MS = 8000;
 const MAX_CHECK_BYTES = 2 * 1024 * 1024;
@@ -116,18 +119,98 @@ function checkPython(abs: string): string | null {
   return `Python syntax error${line ? ` at line ${line}` : ""}: ${last.replace(/^.*?Error: ?/, "")}`;
 }
 
+/** Compilers that turned out unusable (no transpileModule), by path, until
+ * the file changes. A missing compiler is not remembered: one existsSync per
+ * folder level is cheap, and the project may install TypeScript later. */
+const unusableTs = new Map<string, number>();
+
+function findTypeScript(fromDir: string, workspace: string): string | null {
+  const root = path.resolve(workspace);
+  for (let dir = path.resolve(fromDir); ; dir = path.dirname(dir)) {
+    const lib = path.join(dir, "node_modules", "typescript", "lib", "typescript.js");
+    try {
+      const mtime = fs.statSync(lib).mtimeMs;
+      if (unusableTs.get(lib) !== mtime) return lib;
+    } catch {
+      /* not here */
+    }
+    const rel = path.relative(root, dir);
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel) || path.dirname(dir) === dir) return null;
+  }
+}
+
+/** Runs in a short-lived node: the workspace's typescript.js is project code,
+ * so it never loads inside smolcoder itself. Reads the job from stdin and
+ * prints one marked JSON line. */
+const TS_CHILD = `
+let input = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (d) => { input += d; });
+process.stdin.on("end", () => {
+  const say = (o) => process.stdout.write("\\n@@smol-ts@@" + JSON.stringify(o) + "\\n");
+  const job = JSON.parse(input);
+  let ts;
+  try { ts = require(job.lib); } catch { return say({ unusable: true }); }
+  if (!ts || typeof ts.transpileModule !== "function") return say({ unusable: true });
+  const out = ts.transpileModule(job.source, {
+    fileName: job.fileName,
+    reportDiagnostics: true,
+    compilerOptions: Object.assign(job.tsx ? { jsx: (ts.JsxEmit && ts.JsxEmit.Preserve) || 1 } : {}, { noResolve: true, isolatedModules: false }),
+  });
+  const error = (ts.DiagnosticCategory && ts.DiagnosticCategory.Error) ?? 1;
+  const d = (out.diagnostics || []).find((x) => x.file && typeof x.start === "number" && x.category === error);
+  if (!d) return say({ ok: true });
+  say({ line: d.file.getLineAndCharacterOfPosition(d.start).line + 1, message: ts.flattenDiagnosticMessageText(d.messageText, " ") });
+});`;
+
+/** Syntax diagnostics only (transpileModule does no type checking): the
+ * first one, with its line. `mayRun` applies run_command's trust rules to
+ * running the compiler; when they would ask the user, the check is skipped.
+ * Exported for tests. */
+export function checkTypeScript(source: string, absPath: string, workspace: string, mayRun?: (command: string) => boolean): string | null {
+  const lib = findTypeScript(path.dirname(absPath), workspace);
+  if (!lib) return null;
+  const command = `node "${lib}"`;
+  if (!(mayRun ? mayRun(command) : commandEscapesWorkspace(command, workspace) === null)) return null;
+  const r = spawnSync(process.execPath, ["-e", TS_CHILD], {
+    input: JSON.stringify({ lib, source, fileName: path.basename(absPath), tsx: path.extname(absPath).toLowerCase() === ".tsx" }),
+    cwd: workspace,
+    encoding: "utf8",
+    timeout: CHECK_TIMEOUT_MS,
+    maxBuffer: 4 * 1024 * 1024,
+    windowsHide: true,
+  });
+  if (r.error || r.status !== 0) return null;
+  const marked = String(r.stdout ?? "").split("\n").reverse().find((l) => l.startsWith("@@smol-ts@@"));
+  if (!marked) return null;
+  let res: any;
+  try { res = JSON.parse(marked.slice("@@smol-ts@@".length)); } catch { return null; }
+  if (res?.unusable) {
+    try { unusableTs.set(lib, fs.statSync(lib).mtimeMs); } catch { /* gone */ }
+    return null;
+  }
+  if (typeof res?.line !== "number" || typeof res?.message !== "string") return null;
+  return `line ${res.line}: ${res.message.slice(0, 300)}`;
+}
+
 /**
  * Check a just-written file. Returns a short warning sentence, or null when
  * the file parses (or when we have no parser for it). Never throws.
  */
-export function syntaxCheck(absPath: string, relPath: string): string | null {
+export function syntaxCheck(absPath: string, relPath: string, workspace?: string, mayRun?: (command: string) => boolean): string | null {
   try {
     const ext = path.extname(absPath).toLowerCase();
-    if (![".js", ".mjs", ".cjs", ".json", ".html", ".htm", ".py"].includes(ext)) return null;
+    const isTs = [".ts", ".tsx", ".mts", ".cts"].includes(ext) && !absPath.toLowerCase().endsWith(".d.ts");
+    if (!isTs && ![".js", ".mjs", ".cjs", ".json", ".html", ".htm", ".py"].includes(ext)) return null;
     const stat = fs.statSync(absPath);
     if (stat.size > MAX_CHECK_BYTES) return null;
     if (ext === ".py") return checkPython(absPath);
     const source = fs.readFileSync(absPath, "utf8");
+    if (isTs) {
+      if (!workspace) return null;
+      const msg = checkTypeScript(source, absPath, workspace, mayRun);
+      return msg ? `${relPath} has a TypeScript syntax error at ${msg}` : null;
+    }
     if (ext === ".json") {
       try {
         JSON.parse(source);

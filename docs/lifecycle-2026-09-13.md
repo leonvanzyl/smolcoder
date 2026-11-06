@@ -82,4 +82,4 @@ It checks a temporary 503, an incomplete tool-call stream, a simulated exhausted
 
 ## Limits
 
-There is no matched Claude Code, Codex or OpenCode benchmark here. No claim is made that the harness improves the model's underlying reasoning ability or guarantees unattended completion. LM Studio remains covered by adapter/load/stream regression tests; this complex live run used Ollama. The browser checks exercise a desktop keyboard/mouse game and are not a cross-browser or graphics-performance benchmark. The harness's shell permission scan is not an operating-system sandbox.
+There is no matched Claude Code or Codex benchmark here. No claim is made that the harness improves the model's underlying reasoning ability or guarantees unattended completion. LM Studio remains covered by adapter/load/stream regression tests; this complex live run used Ollama. The browser checks exercise a desktop keyboard/mouse game and are not a cross-browser or graphics-performance benchmark. The harness's shell permission scan is not an operating-system sandbox.

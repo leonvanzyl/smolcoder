@@ -5,7 +5,7 @@
 
 import { Plan } from "../plan";
 import { ToolSpec } from "../providers/types";
-import { editFile, listFiles, readFile, writeFile } from "./fs-tools";
+import { AppliedEdits, editFile, FileDiff, listFiles, readFile, writeFile } from "./fs-tools";
 import { syntaxCheck } from "./check";
 import { runCommand } from "./shell";
 import { TaskManager } from "./tasks";
@@ -152,6 +152,15 @@ export interface ToolContext {
   commandsRun: string[];
   /** Internal per-request cap; never a model-supplied tool argument. */
   resultCharLimit?: number;
+  /** Set by the last successful write_file/edit_file, for the UI only. */
+  lastChange?: { diff: FileDiff };
+  /** edit_file calls that succeeded this session (repeat detection). */
+  appliedEdits?: AppliedEdits;
+  /** Whether a command would run without asking the user (the run_command
+   * rules for the current mode). Without it, only commands that stay inside
+   * the workspace do. The TypeScript check uses it before running the
+   * project's own compiler. */
+  mayRunUnasked?: (command: string) => boolean;
 }
 
 export async function executeTool(
@@ -160,8 +169,10 @@ export async function executeTool(
   ctx: ToolContext,
   signal?: AbortSignal
 ): Promise<string> {
+  ctx.lastChange = undefined;
   try {
     let result: string;
+    const change: { diff?: FileDiff } = {};
     switch (name) {
       case "read_file":
         result = readFile(ctx.workspace, args, ctx.resultCharLimit ? ctx.resultCharLimit - 256 : undefined);
@@ -185,24 +196,26 @@ export async function executeTool(
         break;
       }
       case "write_file":
-        result = writeFile(ctx.workspace, args);
+        result = writeFile(ctx.workspace, args, change);
+        if (change.diff) ctx.lastChange = { diff: change.diff };
         if (!result.startsWith("Error")) {
           ctx.filesTouched.add(String(args.path));
-          result += afterWrite(ctx.workspace, String(args.path));
+          result += afterWrite(ctx, String(args.path));
         }
         break;
       case "edit_file":
-        result = editFile(ctx.workspace, args);
-        if (!result.startsWith("Error")) {
+        result = editFile(ctx.workspace, args, change, (ctx.appliedEdits ??= new Set()));
+        if (change.diff) ctx.lastChange = { diff: change.diff };
+        if (!result.startsWith("Error") && change.diff) {
           ctx.filesTouched.add(String(args.path));
-          result += afterWrite(ctx.workspace, String(args.path));
+          result += afterWrite(ctx, String(args.path));
         }
         break;
       case "run_command":
         if (typeof args.command !== "string" || !args.command.trim()) {
           return 'Error: command is required. Example: {"command": "npm test"}';
         }
-        result = await runCommand(args.command, ctx.workspace, signal);
+        result = await runCommand(args.command, ctx.workspace, signal, { maxChars: ctx.resultCharLimit, saveLog: true });
         ctx.commandsRun.push(`${args.command} → ${result.split("\n").at(-1)}`);
         if (ctx.commandsRun.length > 50) ctx.commandsRun.splice(0, ctx.commandsRun.length - 50);
         break;
@@ -238,10 +251,10 @@ export async function executeTool(
 /** Post-write hook: parse what was just written and coach on the first
  * syntax error. A one-line warning riding on the success message is the
  * cheapest possible feedback loop for a local model. */
-function afterWrite(workspace: string, relPath: string): string {
+function afterWrite(ctx: ToolContext, relPath: string): string {
   try {
-    const abs = resolveInWorkspace(workspace, relPath);
-    const warning = syntaxCheck(abs, relPath);
+    const abs = resolveInWorkspace(ctx.workspace, relPath);
+    const warning = syntaxCheck(abs, relPath, ctx.workspace, ctx.mayRunUnasked);
     return warning ? `
 Warning: ${warning} Fix this before moving on (use edit_file).` : "";
   } catch {

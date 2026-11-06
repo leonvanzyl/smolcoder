@@ -4,6 +4,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { Tui } = require("../dist/tui/tui");
+// Unicode glyphs whatever console runs the tests (plain conhost gets ASCII).
+require("../dist/tui/theme").setTheme({ ascii: false });
 
 function capture(fn) {
   const real = process.stdout.write;

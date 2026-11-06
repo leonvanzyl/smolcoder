@@ -62,6 +62,9 @@ function toWireTools(tools: ToolSpec[]): any[] {
  * pause, and a reload of a 17 GB model costs 10-20 s plus a cold cache. */
 const KEEP_ALIVE = process.env.SMOLCODER_KEEP_ALIVE || "30m";
 
+/** Ollama's answer to a prompt larger than the loaded context (truncate:false). */
+const CONTEXT_OVERFLOW = /longer than the context|context length|exceeds? (the )?context/i;
+
 export class OllamaProvider implements Provider {
   readonly replaysThinking = true;
   readonly label: string;
@@ -134,6 +137,14 @@ export class OllamaProvider implements Provider {
       tools: sendTools.length ? toWireTools(sendTools) : undefined,
       stream,
       keep_alive: KEEP_ALIVE,
+      // Never let Ollama make room by itself: truncate drops the oldest
+      // messages (our compaction note among them) and shift slides the window
+      // mid-generation. Off, an oversized prompt is a 400 "prompt is longer
+      // than the context length" error, which the agent's context recovery
+      // handles, and a reply that runs out of room ends with done_reason
+      // "length", which the truncation nudges handle.
+      truncate: false,
+      shift: false,
       ...(think !== undefined ? { think } : {}),
       options: {
         ...(this.numCtx ? { num_ctx: this.numCtx } : {}),
@@ -172,8 +183,9 @@ export class OllamaProvider implements Provider {
         return await this.request(makeBody(true, undefined), opts, started);
       }
       // Older Ollama versions reject stream+tools together; retry non-streaming
-      // once, but only for a pre-stream rejection (not a transient error).
-      if (/returned 4\d\d/.test(msg)) {
+      // once, but only for a pre-stream rejection (not a transient error, and
+      // not an oversized prompt, which would only fail again).
+      if (/returned 4\d\d/.test(msg) && !CONTEXT_OVERFLOW.test(msg)) {
         return await this.request(makeBody(false, think), opts, started);
       }
       throw err;
@@ -231,14 +243,20 @@ export class OllamaProvider implements Provider {
             name: fn.name ?? "",
             ...parseArgs(fn.arguments),
           });
+          opts.onToolArgs?.(fn.name ?? "", typeof fn.arguments === "string" ? fn.arguments.length : JSON.stringify(fn.arguments ?? {}).length);
         }
       }
       if (chunk.done) {
         finished = true;
         if (typeof chunk.prompt_eval_count === "number") promptTokens = chunk.prompt_eval_count;
+        // prompt_eval_cached_count is documented as the part of the prompt
+        // read from cache. Larger than prompt_eval_count, it cannot be part
+        // of it: the count then covers only the newly evaluated tokens.
+        const cached = chunk.prompt_eval_cached_count;
+        if (promptTokens !== undefined && typeof cached === "number" && cached > promptTokens) promptTokens += cached;
         if (typeof chunk.eval_count === "number") completionTokens = chunk.eval_count;
         if (typeof chunk.prompt_eval_duration === "number" && chunk.prompt_eval_duration > 0 && promptTokens) {
-          promptTokPerSec = promptTokens / (chunk.prompt_eval_duration / 1e9);
+          promptTokPerSec = (chunk.prompt_eval_count ?? promptTokens) / (chunk.prompt_eval_duration / 1e9);
         }
         if (typeof chunk.eval_duration === "number" && chunk.eval_duration > 0 && completionTokens) {
           genTokPerSec = completionTokens / (chunk.eval_duration / 1e9);

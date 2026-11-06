@@ -123,7 +123,7 @@ test("channel: the state event carries the busy label so a reconnecting page res
   const { ch } = makeChannel();
   ch.getState = () => ({ mode: "edit" });
   ch.startSpinner("thinking");
-  assert.deepEqual(ch.stateEvent().s, { mode: "edit", busy: "thinking", title: "" });
+  assert.deepEqual(ch.stateEvent().s, { mode: "edit", busy: "thinking", title: "", queued: [], queuePaused: false });
   ch.stopSpinner();
   assert.equal(ch.stateEvent().s.busy, null);
 });
@@ -280,7 +280,8 @@ function readEvents(hub, stopWhen) {
         let i;
         while ((i = buf.indexOf("\n\n")) >= 0) {
           const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
-          if (chunk.startsWith("data: ")) events.push(JSON.parse(chunk.slice(6)));
+          const data = chunk.split("\n").find((l) => l.startsWith("data: "));
+          if (data) events.push(JSON.parse(data.slice(6)));
         }
         if (events.some(stopWhen)) { clearTimeout(timer); finish(); }
       });
@@ -343,7 +344,8 @@ test("hub: sessions start, echo, save, close, resume, delete; workspaces add and
     await until(() => hub.snapshot().workspaces[0].sessions[0].title === "hello there", 2000, "verbatim title");
     await until(() => hub.snapshot().workspaces[0].sessions[0].title === "Hello Session", 2000, "model-written title");
     const events = await readEvents(hub, (e) => e.t === "state" && e.sid === id);
-    assert.equal(events[0].t, "hub");
+    assert.equal(events[0].t, "reset", "a first visit starts with a reset and a full replay");
+    assert.equal(events[1].t, "hub");
     assert.ok(events.some((e) => e.t === "user" && e.sid === id && e.s === "hello there"), "replay includes the user message");
     assert.ok(events.some((e) => e.t === "token" && e.s === "echo: hello there"), "replay includes the reply");
     assert.ok(events.some((e) => e.t === "state" && e.sid === id && e.s.model === "fake-model"), "state follows the replay");
