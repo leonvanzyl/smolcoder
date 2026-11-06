@@ -130,16 +130,25 @@ test("sidebar in a browser", { skip: chromium ? false : "Playwright not availabl
     await boot();
 
     await t.test("status labels, unread and git line", async () => {
-      assert.match(await row("a1").textContent(), /Working · 1m 1\ds/, "busy shows Working and a live duration");
+      assert.match(await row("a1").textContent(), /Working/, "busy shows Working");
+      assert.match(await row("a1").locator(".sb-status").getAttribute("title"), /Working for 1m 1\ds/, "and how long, as the slot's tooltip");
       assert.match(await row("a2").textContent(), /Needs you/);
       assert.match(await row("a3").textContent(), /Done/, "finished since last seen");
       assert.match(await row("a4").textContent(), /Failed/, "an unread failed turn survives as Failed on a stored session");
       assert.match(await row("c1").textContent(), /Failed/, "a failed start");
-      assert.ok(await row("a1").locator(".sb-l3").count(), "the current session shows the branch line");
-      assert.match(await row("a1").locator(".sb-l3").textContent(), /feat\/sidebar-rebuild.*\+128.*−37/);
-      assert.equal(await row("a2").locator(".sb-l3").count(), 0, "not repeated on every session of the same checkout");
-      assert.match(await row("a3").locator(".sb-l3").textContent(), /fix\/login.*\+4.*−1/, "a worktree session shows its own branch");
-      assert.equal(await row("a5").evaluate((e) => e.classList.contains("sb-slim")), true, "stored and seen rows are slim");
+      // One rhythm: every row is a single line of the same height, whatever its state.
+      const heights = await page.evaluate(() => [...document.querySelectorAll("#wslist .sess")].map((e) => Math.round(e.getBoundingClientRect().height)));
+      assert.ok(heights.length >= 6 && heights.every((h) => h === heights[0]), "rows share one height: " + heights.join(","));
+      // Titles in a folder line up with the folder's name.
+      const nameX = await page.locator(".sb-folder", { hasText: "smolcoder" }).locator(".wsname").evaluate((e) => e.getBoundingClientRect().left);
+      const titleX = await row("a2").locator(".stitle").evaluate((e) => e.getBoundingClientRect().left);
+      assert.ok(Math.abs(nameX - titleX) <= 1, "session title indented to the folder name (" + nameX + " vs " + titleX + ")");
+      // The branch and +N −M of the current checkout are in the top bar.
+      assert.match(await page.locator("#crumb .crumb-git").textContent(), /feat\/sidebar-rebuild.*\+128.*−37/);
+      assert.equal(await row("a3").locator(".sb-wtmark").count(), 1, "a worktree session is marked in its row");
+      assert.equal(await row("a2").locator(".sb-wtmark").count(), 0);
+      assert.equal(await row("a5").evaluate((e) => e.classList.contains("recede")), true, "stored and seen rows recede");
+      assert.equal(await row("a1").evaluate((e) => e.classList.contains("recede")), false);
       assert.equal(await row("a1").getAttribute("aria-current"), "page");
       // The project favicon, and a monogram where there is none.
       assert.equal(await page.locator(".sb-folder", { hasText: "smolcoder" }).locator("img.sb-favicon").count(), 1);
@@ -360,6 +369,22 @@ test("sidebar in a browser", { skip: chromium ? false : "Playwright not availabl
       assert.match(await page.locator("#wslist").textContent(), /No projects yet/);
       await shot("empty");
       assert.deepEqual(errors, [], "browser errors");
+    });
+
+    await t.test("a fresh session keeps the logo under a note, until the first message", async () => {
+      await boot();
+      const log = () => page.locator(".log:not([hidden])");
+      await emit([{ t: "line", sid: "a1", kind: "warn", s: "older Ollama: setting the context explicitly" }]);
+      await settle();
+      assert.equal(await log().evaluate((e) => e.classList.contains("fresh")), true, "a note does not end the fresh state");
+      const before = await log().evaluate((e) => getComputedStyle(e, "::before").content);
+      assert.match(before, /███/, "the SMOL logo shows");
+      assert.match(await log().evaluate((e) => getComputedStyle(e, "::after").content), /What should we work on\?/);
+      assert.ok(await log().locator(".line-warn").isVisible(), "the note shows too");
+      await emit([{ t: "user", sid: "a1", s: "hello" }]);
+      await settle();
+      assert.equal(await log().evaluate((e) => e.classList.contains("fresh")), false, "the first message ends it");
+      assert.equal(await log().evaluate((e) => getComputedStyle(e, "::before").content), "none");
     });
 
     if (shots) {
