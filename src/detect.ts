@@ -553,7 +553,15 @@ export async function resolveContextWindow(
     // Match the CHOSEN model only — never fall back to models[0]. If our
     // preload failed (e.g. too big for VRAM) but a different model is still
     // resident, models[0] would anchor the budget to the wrong window.
-    const entry = ps?.models?.find((m: any) => m.name === model.id || m.model === model.id);
+    let entry = ps?.models?.find((m: any) => m.name === model.id || m.model === model.id);
+    if (!entry && Array.isArray(ps?.models) && ps.models.length) {
+      // The same weights can be pulled under several tags (qwen3:latest and
+      // qwen3:27b); /api/ps names the loaded model by whichever tag loaded it
+      // first. Match on the digest so the window is still read correctly.
+      const tags = await tryFetchJson(`${model.baseUrl}/api/tags`, undefined, 3000);
+      const digest = tags?.models?.find((m: any) => m.name === model.id || m.model === model.id)?.digest;
+      if (digest) entry = ps.models.find((m: any) => m.digest === digest);
+    }
     if (typeof entry?.context_length === "number" && entry.context_length > 0) {
       return {
         ...model,

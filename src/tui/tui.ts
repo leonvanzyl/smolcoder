@@ -555,6 +555,9 @@ export class Tui implements SessionUI {
           if (menu.kind === "args" && menu.loading) return true;
           return false; // submit what was typed
         }
+        // With no value typed yet, enter runs the bare command ("/models "
+        // opens the picker) instead of the first suggested value.
+        if (menu.kind === "args" && menu.sig.endsWith(":")) return false;
         if (this.complete(menu, pick(), "enter")) return true;
         break;
       default:
@@ -567,7 +570,8 @@ export class Tui implements SessionUI {
   /** Apply a menu choice. Returns true when it submitted the input. */
   private complete(menu: Menu, item: MenuItem, how: "tab" | "enter"): boolean {
     if (menu.kind === "slash" && item.cmd) {
-      if (item.cmd.args || how === "tab") {
+      // Enter runs the command; tab completes it so a value can follow.
+      if (how === "tab") {
         this.ed.set("/" + item.cmd.name + " ");
         return false;
       }

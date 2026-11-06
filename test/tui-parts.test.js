@@ -352,12 +352,15 @@ test("input: esc never wipes a draft on one press; alt+enter adds a line; slash 
   assert.match(f, /↓ 6 more/);
   f = strip(capture(() => keys("\x1b[6~\x1b[6~")));
   assert.match(f.slice(f.lastIndexOf("/cmd")), /cmd11/);
-  // args mode: Enter on /models inserts "/models " and lists the values
+  // args mode: tab on /models inserts "/models " and lists the values
+  // (enter would run /models itself and open the picker)
   capture(() => keys("\x15/models"));
-  f = strip(capture(() => keys("\r")));
+  f = strip(capture(() => keys("\t")));
   await sleep(10);
   f = strip(capture(() => tui.refresh()));
   assert.match(f, /next recent/);
+  capture(() => keys("n"));
+  await sleep(10);
   capture(() => keys("\r"));
   assert.equal(await p, "/models next");
   capture(() => tui.close());
