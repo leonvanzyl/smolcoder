@@ -1,5 +1,11 @@
 // Line editor state: a buffer + cursor index, with logical-line navigation
-// for multi-line input, and a wrap-aware layout used by the renderer.
+// for multi-line input, word motions, and a wrap-aware layout used by the
+// renderer. Positions step over whole characters (surrogate pairs, combining
+// marks), and the layout measures terminal cells, so CJK and emoji line up.
+
+import { cellWidth, nextCharIndex, prevCharIndex } from "./width";
+
+const isWordChar = (ch: string | undefined) => !!ch && /[\p{L}\p{N}_]/u.test(ch);
 
 export class LineEditor {
   buffer = "";
@@ -12,21 +18,49 @@ export class LineEditor {
 
   backspace(): void {
     if (this.cursor === 0) return;
-    this.buffer = this.buffer.slice(0, this.cursor - 1) + this.buffer.slice(this.cursor);
-    this.cursor--;
+    const p = prevCharIndex(this.buffer, this.cursor);
+    this.buffer = this.buffer.slice(0, p) + this.buffer.slice(this.cursor);
+    this.cursor = p;
   }
 
   del(): void {
     if (this.cursor >= this.buffer.length) return;
-    this.buffer = this.buffer.slice(0, this.cursor) + this.buffer.slice(this.cursor + 1);
+    const n = nextCharIndex(this.buffer, this.cursor);
+    this.buffer = this.buffer.slice(0, this.cursor) + this.buffer.slice(n);
   }
 
   left(): void {
-    if (this.cursor > 0) this.cursor--;
+    this.cursor = prevCharIndex(this.buffer, this.cursor);
   }
 
   right(): void {
-    if (this.cursor < this.buffer.length) this.cursor++;
+    this.cursor = nextCharIndex(this.buffer, this.cursor);
+  }
+
+  /** Start of the word before the cursor (skipping spaces/punctuation first). */
+  private wordStartBefore(): number {
+    let i = this.cursor;
+    while (i > 0 && !isWordChar(this.buffer[i - 1]) && this.buffer[i - 1] !== "\n") i--;
+    if (i > 0 && this.buffer[i - 1] === "\n" && i === this.cursor) return i - 1;
+    while (i > 0 && isWordChar(this.buffer[i - 1])) i--;
+    return i;
+  }
+
+  private wordEndAfter(): number {
+    let i = this.cursor;
+    const n = this.buffer.length;
+    while (i < n && !isWordChar(this.buffer[i]) && this.buffer[i] !== "\n") i++;
+    if (i < n && this.buffer[i] === "\n" && i === this.cursor) return i + 1;
+    while (i < n && isWordChar(this.buffer[i])) i++;
+    return i;
+  }
+
+  wordLeft(): void {
+    this.cursor = this.wordStartBefore();
+  }
+
+  wordRight(): void {
+    this.cursor = this.wordEndAfter();
   }
 
   private lineStartIdx(): number {
@@ -85,13 +119,23 @@ export class LineEditor {
     this.cursor = start;
   }
 
+  /** ctrl+k: delete to the end of the line (or the newline itself at the end). */
+  killToLineEnd(): void {
+    let end = this.lineEndIdx();
+    if (end === this.cursor && end < this.buffer.length) end++;
+    this.buffer = this.buffer.slice(0, this.cursor) + this.buffer.slice(end);
+  }
+
   deleteWordBack(): void {
     if (this.cursor === 0) return;
-    let i = this.cursor;
-    while (i > 0 && /\s/.test(this.buffer[i - 1])) i--;
-    while (i > 0 && !/\s/.test(this.buffer[i - 1])) i--;
+    const i = this.wordStartBefore();
     this.buffer = this.buffer.slice(0, i) + this.buffer.slice(this.cursor);
     this.cursor = i;
+  }
+
+  deleteWordForward(): void {
+    const j = this.wordEndAfter();
+    this.buffer = this.buffer.slice(0, this.cursor) + this.buffer.slice(j);
   }
 
   clear(): void {
@@ -111,29 +155,48 @@ export interface Layout {
   curCol: number;
 }
 
-/** Wrap the buffer into display rows of at most `width` chars, tracking where
- * the cursor lands. Explicit newlines always break a row. */
+/** Wrap the buffer into display rows of at most `width` cells, tracking
+ * where the cursor lands (curCol is in cells). Explicit newlines always break
+ * a row; a wide character that would straddle the edge moves to the next row.
+ * Tabs show as 4 spaces. */
 export function layoutBuffer(buffer: string, cursor: number, width: number): Layout {
   const rows: string[] = [];
   let row = "";
+  let rowW = 0;
   let curRow = 0;
   let curCol = 0;
-  for (let i = 0; i <= buffer.length; i++) {
-    if (i === cursor) {
-      curRow = rows.length;
-      curCol = row.length;
-    }
+  let i = 0;
+  const atCursor = () => {
+    curRow = rows.length;
+    curCol = rowW;
+  };
+  while (i <= buffer.length) {
+    if (i === cursor) atCursor();
     if (i === buffer.length) break;
-    const ch = buffer[i];
+    const cp = buffer.codePointAt(i)!;
+    const ch = String.fromCodePoint(cp);
     if (ch === "\n") {
       rows.push(row);
       row = "";
-    } else {
-      row += ch;
-      if (row.length >= width) {
-        rows.push(row);
-        row = "";
-      }
+      rowW = 0;
+      i++;
+      continue;
+    }
+    const shown = ch === "\t" ? "    " : ch;
+    const w = ch === "\t" ? 4 : cellWidth(cp);
+    if (rowW + w > width && rowW > 0) {
+      rows.push(row);
+      row = "";
+      rowW = 0;
+      if (i === cursor) atCursor();
+    }
+    row += shown;
+    rowW += w;
+    i += ch.length;
+    if (rowW >= width && i < buffer.length && buffer[i] !== "\n") {
+      rows.push(row);
+      row = "";
+      rowW = 0;
     }
   }
   rows.push(row);
