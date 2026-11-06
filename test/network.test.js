@@ -342,3 +342,22 @@ test("a resumed session's fallback warning survives the stand-in's own note and 
     await ollama.close();
   }
 });
+
+test("Ollama: a model loaded under another tag of the same weights still reports its real window", async () => {
+  const { resolveContextWindow } = require("../dist/detect");
+  const digest = "aaee06c39dcf2437";
+  const ollama = await serveJson({
+    "/api/show": { model_info: { "qwen35.context_length": 262144 } },
+    "/api/chat": {},
+    "/api/tags": { models: [{ name: "qwen3.8:latest", model: "qwen3.8:latest", digest }, { name: "qwen3.8:27b", model: "qwen3.8:27b", digest }] },
+    "/api/ps": { models: [{ name: "qwen3.8:27b", model: "qwen3.8:27b", digest, context_length: 131072 }] },
+  });
+  try {
+    const ready = await resolveContextWindow({ id: "qwen3.8:latest", backend: "ollama", baseUrl: ollama.base, contextWindow: 0 });
+    assert.equal(ready.contextWindow, 131072, "the window the server actually allocated");
+    assert.equal(ready.numCtx, undefined, "no num_ctx override, so Ollama does not reload the model");
+    assert.equal(ready.note, undefined, "no 'older Ollama' warning");
+  } finally {
+    await ollama.close();
+  }
+});
