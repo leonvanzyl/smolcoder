@@ -1,89 +1,61 @@
-// The TUI's pickers, driven by feeding keys to stdin and reading the frames it
-// draws. stdout is only captured inside synchronous sections so the test
-// runner's own output is never swallowed.
+// The TUI's pickers and prompts, driven by feeding keys to a fake stdin and
+// reading the screen of an emulated terminal.
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { Tui } = require("../dist/tui/tui");
+const { makeTui, sleep, DOWN, UP } = require("./tui-harness");
 // Unicode glyphs whatever console runs the tests (plain conhost gets ASCII).
-require("../dist/tui/theme").setTheme({ ascii: false });
-
-function capture(fn) {
-  const real = process.stdout.write;
-  let out = "";
-  process.stdout.write = (s) => ((out += s), true);
-  try {
-    fn();
-  } finally {
-    process.stdout.write = real;
-  }
-  // eslint-disable-next-line no-control-regex
-  return out.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, "");
-}
-const keys = (s) => process.stdin.emit("data", s);
-const DOWN = "\x1b[B";
-const UP = "\x1b[A";
+require("../dist/tui/theme").setTheme({ ascii: false, color: true });
 
 test("tui: a text prompt edits one line, submits on enter and cancels on ctrl+c", async () => {
-  const tui = new Tui();
-  let p;
-  const frame = capture(() => {
-    tui.start();
-    tui.start(); // startup may open it before the session does
-    p = tui.prompt("Address of the machine", "192.168.1.50");
-  });
-  assert.match(frame, /Address of the machine/);
-  assert.match(frame, /192\.168\.1\.50/, "the placeholder shows while empty");
-  const typed = capture(() => keys("gpu-bx"));
-  assert.match(typed, /gpu-bx/);
-  const echoed = capture(() => {
-    keys("\x7f"); // backspace
-    keys("ox.local\r");
-  });
+  const t = makeTui();
+  t.tui.start(); // startup may open it before the session does
+  const p = t.tui.prompt("Address of the machine", "192.168.1.50");
+  assert.ok(t.has("Address of the machine"));
+  assert.ok(t.has("192.168.1.50"), "the placeholder shows while empty");
+  t.keys("gpu-bx");
+  assert.ok(t.has("gpu-bx"));
+  t.keys("\x7f"); // backspace
+  t.keys("ox.local\r");
   assert.equal(await p, "gpu-box.local", "start() twice did not double the keystrokes");
-  assert.match(echoed, /Address of the machine: gpu-box\.local/);
+  assert.ok(t.has("Address of the machine: gpu-box.local"), "the answer is noted");
 
-  let cancelled, empty;
-  capture(() => {
-    cancelled = tui.prompt("Name");
-    keys("half\x03");
-  });
+  const cancelled = t.tui.prompt("Name");
+  t.keys("half\x03");
   assert.equal(await cancelled, null);
-  capture(() => {
-    empty = tui.prompt("Name");
-    keys("  \r");
-  });
+  const empty = t.tui.prompt("Name");
+  t.keys("  \r");
   assert.equal(await empty, null);
-  capture(() => tui.close());
+  const secret = t.tui.prompt("API key", "", { secret: true });
+  t.keys("sk-123");
+  assert.ok(!t.has("sk-123"), "a secret is masked while typed");
+  assert.ok(t.has("••••••"));
+  t.keys("\r");
+  assert.equal(await secret, "sk-123");
+  assert.ok(!t.has("sk-123"));
+  t.close();
 });
 
 test("tui: a long list scrolls with the selection, so rows past the tenth can be reached", async () => {
-  const tui = new Tui();
+  const t = makeTui({ cols: 80, rows: 24 });
   const options = Array.from({ length: 15 }, (_, i) => ({ label: `model-${String(i + 1).padStart(2, "0")}` }));
   options.push({ label: "+ Find models on another machine…" });
-  let p;
-  const first = capture(() => {
-    tui.start();
-    p = tui.select("Select model", options);
-  });
-  assert.match(first, /model-10/);
-  assert.doesNotMatch(first, /model-11/);
-  assert.match(first, /↓ 6 more/);
+  const p = t.tui.select("Select model", options);
+  assert.ok(t.has("model-10"));
+  assert.ok(!t.has("model-11"));
+  assert.ok(t.has("↓ 6 more"));
 
-  const scrolled = capture(() => keys(DOWN.repeat(12)));
-  const last = scrolled.slice(scrolled.lastIndexOf("Select model"));
-  assert.match(last, /model-13/);
-  assert.doesNotMatch(last, /model-03/);
-  assert.match(last, /↑ 3 more/);
-  assert.match(last, /↓ 3 more/);
+  t.keys(DOWN.repeat(12));
+  assert.ok(t.has("model-13"));
+  assert.ok(!t.has("model-03"));
+  assert.ok(t.has("↑ 3 more"));
+  assert.ok(t.has("↓ 3 more"));
 
   // Up from the top wraps to the bottom: the network row is one keypress away.
-  const wrapped = capture(() => {
-    keys(UP.repeat(13));
-  });
-  assert.match(wrapped.slice(wrapped.lastIndexOf("Select model")), /Find models on another machine/);
-  capture(() => keys("\r"));
+  t.keys(UP.repeat(13));
+  assert.ok(t.has("Find models on another machine"));
+  t.keys("\r");
   assert.equal(await p, 15);
-  capture(() => tui.close());
+  t.close();
 });
 
 test("tui: /model + enter opens the model picker; values only after tab or a typed space", async () => {
@@ -92,26 +64,14 @@ test("tui: /model + enter opens the model picker; values only after tab or a typ
     { name: "help", desc: "Show help" },
   ];
   const submit = async (typed) => {
-    // Redraws also land on timers, so swallow output for the whole exchange.
-    const real = process.stdout.write;
-    process.stdout.write = () => true;
-    try {
-      return await submitQuiet(typed);
-    } finally {
-      process.stdout.write = real;
-    }
-  };
-  const submitQuiet = async (typed) => {
-    const tui = new Tui({ historyFile: null });
-    tui.slashCommands = cmds;
-    let p;
-    capture(() => { tui.start(); p = tui.readInput(); });
+    const t = makeTui({ props: { slashCommands: cmds } });
+    const p = t.tui.readInput();
     for (const k of typed) {
-      capture(() => keys(k));
-      await new Promise((r) => setTimeout(r, 60)); // arg values load asynchronously
+      t.keys(k);
+      await sleep(30); // arg values load asynchronously
     }
     const text = await p;
-    capture(() => tui.close());
+    t.close();
     return String(text).trim();
   };
   assert.equal(await submit(["/model", "\r"]), "/models", "enter on the highlighted command runs it bare");

@@ -16,7 +16,6 @@ import { commandHelp } from "./commands";
 import { DATA_DIR, loadConfig } from "./config";
 import { ContextManager } from "./context";
 import { EventBus } from "./events";
-import { terminalLogo } from "./logo";
 import { Plan } from "./plan";
 import { buildSystemPrompt, loadAgentsMd } from "./prompt";
 import { Effort } from "./providers/types";
@@ -29,6 +28,7 @@ import {
   refreshModels,
   reportCompactions,
   Session,
+  backendLabel,
   SessionPrefs,
   sessionLine,
   setupWithoutLocalModels,
@@ -36,7 +36,7 @@ import {
 import { Mode, ToolContext } from "./tools/index";
 import { pickShell } from "./tools/shell";
 import { TaskManager } from "./tools/tasks";
-import { Tui } from "./tui/tui";
+import { Tui, restoreTerminal } from "./tui/tui";
 import { UI } from "./ui";
 import { c } from "./util";
 import { askHubToOpen, pingHub, readHubRecord, WebHub } from "./web/hub";
@@ -170,9 +170,21 @@ function installSignalCleanup(cleanup: () => void): void {
   process.on("SIGINT", () => run(130));
 }
 
-/** The SMOL banner that opens every interactive session. */
-function printLogo(): void {
-  for (const line of terminalLogo(process.stdout.columns || 80, VERSION)) console.log(line);
+/** Printed on the normal screen after the TUI closes: what the session was,
+ * how to get back to it, and the model. */
+function printExitSummary(session: Session): void {
+  const first = session.agent.messages.find((m) => m.role === "user" && !m.compactNote && !m.historyNote && m.content.trim());
+  const title = first ? first.content.replace(/\s+/g, " ").trim().slice(0, 60) : "";
+  const model = `${session.chosen.id} ${c.dim(backendLabel(session.chosen))}`;
+  const lines = [""];
+  lines.push(`  ${c.cyan(c.bold("smol"))}${c.dim("coder")}  ${c.dim("v" + VERSION)}`);
+  if (title) {
+    lines.push(`  ${c.dim("Session")}  ${c.bold(title)}`);
+    lines.push(`  ${c.dim("Resume ")}  run ${c.bold("smol")} here, then ${c.cyan("/sessions")}`);
+  } else lines.push(`  ${c.dim("Session")}  nothing sent, nothing saved`);
+  lines.push(`  ${c.dim("Model  ")}  ${model}`);
+  lines.push("");
+  process.stdout.write(lines.join("\n") + "\n");
 }
 
 function prefsOf(args: CliArgs): SessionPrefs {
@@ -301,23 +313,32 @@ async function runInteractive(args: CliArgs): Promise<void> {
     process.exit(1);
   }
 
-  printLogo();
-  const cfg = loadConfig();
-  process.stdout.write(c.dim("· looking for model servers…"));
-  let chosen = await prepareModel(prefsOf(args), cfg, (label) => {
-    process.stdout.write("\r\x1b[2K" + c.dim(`· ${label}…`));
-  });
-  process.stdout.write("\r\x1b[2K");
-
+  // The full-screen TUI opens at once on its home screen (the SMOL logo);
+  // finding a model shows as its spinner. Until a session exists, esc or
+  // ctrl+c quits.
   const tui = new Tui();
+  tui.version = VERSION;
+  tui.hintLeft = args.workspace.replace(os.homedir(), "~");
+  tui.onCancel = () => {
+    tui.close();
+    process.exit(130);
+  };
+  // A crash must not leave the terminal on the alternate screen.
+  const crash = (err: unknown) => {
+    restoreTerminal();
+    console.error(err);
+    process.exit(1);
+  };
+  process.on("uncaughtException", crash);
+  process.on("unhandledRejection", crash);
+  tui.start();
+  const cfg = loadConfig();
+  tui.startSpinner("Looking for model servers");
+  let chosen = await prepareModel(prefsOf(args), cfg, (label) => tui.startSpinner(label.charAt(0).toUpperCase() + label.slice(1)));
+  tui.stopSpinner();
+
   if (!chosen) {
-    // Nothing on this computer: open the TUI early and offer to look on the
-    // network. Until a session exists, esc/ctrl+c while it searches quits.
-    tui.onCancel = () => {
-      tui.close();
-      process.exit(130);
-    };
-    tui.start();
+    // Nothing on this computer: offer to look on the network.
     chosen = await setupWithoutLocalModels(tui, prefsOf(args));
     if (!chosen) {
       tui.close();
@@ -334,7 +355,11 @@ async function runInteractive(args: CliArgs): Promise<void> {
   } catch {
     /* no writable data folder: the session just is not saved */
   }
-  session.onExit = () => process.exit(0);
+  session.onExit = () => {
+    tui.close();
+    printExitSummary(session);
+    process.exit(0);
+  };
   process.on("exit", () => session.taskManager.killAll());
   installSignalCleanup(() => {
     try {
@@ -352,7 +377,6 @@ async function runInteractive(args: CliArgs): Promise<void> {
 
   tui.start();
   session.announce();
-  tui.println("");
   // Scan this computer and added machines once in the background, so the
   // model picker and F2 open on a full list without waiting.
   void refreshModels();

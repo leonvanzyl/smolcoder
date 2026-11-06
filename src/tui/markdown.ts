@@ -1,11 +1,11 @@
-// Line-buffered markdown for streamed replies. Each finished line is
-// formatted once and committed to scrollback (headings, bold/italic, inline
-// code, • bullets, quotes, rules, fenced code with a dim gutter and syntax
-// colors); only the unfinished tail is redrawn while tokens arrive. Tables are
-// held until the block ends so their columns can be aligned. Rows are
-// word-wrapped to the terminal width here, so the terminal never wraps them.
+// Line-buffered markdown for streamed replies. Each finished line is laid
+// out once (headings, bold/italic, inline code, bullets, quotes, rules,
+// fenced code in a shaded panel with syntax colours); only the unfinished
+// tail is laid out again while tokens arrive. Tables are held until the block
+// ends, then drawn as a grid. Rows are wrapped to the width here.
 
 import { HlState, highlightLine, langOf } from "./highlight";
+import { Row, span } from "./rows";
 import { theme } from "./theme";
 import { expandTabs, stringWidth, truncateWidth, wrapAnsi } from "./width";
 
@@ -23,7 +23,7 @@ export function renderInline(s: string): string {
     }
     let p = part;
     p = p.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_m, text: string, url: string) =>
-      text === url ? t.underline(text) : t.underline(text) + t.dim(` (${url})`)
+      text === url ? t.underline(t.accent(text)) : t.underline(t.accent(text)) + t.faint(` (${url})`)
     );
     p = p.replace(/(\*\*|__)(?=\S)(.+?)(?<=\S)\1/g, (_m, _d, inner: string) => t.bold(inner));
     p = p.replace(/~~(?=\S)(.+?)(?<=\S)~~/g, (_m, inner: string) => t.strike(inner));
@@ -48,30 +48,45 @@ function splitRow(line: string): string[] {
 interface Fence {
   marker: string;
   lang: string | null;
+  tag: string;
   hl: HlState;
 }
 
 export interface MarkdownOptions {
-  /** No markdown: plain dim text (full reasoning view). */
+  /** No markdown: plain muted text (the full reasoning view). */
   plain?: boolean;
+}
+
+const fgOf = (c: number) => ({ fg: theme.cell(c) });
+
+/** A row of plain text in the default text colour. */
+function textRow(x: number, s: string): Row {
+  return [span(x, s, fgOf(theme.p.text))];
+}
+
+/** One row of a shaded code panel. */
+function panelRow(w: number, text = "", x = 2): Row {
+  const st = { bg: theme.cell(theme.p.element), fg: theme.cell(theme.p.text) };
+  return [{ x: 0, fill: w, style: st, text: "" }, ...(text ? [{ x, text, style: st }] : [])];
 }
 
 export class MarkdownStream {
   private buf = "";
   private fence: Fence | null = null;
   private table: string[] = [];
+  private blank = true;
 
   constructor(private width: () => number, private opts: MarkdownOptions = {}) {}
 
-  /** True when nothing is waiting to be committed. */
+  /** True when nothing is waiting to be laid out. */
   get idle(): boolean {
     return this.buf === "" && this.table.length === 0;
   }
 
-  /** Feed streamed text; returns finished display rows to commit. */
-  push(text: string): string[] {
+  /** Feed streamed text; returns the finished rows. */
+  push(text: string): Row[] {
     this.buf += text;
-    const rows: string[] = [];
+    const rows: Row[] = [];
     let nl: number;
     while ((nl = this.buf.indexOf("\n")) >= 0) {
       const line = this.buf.slice(0, nl).replace(/\r$/, "");
@@ -81,31 +96,40 @@ export class MarkdownStream {
     return rows;
   }
 
-  /** Display rows for the unfinished tail: buffered table rows and the
-   * partial last line. Nothing here is committed. */
-  tail(): string[] {
-    const rows: string[] = [];
+  /** Rows for the unfinished tail: held table rows and the partial last
+   * line. Nothing here is final. */
+  tail(): Row[] {
+    const rows: Row[] = [];
     const w = this.width();
-    for (const l of this.table) rows.push(truncateWidth(renderInline(expandTabs(l)), w));
+    if (this.table.length) {
+      const lines = this.buf && /^\s*\|/.test(this.buf) ? [...this.table, this.buf] : this.table;
+      rows.push(...renderTable(lines, w));
+      if (this.buf && !/^\s*\|/.test(this.buf)) rows.push(textRow(0, truncateWidth(expandTabs(this.buf), w)));
+      return rows;
+    }
     if (this.buf) {
       if (this.opts.plain) rows.push(...this.plainRows(this.buf));
       else if (this.fence) rows.push(...this.codeRows(this.buf, { ...this.fence.hl }, this.fence.lang));
-      else if (this.table.length || /^\s*\|/.test(this.buf)) rows.push(truncateWidth(expandTabs(this.buf), w));
+      else if (/^\s*\|/.test(this.buf)) rows.push(textRow(0, truncateWidth(expandTabs(this.buf), w)));
       else rows.push(...this.blockRows(this.buf, true));
     }
+    // A code panel still streaming gets its bottom edge.
+    if (this.fence && !this.opts.plain) rows.push(panelRow(w));
     return rows;
   }
 
   /** End of the reply: everything left becomes final rows. */
-  end(): string[] {
-    const rows: string[] = [];
+  end(): Row[] {
+    const rows: Row[] = [];
     if (this.buf) {
       const line = this.buf;
       this.buf = "";
       rows.push(...this.feedLine(line));
     }
     rows.push(...this.flushTable());
+    if (this.fence && !this.opts.plain) rows.push(panelRow(this.width()));
     this.fence = null;
+    while (rows.length && rows[rows.length - 1].length === 0) rows.pop();
     return rows;
   }
 
@@ -116,7 +140,7 @@ export class MarkdownStream {
     this.fence = null;
   }
 
-  private feedLine(line: string): string[] {
+  private feedLine(line: string): Row[] {
     if (this.opts.plain) return this.plainRows(line);
     if (!this.fence && /^\s*\|/.test(line)) {
       this.table.push(line);
@@ -127,75 +151,108 @@ export class MarkdownStream {
     return rows;
   }
 
-  private plainRows(line: string): string[] {
+  private plainRows(line: string): Row[] {
     const w = this.width();
-    return wrapAnsi(expandTabs(line), w).map((r) => theme.dim(r));
+    if (!line.trim()) {
+      if (this.blank) return [];
+      this.blank = true;
+      return [[]];
+    }
+    this.blank = false;
+    return wrapAnsi(expandTabs(line), w).map((r) => [span(0, r, { ...fgOf(theme.p.muted), attrs: 4 })]);
   }
 
-  private codeRows(line: string, hl: HlState, lang: string | null): string[] {
-    const t = theme;
-    const gutter = t.dim(t.g.gutter + " ");
+  private codeRows(line: string, hl: HlState, lang: string | null): Row[] {
+    const w = this.width();
     const code = highlightLine(expandTabs(line), lang, hl);
-    return wrapAnsi(code, this.width() - 2, gutter).map((r, i) => (i === 0 ? gutter + r : r));
+    return wrapAnsi(code, Math.max(4, w - 4)).map((r) => panelRow(w, r));
   }
 
-  /** Format one complete (or, with peek, partial) line outside tables. */
-  private blockRows(line: string, peek: boolean): string[] {
+  /** Lay out one complete (or, with peek, partial) line outside tables. */
+  private blockRows(line: string, peek: boolean): Row[] {
     const t = theme;
     const w = this.width();
     if (this.fence) {
       const close = line.trim();
       if (close.startsWith(this.fence.marker) && /^[`~]+$/.test(close)) {
-        if (!peek) this.fence = null;
-        return [t.dim(t.g.fenceBottom)];
+        if (!peek) {
+          this.fence = null;
+          this.blank = false;
+        }
+        return [panelRow(w)];
       }
       return this.codeRows(line, peek ? { ...this.fence.hl } : this.fence.hl, this.fence.lang);
     }
     const f = FENCE.exec(line);
     if (f) {
-      if (!peek) this.fence = { marker: f[2][0].repeat(3), lang: langOf(f[3]), hl: {} };
-      return [t.dim(t.g.fenceTop + (f[3] ? " " + f[3] : ""))];
+      const tag = f[3] ?? "";
+      if (!peek) this.fence = { marker: f[2][0].repeat(3), lang: langOf(tag), tag, hl: {} };
+      const head = panelRow(w);
+      if (tag) head.push({ x: Math.max(2, w - 2 - stringWidth(tag)), text: tag, style: { bg: t.cell(t.p.element), fg: t.cell(t.p.faint) } });
+      return [head];
     }
     line = expandTabs(line);
-    if (!line.trim()) return [""];
+    if (!line.trim()) {
+      if (this.blank) return [];
+      if (!peek) this.blank = true;
+      return [[]];
+    }
+    if (!peek) this.blank = false;
     const h = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
     if (h) {
       const text = renderInline(h[2]);
-      const styled = h[1].length === 1 ? t.heading(text) : h[1].length === 2 ? t.heading(text) : t.bold(text);
-      return wrapAnsi(styled, w);
+      const styled = h[1].length <= 2 ? t.heading(text) : t.bold(t.text(text));
+      return wrapAnsi(styled, w).map((r) => textRow(0, r));
     }
-    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) return [t.dim(t.g.hr.repeat(Math.min(w, 40)))];
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) return [[span(0, t.g.hr.repeat(w), fgOf(t.p.border))]];
     const q = /^(\s*)>\s?(.*)$/.exec(line);
     if (q) {
-      const bar = t.dim(t.g.quote + " ");
-      return wrapAnsi(t.italic(renderInline(q[2])), w - 2, bar).map((r, i) => (i === 0 ? bar + r : r));
+      return wrapAnsi(t.italic(renderInline(q[2])), w - 2).map((r) => [
+        span(0, t.g.vline, fgOf(t.p.borderActive)),
+        span(2, r, fgOf(t.p.muted)),
+      ]);
+    }
+    const task = /^(\s*)[-*+]\s+\[([ xX])\]\s+(.*)$/.exec(line);
+    if (task) {
+      const done = task[2] !== " ";
+      const ind = stringWidth(task[1]);
+      const box = done ? t.green(t.g.stepDone) : t.muted(t.g.stepTodo);
+      const body = done ? t.muted(renderInline(task[3])) : renderInline(task[3]);
+      return wrapAnsi(body, w - ind - 2).map((r, i) => (i === 0 ? [span(ind, box), span(ind + 2, r, fgOf(t.p.text))] : textRow(ind + 2, r)));
     }
     const b = /^(\s*)[-*+]\s+(.*)$/.exec(line);
     if (b) {
-      const pre = b[1] + t.g.bullet + " ";
-      const ind = " ".repeat(stringWidth(pre));
-      return wrapAnsi(b[1] + t.accent(t.g.bullet) + " " + renderInline(b[2]), w, ind);
+      const ind = stringWidth(b[1]);
+      return wrapAnsi(renderInline(b[2]), w - ind - 2).map((r, i) =>
+        i === 0 ? [span(ind, t.g.bullet, fgOf(t.p.accent)), span(ind + 2, r, fgOf(t.p.text))] : textRow(ind + 2, r)
+      );
     }
     const o = /^(\s*)(\d+[.)])\s+(.*)$/.exec(line);
     if (o) {
-      const pre = o[1] + o[2] + " ";
-      return wrapAnsi(o[1] + t.accent(o[2]) + " " + renderInline(o[3]), w, " ".repeat(stringWidth(pre)));
+      const ind = stringWidth(o[1]);
+      const nw = stringWidth(o[2]) + 1;
+      return wrapAnsi(renderInline(o[3]), w - ind - nw).map((r, i) =>
+        i === 0 ? [span(ind, o[2], fgOf(t.p.accent)), span(ind + nw, r, fgOf(t.p.text))] : textRow(ind + nw, r)
+      );
     }
-    return wrapAnsi(renderInline(line), w);
+    return wrapAnsi(renderInline(line), w).map((r) => textRow(0, r));
   }
 
-  /** Render the held table: aligned columns when it fits, else plain rows. */
-  private flushTable(): string[] {
+  /** Lay out the held table. */
+  private flushTable(): Row[] {
     if (!this.table.length) return [];
     const lines = this.table;
     this.table = [];
+    this.blank = false;
     return renderTable(lines, this.width());
   }
 }
 
-export function renderTable(lines: string[], width: number): string[] {
+/** A grid table that fits `width`: columns shrink (cells cut with …) when
+ * needed; rows that are not a table are plain text. */
+export function renderTable(lines: string[], width: number): Row[] {
   const t = theme;
-  const asText = () => lines.flatMap((l) => wrapAnsi(renderInline(expandTabs(l)), width));
+  const asText = () => lines.flatMap((l) => wrapAnsi(renderInline(expandTabs(l)), width).map((r) => textRow(0, r)));
   if (lines.length < 2 || !TABLE_SEP.test(lines[1])) return asText();
   const head = splitRow(lines[0]).map(renderInline);
   const aligns = splitRow(lines[1]).map((c) => (c.endsWith(":") ? (c.startsWith(":") ? "c" : "r") : "l"));
@@ -204,17 +261,40 @@ export function renderTable(lines: string[], width: number): string[] {
   const widths = Array.from({ length: cols }, (_, i) =>
     Math.max(1, stringWidth(head[i] ?? ""), ...body.map((r) => stringWidth(r[i] ?? "")))
   );
-  const total = widths.reduce((a, b) => a + b, 0) + 3 * (cols - 1);
-  if (total > width) return asText();
+  const total = () => widths.reduce((a, b) => a + b, 0) + 3 * cols + 1;
+  while (total() > width) {
+    let wi = 0;
+    for (let i = 1; i < cols; i++) if (widths[i] > widths[wi]) wi = i;
+    if (widths[wi] <= 3) return asText();
+    widths[wi]--;
+  }
+  const g = t.g.sq;
+  const bc = fgOf(t.p.border);
   const cell = (s: string, i: number) => {
-    const pad = widths[i] - stringWidth(s);
+    const cut = truncateWidth(s, widths[i], t.g.ellipsis);
+    const pad = widths[i] - stringWidth(cut);
     const a = aligns[i] ?? "l";
-    if (a === "r") return " ".repeat(pad) + s;
-    if (a === "c") return " ".repeat(Math.floor(pad / 2)) + s + " ".repeat(Math.ceil(pad / 2));
-    return s + " ".repeat(pad);
+    if (a === "r") return " ".repeat(pad) + cut;
+    if (a === "c") return " ".repeat(Math.floor(pad / 2)) + cut + " ".repeat(Math.ceil(pad / 2));
+    return cut + " ".repeat(pad);
   };
-  const sep = t.dim(" " + t.g.gutter + " ");
-  const row = (cells: string[]) => widths.map((_, i) => cell(cells[i] ?? "", i)).join(sep).replace(/\s+$/, "");
-  const rule = t.dim(widths.map((w) => t.g.hr.repeat(w)).join(t.g.hr + (t.opts.ascii ? "+" : "┼") + t.g.hr));
-  return [row(head.map((h) => t.bold(h))), rule, ...body.map(row)];
+  const rule = (l: string, m: string, r: string): Row => [span(0, l + widths.map((w) => t.g.hr.repeat(w + 2)).join(m) + r, bc)];
+  const row = (cells: string[], bold: boolean): Row => {
+    const out: Row = [span(0, t.g.vline, bc)];
+    let x = 1;
+    widths.forEach((w, i) => {
+      const c = cell(cells[i] ?? "", i);
+      out.push(span(x + 1, bold ? t.bold(c) : c, fgOf(t.p.text)));
+      x += w + 3;
+      out.push(span(x - 1, t.g.vline, bc));
+    });
+    return out;
+  };
+  return [
+    rule(g.tl, g.t, g.tr),
+    row(head, true),
+    rule(g.l, g.x, g.r),
+    ...body.map((r) => row(r, false)),
+    rule(g.bl, g.b, g.br),
+  ];
 }
