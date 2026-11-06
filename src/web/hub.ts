@@ -21,15 +21,52 @@ import { tryFetchJson } from "../util";
 import { Attachment, classifyUpload, extOf, MAX_UPLOAD_BYTES, mimeForExt, safeName } from "../attachments";
 import { Event, SessionChannel, uploadUrl } from "./channel";
 import { PAGE_HTML } from "./page";
-import { SessionMeta, SessionStore, WorkspaceStore, workspaceKey } from "./store";
+import { SESSION_ID_RE, SessionMeta, SessionStore, WorkspaceStore, workspaceKey } from "./store";
 import { Terminal } from "./terminal";
+import * as side from "./sidebar-data";
+import { expandHome, groupOf, tilde } from "./sidebar-data";
+
+export { browseDir, completeDir } from "./sidebar-data";
 
 export type SessionFactory = (ui: SessionChannel, workspace: string, prefs: SessionPrefs) => Promise<Session>;
 
-/** Session ids are short hex and upload ids are 16 hex chars. Both end up in
- * file paths under the data folder, so nothing else is accepted. */
-const SESSION_ID_RE = /^[a-z0-9_-]{1,64}$/i;
+/** Upload ids are 16 hex chars; session ids follow SESSION_ID_RE. Both end
+ * up in file paths under the data folder, so nothing else is accepted. */
 const UPLOAD_ID_RE = /^[a-f0-9]{16}$/;
+
+/** A worktree the hub did not remove, and why (shown to the user). */
+export interface KeptWorktree {
+  path: string;
+  reason: string;
+}
+
+/** Recent SSE lines kept so a page that reconnects gets only what it missed. */
+const RING_EVENTS = 10_000;
+const RING_BYTES = 16 * 1024 * 1024;
+
+/** The self-hosted UI font (Inter Variable, Latin), shipped in assets/fonts.
+ * Resolved from the package root: this file runs as dist/web/hub.js, both in
+ * a checkout and in an npm-installed copy. */
+export const FONT_ROUTE = "/fonts/inter-latin-wght-normal.woff2";
+export const FONT_FILE = path.join(__dirname, "..", "..", "assets", "fonts", "inter-latin-wght-normal.woff2");
+let fontBytes: Buffer | null | undefined;
+function serveFont(req: http.IncomingMessage, res: http.ServerResponse): void {
+  if (fontBytes === undefined) {
+    try { fontBytes = fs.readFileSync(FONT_FILE); } catch { fontBytes = null; }
+  }
+  if (!fontBytes) {
+    // Missing file: the CSS stack falls back to Segoe UI / system-ui.
+    res.writeHead(404);
+    res.end();
+    return;
+  }
+  res.writeHead(200, {
+    "content-type": "font/woff2",
+    "content-length": fontBytes.length,
+    "cache-control": "public, max-age=31536000, immutable",
+  });
+  res.end(req.method === "HEAD" ? undefined : fontBytes);
+}
 
 export interface HubOptions {
   port: number;
@@ -127,84 +164,74 @@ export function askHubToOpen(rec: HubRecord, workspace: string, start: boolean):
   );
 }
 
-// ---- helpers ----------------------------------------------------------------
+// ---- @-mention file list ------------------------------------------------------
 
-function tilde(p: string): string {
-  const home = os.homedir();
-  const same = process.platform === "win32" ? p.slice(0, home.length).toLowerCase() === home.toLowerCase() : p.startsWith(home);
-  return same ? "~" + p.slice(home.length).replace(/\\/g, "/") : p;
+const MENTION_SKIP = new Set([".git", "node_modules", ".hg", ".svn"]);
+const MENTION_CAP = 5000;
+
+/** The top-level .gitignore as simple matchers: "name", "dir/", "/path",
+ * "*.log". Negations and deeper globs are ignored (it only trims a list). */
+function gitignoreMatchers(root: string): ((rel: string, name: string) => boolean)[] {
+  let text = "";
+  try {
+    text = fs.readFileSync(path.join(root, ".gitignore"), "utf8");
+  } catch {
+    return [];
+  }
+  const out: ((rel: string, name: string) => boolean)[] = [];
+  for (let line of text.split(/\r?\n/)) {
+    line = line.trim();
+    if (!line || line.startsWith("#") || line.startsWith("!")) continue;
+    line = line.replace(/\/+$/, "");
+    const anchored = line.startsWith("/") || line.slice(0, -1).includes("/");
+    line = line.replace(/^\/+/, "");
+    if (!line || line.includes("**")) continue;
+    const re = new RegExp(
+      "^" + line.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]") + "$",
+      process.platform === "win32" ? "i" : ""
+    );
+    out.push(anchored ? (rel) => re.test(rel) : (_rel, name) => re.test(name));
+  }
+  return out;
 }
 
-function expandHome(s: string): string {
-  if (s === "~") return os.homedir();
-  if (s.startsWith("~/") || s.startsWith("~\\")) return path.join(os.homedir(), s.slice(2));
-  return s;
-}
-
-const PROJECT_MARKERS = [".git", "package.json", "pyproject.toml", "Cargo.toml", "go.mod", "AGENTS.md", "pom.xml", "Gemfile"];
-function isProject(dir: string): boolean {
-  return PROJECT_MARKERS.some((m) => fs.existsSync(path.join(dir, m)));
-}
-
-let rootsCache: { at: number; roots: string[] } | null = null;
-function listRoots(): string[] {
-  if (rootsCache && Date.now() - rootsCache.at < 60_000) return rootsCache.roots;
-  let roots: string[];
-  if (process.platform === "win32") {
-    roots = [];
-    for (let i = 67; i <= 90; i++) {
-      // C: through Z:; A:/B: are floppy letters and slow to probe
-      const r = `${String.fromCharCode(i)}:\\`;
-      try {
-        if (fs.existsSync(r)) roots.push(r);
-      } catch {
-        /* skip */
+/** Workspace files for the composer's @ menu: relative, "/"-separated,
+ * breadth first, capped. Skips VCS folders, node_modules and simple
+ * .gitignore entries. Exported for tests. */
+export function listWorkspaceFiles(root: string, cap = MENTION_CAP): { files: string[]; truncated: boolean } {
+  const ignore = gitignoreMatchers(root);
+  const ignored = (rel: string, name: string) => ignore.some((m) => m(rel, name));
+  const files: string[] = [];
+  const queue: string[] = [""];
+  let truncated = false;
+  let dirs = 0;
+  while (queue.length) {
+    const rel = queue.shift()!;
+    if (++dirs > 20_000) {
+      truncated = true;
+      break;
+    }
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(path.join(root, rel), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    entries.sort((a, b) => a.name.localeCompare(b.name));
+    for (const e of entries) {
+      const r = rel ? rel + "/" + e.name : e.name;
+      if (MENTION_SKIP.has(e.name) || ignored(r, e.name)) continue;
+      if (e.isDirectory()) queue.push(r);
+      else if (e.isFile() || e.isSymbolicLink()) {
+        if (files.length >= cap) {
+          truncated = true;
+          return { files, truncated };
+        }
+        files.push(r);
       }
     }
-  } else {
-    roots = ["/"];
   }
-  rootsCache = { at: Date.now(), roots };
-  return roots;
-}
-
-const SKIP_DIRS = /^(node_modules|\$recycle\.bin|system volume information|windows|program files( \(x86\))?|programdata|appdata)$/i;
-
-/** Folder listing for the "open folder" picker. Exported for tests. */
-export function browseDir(input: string | null | undefined): Record<string, any> {
-  const home = os.homedir();
-  const target = input && input.trim() ? path.resolve(expandHome(input.trim())) : home;
-  const roots = listRoots();
-  const base = { path: target, display: tilde(target), home, roots };
-  let st: fs.Stats;
-  try {
-    st = fs.statSync(target);
-  } catch {
-    return { ...base, error: `not a folder: ${target}`, parent: path.dirname(target), dirs: [] };
-  }
-  if (!st.isDirectory()) return { ...base, error: `not a folder: ${target}`, parent: path.dirname(target), dirs: [] };
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(target, { withFileTypes: true });
-  } catch (err: any) {
-    return { ...base, error: `cannot read ${target}: ${err?.message ?? err}`, parent: path.dirname(target), dirs: [] };
-  }
-  const dirs = entries
-    .filter((e) => e.isDirectory() && !e.name.startsWith(".") && !SKIP_DIRS.test(e.name))
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
-    .slice(0, 500)
-    .map((e) => {
-      const full = path.join(target, e.name);
-      let project = false;
-      try {
-        project = isProject(full);
-      } catch {
-        /* unreadable */
-      }
-      return { name: e.name, path: full, project };
-    });
-  const parent = path.dirname(target);
-  return { ...base, parent: parent === target ? null : parent, dirs, project: isProject(target) };
+  return { files, truncated };
 }
 
 function defaultFactory(help: string): SessionFactory {
@@ -236,6 +263,18 @@ export class WebHub {
   private hubTimer: NodeJS.Timeout | null = null;
   private termCounter = 0;
   private stopped = false;
+  /** SSE event ids are "<boot>.<seq>": a page left over from an earlier hub
+   * never resumes from this one's numbers. */
+  private readonly boot = crypto.randomBytes(3).toString("hex");
+  private seq = 0;
+  private ring: { seq: number; line: string }[] = [];
+  private ringBytes = 0;
+  /** Sidebar git facts (branch, +N −M), refreshed off the snapshot path. */
+  private git = new side.GitInfo(() => this.changed());
+  private savedText = new side.SavedText();
+  /** Unsaved worktree sessions that just closed, while their worktree is
+   * being removed (exit paths list them instead of leaking them). */
+  private releasing = new Map<string, SessionMeta>();
 
   constructor(private opts: HubOptions) {
     this.port = opts.port;
@@ -278,7 +317,16 @@ export class WebHub {
       }
       live.session?.taskManager.killAll();
       for (const t of live.terminals.values()) t.close();
+      // A worktree session with nothing saved: drop its worktree when that
+      // loses nothing, otherwise keep it listed so it is not orphaned.
+      if (!live.discard && live.meta.worktree && !this.metas.has(live.id)) {
+        const r = side.removeWorktreeSync(groupOf(live.meta), live.meta.worktree.path);
+        if (!r.removed) this.keepListed(live.meta);
+      }
     }
+    // Still being removed when the hub stops: list them (the folder may stay).
+    for (const meta of this.releasing.values()) if (!this.metas.has(meta.id)) this.keepListed(meta);
+    this.releasing.clear();
     clearHubRecord(process.pid, this.dataDir);
     for (const c of this.clients) c.end();
     this.server?.close();
@@ -301,14 +349,21 @@ export class WebHub {
 
   /** Start a new session in a workspace; returns its id right away while the
    * model is detected and loaded in the background. */
-  openSession(workspace: string): string {
-    const id = crypto.randomBytes(4).toString("hex");
-    this.workspaces.add(workspace);
+  openSession(workspace: string, extra: Partial<SessionMeta> = {}, id = crypto.randomBytes(4).toString("hex")): string {
+    this.workspaces.add(extra.project ?? workspace);
     const now = Date.now();
-    const live = this.makeLive(id, { id, workspace, title: "", createdAt: now, updatedAt: now });
+    const live = this.makeLive(id, { id, workspace, title: "", createdAt: now, updatedAt: now, ...extra });
     void this.spawn(live, null);
     this.changed();
     return id;
+  }
+
+  /** A new session in its own git worktree on `branch` (new or existing). */
+  async openSessionOnBranch(project: string, branch: string): Promise<string> {
+    const id = crypto.randomBytes(4).toString("hex");
+    const wt = side.worktreePathFor(this.dataDir, project, id);
+    await side.addWorktree(project, wt, branch);
+    return this.openSession(wt, { project, worktree: { path: wt, branch } }, id);
   }
 
   /** Bring a saved session back to life (or retry one that failed to start). */
@@ -325,9 +380,10 @@ export class WebHub {
     live.channel.title = meta.title;
     if (body) {
       live.channel.restoreReplay(body.events);
-      for (const ev of live.channel.replay) this.send(ev);
+      // Old turns, not news: flagged so no page notifies about them.
+      for (const ev of live.channel.replay) this.send({ ...ev, replay: true });
     }
-    this.workspaces.add(meta.workspace);
+    this.workspaces.add(groupOf(meta));
     void this.spawn(live, body?.snapshot ?? null);
     this.changed();
     return true;
@@ -347,8 +403,20 @@ export class WebHub {
     return true;
   }
 
-  deleteSession(id: string): void {
+  /** The id of a session this hub knows (live or saved), or an error. Every
+   * request naming a session goes through here before anything touches disk. */
+  private knownSession(id: unknown): string {
+    const s = typeof id === "string" ? id : "";
+    if (!SESSION_ID_RE.test(s) || !(this.live.has(s) || this.metas.has(s))) throw new Error("unknown session");
+    return s;
+  }
+
+  /** Delete a session: its files, uploads and (when nothing in it would be
+   * lost) its worktree. Resolves with the worktree it kept, if any. */
+  async deleteSession(id: string): Promise<{ kept?: KeptWorktree }> {
+    id = this.knownSession(id);
     const live = this.live.get(id);
+    const meta = live?.meta ?? this.metas.get(id)!;
     if (live) {
       live.discard = true;
       this.closeSession(id);
@@ -361,9 +429,16 @@ export class WebHub {
       /* best effort */
     }
     this.changed();
+    const wt = meta.worktree;
+    if (!wt) return {};
+    // Only once the session has left: never under a running agent.
+    if (!(await this.afterClose(id))) return { kept: { path: wt.path, reason: "the session was still closing" } };
+    const r = await side.removeWorktree(groupOf(meta), wt.path);
+    return r.removed ? {} : { kept: { path: wt.path, reason: r.reason ?? "it has changes" } };
   }
 
   renameSession(id: string, title: string): void {
+    id = this.knownSession(id);
     title = title.replace(/\s+/g, " ").trim().slice(0, 80);
     if (!title) return;
     const live = this.live.get(id);
@@ -386,22 +461,111 @@ export class WebHub {
     this.changed();
   }
 
-  /** Forget a workspace and delete its saved sessions. Returns an error
-   * message when it still has open sessions. */
-  removeWorkspace(p: string): string | null {
+  /** Forget a workspace and delete its saved sessions. Their worktrees go
+   * only when nothing in them would be lost; the rest are kept on disk and
+   * reported. Throws when the workspace still has open sessions. */
+  async removeWorkspace(p: string): Promise<{ kept: KeptWorktree[] }> {
     const key = workspaceKey(p);
     for (const live of this.live.values()) {
-      if (workspaceKey(live.workspace) === key) return "close its open sessions first";
+      if (workspaceKey(groupOf(live.meta)) === key) throw new Error("close its open sessions first");
     }
+    const worktrees: SessionMeta[] = [];
     for (const m of [...this.metas.values()]) {
-      if (workspaceKey(m.workspace) === key) {
+      if (workspaceKey(groupOf(m)) === key) {
+        if (m.worktree) worktrees.push(m);
         this.store.delete(m.id);
         this.metas.delete(m.id);
       }
     }
     this.workspaces.remove(p);
     this.changed();
-    return null;
+    const kept: KeptWorktree[] = [];
+    for (const m of worktrees) {
+      const r = await side.removeWorktree(groupOf(m), m.worktree!.path);
+      if (!r.removed) kept.push({ path: m.worktree!.path, reason: r.reason ?? "it has changes" });
+    }
+    return { kept };
+  }
+
+  // ---- sidebar metadata (UI only) --------------------------------------------
+
+  /** Change a session's meta, live and saved, and persist it when saved. */
+  editMeta(id: string, fn: (m: SessionMeta) => void): SessionMeta {
+    const live = this.live.get(id);
+    const saved = this.metas.get(id);
+    const meta = live?.meta ?? saved;
+    if (!meta) throw new Error("unknown session");
+    fn(meta);
+    if (saved && saved !== meta) fn(saved);
+    if (saved) {
+      try {
+        this.store.saveMeta(meta);
+      } catch {
+        /* non-fatal */
+      }
+    }
+    this.changed();
+    return meta;
+  }
+
+  /** Archive (closing it when live) or restore. A worktree stays as it is:
+   * archive is undoable and must not lose a file (an .env, a build output),
+   * so only an explicit delete removes a worktree, and only a clean one. */
+  archiveSession(id: string, archived: boolean): Record<string, never> {
+    id = this.knownSession(id);
+    this.editMeta(id, (m) => (archived ? (m.archivedAt = Date.now()) : delete m.archivedAt));
+    if (archived) this.closeSession(id);
+    return {};
+  }
+
+  /** Resolves true once a closing session has left, false after `ms`. */
+  private async afterClose(id: string, ms = 5000): Promise<boolean> {
+    const t0 = Date.now();
+    while (this.live.has(id) && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 25));
+    return !this.live.has(id);
+  }
+
+  /** busy|waiting -> idle: remember when and how the turn ended. */
+  private turnEnded(live: Live): void {
+    if (live.channel.pickerTurn) return;
+    live.meta.lastTurnEndedAt = Date.now();
+    const outcome = live.session?.state().outcome;
+    if (outcome === "completed" || outcome === "error" || outcome === "cancelled") live.meta.lastOutcome = outcome;
+    if (this.metas.has(live.id) || live.channel.title) this.scheduleSave(live);
+    void this.git.refresh(live.workspace);
+  }
+
+  /** Titles, then transcripts. A search whose page went away (the page
+   * aborts a query once a newer one is typed) stops reading files and
+   * answers `stale: true` with no hits. */
+  async searchSessions(q: string, cancelled: () => boolean = () => false): Promise<{ hits: Record<string, any>[]; stale?: boolean }> {
+    const items: side.SearchItem[] = [];
+    const item = (m: SessionMeta, title: string, text: () => string | Promise<string>) =>
+      items.push({ id: m.id, title, workspace: groupOf(m), archived: !!m.archivedAt, updatedAt: m.updatedAt, text });
+    for (const l of this.live.values()) item(l.meta, l.channel.title || l.meta.title, () => side.replayText(l.channel.replay));
+    for (const m of this.metas.values()) if (!this.live.has(m.id)) item(m, m.title, () => this.savedText.get(this.store, m.id));
+    const hits = await side.searchSessions(items, q, { stale: () => this.stopped || cancelled() });
+    return hits ? { hits } : { hits: [], stale: true };
+  }
+
+  /** Folders the sidebar lists: the workspace list plus sessions' projects. */
+  private knownFolders(): string[] {
+    const out = this.workspaces.list().map((w) => w.path);
+    for (const m of this.metas.values()) out.push(groupOf(m));
+    for (const l of this.live.values()) out.push(groupOf(l.meta));
+    return out;
+  }
+
+  private serveProjectIcon(res: http.ServerResponse, p: string): void {
+    const key = p ? workspaceKey(p) : "";
+    const known = !!key && this.knownFolders().some((f) => workspaceKey(f) === key);
+    const file = known ? side.findProjectIcon(path.resolve(p)) : null;
+    if (!file) {
+      res.writeHead(404);
+      res.end();
+      return;
+    }
+    side.serveIcon(res, file);
   }
 
   private makeLive(id: string, meta: SessionMeta): Live {
@@ -427,6 +591,9 @@ export class WebHub {
       // A saved session already has a name; only fresh ones get one written.
       titleTries: meta.title ? 99 : 0,
       titleByUser: false,
+    };
+    channel.onPhase = (from, to) => {
+      if (to === "idle" && (from === "busy" || from === "waiting")) this.turnEnded(live);
     };
     this.live.set(id, live);
     return live;
@@ -459,6 +626,7 @@ export class WebHub {
       prefs = { ...prefs, mode, backend: restore.backend, model: restore.model ?? prefs.model, baseUrl: restore.baseUrl, effort: restore.effort !== undefined ? restore.effort : prefs.effort, resumed: true };
     }
     try {
+      if (live.meta.worktree) await side.ensureWorktree(groupOf(live.meta), live.meta.worktree);
       const session = await this.factory(live.channel, live.workspace, prefs);
       if (live.channel.closed || this.live.get(live.id) !== live) {
         session.taskManager.killAll();
@@ -514,6 +682,35 @@ export class WebHub {
     live.terminals.clear();
     if (this.live.get(live.id) === live) this.live.delete(live.id);
     this.send({ t: "closed", sid: live.id });
+    this.changed();
+    // Nothing was saved, so nothing lists this worktree any more: remove it
+    // (freeing its branch) when that loses nothing, otherwise list it.
+    if (!live.discard && live.meta.worktree && !this.metas.has(live.id)) void this.releaseWorktree(live.meta);
+  }
+
+  private async releaseWorktree(meta: SessionMeta): Promise<void> {
+    this.releasing.set(meta.id, meta);
+    let removed = false;
+    try {
+      removed = (await side.removeWorktree(groupOf(meta), meta.worktree!.path)).removed;
+    } catch {
+      /* kept */
+    }
+    if (!this.releasing.delete(meta.id)) return; // the hub stopped and listed it already
+    if (!removed && !this.metas.has(meta.id) && !this.live.has(meta.id)) this.keepListed(meta);
+  }
+
+  /** Save a session that has no transcript as a listed one, so the
+   * worktree it keeps can be found (and resumed) from the sidebar. */
+  private keepListed(meta: SessionMeta): void {
+    if (!meta.title && meta.worktree) meta.title = `Worktree on ${meta.worktree.branch}`;
+    meta.updatedAt = Date.now();
+    this.metas.set(meta.id, meta);
+    try {
+      this.store.saveMeta(meta);
+    } catch {
+      /* listed for this run at least */
+    }
     this.changed();
   }
 
@@ -597,13 +794,38 @@ export class WebHub {
   // ---- broadcasting -----------------------------------------------------------
 
   private send(ev: Event): void {
-    const line = `data: ${JSON.stringify(ev)}\n\n`;
+    if (ev.t === "hub") {
+      // A sidebar snapshot replaces the one before, and a resuming page gets
+      // a fresh one anyway: no id, and never kept in the resume ring.
+      const line = `data: ${JSON.stringify(ev)}\n\n`;
+      for (const c of this.clients) c.write(line);
+      return;
+    }
+    const seq = ++this.seq;
+    const line = `id: ${this.boot}.${seq}\ndata: ${JSON.stringify(ev)}\n\n`;
+    this.ring.push({ seq, line });
+    this.ringBytes += line.length;
+    while (this.ring.length > RING_EVENTS || (this.ringBytes > RING_BYTES && this.ring.length > 1)) {
+      this.ringBytes -= this.ring.shift()!.line.length;
+    }
     for (const c of this.clients) c.write(line);
+  }
+
+  /** The events after `lastId`, when the ring still holds all of them. */
+  private missedSince(lastId: string | undefined): string[] | null {
+    const m = /^([a-f0-9]+)\.(\d+)$/.exec(String(lastId ?? "").trim());
+    if (!m || m[1] !== this.boot) return null;
+    const last = Number(m[2]);
+    if (last > this.seq) return null;
+    if (last === this.seq) return [];
+    const first = this.ring[0]?.seq ?? this.seq + 1;
+    if (first > last + 1) return null; // a gap: some of what it missed is gone
+    return this.ring.filter((r) => r.seq > last).map((r) => r.line);
   }
 
   /** Coalesced: many status flips in one tick produce one snapshot. */
   private changed(): void {
-    if (this.hubTimer) return;
+    if (this.hubTimer || this.stopped) return;
     this.hubTimer = setTimeout(() => {
       this.hubTimer = null;
       this.send(this.snapshot());
@@ -622,13 +844,14 @@ export class WebHub {
       }
       return g;
     };
-    for (const w of this.workspaces.list()) {
+    const entries = new Map(this.workspaces.list().map((w) => [workspaceKey(w.path), w]));
+    for (const w of entries.values()) {
       const g = group(w.path);
       g.last = Math.max(g.last, w.lastOpened);
     }
     for (const m of this.metas.values()) {
       if (this.live.has(m.id)) continue;
-      group(m.workspace).sessions.push({
+      group(groupOf(m)).sessions.push({
         id: m.id,
         title: m.title,
         status: "stored",
@@ -637,10 +860,11 @@ export class WebHub {
         updatedAt: m.updatedAt,
         model: m.model,
         terminals: [],
+        ...side.sessionFields(m, this.git),
       });
     }
     for (const l of this.live.values()) {
-      group(l.workspace).sessions.push({
+      group(groupOf(l.meta)).sessions.push({
         id: l.id,
         title: l.channel.title || l.meta.title,
         status: l.channel.phase,
@@ -649,13 +873,28 @@ export class WebHub {
         updatedAt: l.meta.updatedAt,
         model: l.meta.model,
         terminals: [...l.terminals.values()].map((t) => ({ tid: t.id, cwd: t.cwd })),
+        phaseSince: l.channel.phaseSince,
+        ...side.sessionFields(l.meta, this.git),
       });
     }
     const workspaces = [...groups.values()]
       .map((g) => {
         g.sessions.sort((a, b) => b.updatedAt - a.updatedAt);
         const last = Math.max(g.last, ...g.sessions.map((s) => s.updatedAt));
-        return { path: g.path, name: path.basename(g.path) || g.path, display: tilde(g.path), last, sessions: g.sessions };
+        const w = entries.get(workspaceKey(g.path));
+        return {
+          path: g.path,
+          name: path.basename(g.path) || g.path,
+          display: tilde(g.path),
+          last,
+          sessions: g.sessions,
+          pinnedAt: w?.pinnedAt,
+          order: w?.order,
+          addedAt: w?.addedAt,
+          lastOpened: w?.lastOpened,
+          icon: side.findProjectIcon(g.path) !== null,
+          git: this.git.get(g.path),
+        };
       })
       .sort((a, b) => b.last - a.last);
     return { t: "hub", home: os.homedir(), sep: path.sep, version: this.opts.version, workspaces };
@@ -663,15 +902,41 @@ export class WebHub {
 
   // ---- http ---------------------------------------------------------------------
 
+  /** host:port forms the page may be served under. */
+  private loopbackNames(): string[] {
+    const names = ["127.0.0.1", "localhost", "[::1]"].map((h) => `${h}:${this.port}`);
+    // Port 80 is the default: browsers then leave it out of Host and Origin.
+    if (this.port === 80) names.push("127.0.0.1", "localhost", "[::1]");
+    return names;
+  }
+
+  private hostAllowed(host: string | undefined): boolean {
+    const h = String(host ?? "").trim().toLowerCase();
+    return this.loopbackNames().includes(h);
+  }
+
   private route(req: http.IncomingMessage, res: http.ServerResponse): void {
     res.setHeader("Referrer-Policy", "no-referrer");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Cache-Control", "no-store");
+    // DNS rebinding: a page on another site whose name now points at
+    // 127.0.0.1 reaches this server with its own name in Host. Only the
+    // loopback names are served, on every route (the font included).
+    if (!this.hostAllowed(req.headers.host)) {
+      res.writeHead(403, { "content-type": "text/plain" });
+      res.end("forbidden — open smolcoder's printed URL (http://127.0.0.1:" + this.port + "/…)");
+      return;
+    }
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${this.port}`);
     const origin = req.headers.origin;
-    const sameOrigin =
-      !origin || origin === `http://127.0.0.1:${this.port}` || origin === `http://localhost:${this.port}`;
+    const sameOrigin = !origin || this.loopbackNames().some((h) => origin === `http://${h}`);
+    // The bundled UI font is public, and CSS url() cannot carry the key, so
+    // this one path is served before the key check (same origin still applies).
+    if ((req.method === "GET" || req.method === "HEAD") && url.pathname === FONT_ROUTE && sameOrigin) {
+      serveFont(req, res);
+      return;
+    }
     if (url.searchParams.get("k") !== this.authToken || !sameOrigin) {
       res.writeHead(403, { "content-type": "text/plain" });
       res.end("forbidden — open smolcoder's printed URL (it includes the session key)");
@@ -684,6 +949,15 @@ export class WebHub {
 
     if (req.method === "GET") {
       switch (url.pathname) {
+        case "/files": {
+          const live = this.live.get(String(url.searchParams.get("sid") ?? ""));
+          if (!live) {
+            json(404, { error: "no such session" });
+            return;
+          }
+          json(200, listWorkspaceFiles(live.workspace));
+          return;
+        }
         case "/":
           res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
           res.end(PAGE_HTML);
@@ -694,9 +968,31 @@ export class WebHub {
         case "/events":
           this.sse(req, res);
           return;
-        case "/fs":
-          json(200, browseDir(url.searchParams.get("path")));
+        case "/fs": {
+          const p = url.searchParams.get("path");
+          (url.searchParams.get("complete") === "1" ? side.completeDirAsync(p) : side.browseDirAsync(p)).then(
+            (r) => json(200, r),
+            (err: any) => json(400, { error: String(err?.message ?? err) })
+          );
           return;
+        }
+        case "/workspaces/suggest":
+          json(200, { dirs: side.suggestWorkspaces(this.knownFolders()) });
+          return;
+        case "/workspaces/icon":
+          this.serveProjectIcon(res, String(url.searchParams.get("path") ?? ""));
+          return;
+        case "/sessions/search": {
+          let gone = false;
+          res.on("close", () => (gone = true));
+          this.searchSessions(String(url.searchParams.get("q") ?? ""), () => gone).then(
+            (r) => {
+              if (!gone) json(200, r);
+            },
+            (err: any) => json(400, { error: String(err?.message ?? err) })
+          );
+          return;
+        }
         case "/upload":
           this.serveUpload(res, url);
           return;
@@ -723,11 +1019,12 @@ export class WebHub {
         } catch {
           /* ignore */
         }
-        try {
-          json(200, this.handlePost(url.pathname, data) ?? {});
-        } catch (err: any) {
-          json(400, { error: String(err?.message ?? err) });
-        }
+        Promise.resolve()
+          .then(() => this.handlePost(url.pathname, data))
+          .then(
+            (r) => json(200, r ?? {}),
+            (err: any) => json(400, { error: String(err?.message ?? err) })
+          );
       });
       return;
     }
@@ -735,6 +1032,11 @@ export class WebHub {
     res.end();
   }
 
+  /** One stream for every session. A reconnecting page sends Last-Event-ID
+   * (the browser does it by itself; ?last= works too): when the ring still
+   * holds everything after it, only that is sent and the page keeps its DOM.
+   * Otherwise (first visit, a gap, another hub) "reset" and a full replay.
+   * Either way it ends with "synced", which carries the current id. */
   private sse(req: http.IncomingMessage, res: http.ServerResponse): void {
     res.writeHead(200, {
       "content-type": "text/event-stream",
@@ -742,15 +1044,25 @@ export class WebHub {
       connection: "keep-alive",
     });
     const write = (ev: Event) => res.write(`data: ${JSON.stringify(ev)}\n\n`);
-    write(this.snapshot());
-    for (const l of this.live.values()) {
-      for (const ev of l.channel.replay) write(ev);
-      write(l.channel.stateEvent());
-      for (const t of l.terminals.values()) {
-        write({ t: "termopen", sid: l.id, tid: t.id, cwd: t.cwd });
-        if (t.buffer) write({ t: "term", sid: l.id, tid: t.id, s: t.buffer });
+    const url = new URL(req.url ?? "/", `http://127.0.0.1:${this.port}`);
+    const lastId = (req.headers["last-event-id"] as string | undefined) ?? url.searchParams.get("last") ?? undefined;
+    const missed = this.missedSince(lastId);
+    if (missed) {
+      for (const line of missed) res.write(line);
+      write(this.snapshot());
+    } else {
+      write({ t: "reset" });
+      write(this.snapshot());
+      for (const l of this.live.values()) {
+        for (const ev of l.channel.replay) write(ev);
+        write(l.channel.stateEvent());
+        for (const t of l.terminals.values()) {
+          write({ t: "termopen", sid: l.id, tid: t.id, cwd: t.cwd });
+          if (t.buffer) write({ t: "term", sid: l.id, tid: t.id, s: t.buffer });
+        }
       }
     }
+    res.write(`id: ${this.boot}.${this.seq}\ndata: ${JSON.stringify({ t: "synced", resumed: !!missed })}\n\n`);
     this.clients.add(res);
     req.on("close", () => this.clients.delete(res));
   }
@@ -758,6 +1070,8 @@ export class WebHub {
   // ---- attachments ---------------------------------------------------------
 
   private uploadsDir(sid: string): string {
+    // "" would be the whole uploads folder and ".." the data folder.
+    if (!SESSION_ID_RE.test(sid)) throw new Error("not a session id");
     return path.join(this.dataDir, "uploads", sid);
   }
 
@@ -865,7 +1179,14 @@ export class WebHub {
     return abs;
   }
 
-  private handlePost(p: string, d: any): any {
+  /** A folder named in a request (it need not exist any more). */
+  private folderArg(p: any): string {
+    const s = String(p ?? "").trim();
+    if (!s) throw new Error("path is required");
+    return path.resolve(expandHome(s));
+  }
+
+  private handlePost(p: string, d: any): any | Promise<any> {
     const sid = String(d.sid ?? "");
     const live = () => {
       const l = this.live.get(sid);
@@ -879,9 +1200,29 @@ export class WebHub {
         const attachments = ids.map((id) => l.uploads.get(id));
         if (attachments.some((a) => !a)) throw new Error("an attachment is no longer available — add it again");
         for (const id of ids) l.uploads.delete(id);
-        l.channel.handleMessage(String(d.text ?? ""), attachments as Attachment[]);
+        l.channel.handleMessage(String(d.text ?? ""), attachments as Attachment[], typeof d.via === "string" ? d.via : undefined);
         return {};
       }
+      case "/queue/remove":
+        if (!live().channel.removeQueued(Number(d.id))) throw new Error("that message is no longer waiting");
+        return {};
+      case "/queue/resume":
+        live().channel.resumeQueue();
+        return {};
+      case "/queue/clear":
+        live().channel.clearQueue();
+        return {};
+      case "/select/star":
+        return live()
+          .channel.star(Number(d.id), Number(d.index))
+          .then((options) => {
+            if (!options) throw new Error("this list cannot be starred");
+            return { options };
+          });
+      case "/command/args":
+        return live()
+          .channel.commandArgs(String(d.name ?? ""))
+          .then((options) => ({ options }));
       case "/upload/remove":
         this.removeUpload(live(), String(d.id ?? ""));
         return {};
@@ -903,19 +1244,43 @@ export class WebHub {
       case "/cancel":
         live().channel.cancel();
         return {};
-      case "/sessions/new":
-        return { id: this.openSession(this.checkDir(d.workspace)) };
+      case "/sessions/new": {
+        const ws = this.checkDir(d.workspace);
+        const branch = typeof d.branch === "string" ? d.branch.trim() : "";
+        return branch ? this.openSessionOnBranch(ws, branch).then((id) => ({ id })) : { id: this.openSession(ws) };
+      }
+      case "/sessions/seen":
+        this.editMeta(this.knownSession(d.id), (m) => (m.lastVisitedAt = Date.now()));
+        return {};
+      case "/sessions/unread":
+        this.editMeta(this.knownSession(d.id), (m) => {
+          m.lastTurnEndedAt ??= m.updatedAt || Date.now();
+          m.lastVisitedAt = m.lastTurnEndedAt - 1;
+        });
+        return {};
+      case "/sessions/pin":
+        this.editMeta(this.knownSession(d.id), (m) => (d.pinned ? (m.pinnedAt = Date.now()) : delete m.pinnedAt));
+        return {};
+      case "/sessions/archive":
+        return this.archiveSession(d.id, !!d.archived);
+      case "/workspaces/pin":
+        this.workspaces.setPinned(this.folderArg(d.path), !!d.pinned);
+        this.changed();
+        return {};
+      case "/workspaces/order":
+        this.workspaces.setOrder(Array.isArray(d.paths) ? d.paths.map((p: any) => this.folderArg(p)) : []);
+        this.changed();
+        return {};
       case "/sessions/resume":
-        if (!this.resumeSession(String(d.id ?? ""))) throw new Error("unknown session");
+        if (!this.resumeSession(this.knownSession(d.id))) throw new Error("unknown session");
         return { id: d.id };
       case "/sessions/close":
-        this.closeSession(String(d.id ?? ""));
+        this.closeSession(this.knownSession(d.id));
         return {};
       case "/sessions/delete":
-        this.deleteSession(String(d.id ?? ""));
-        return {};
+        return this.deleteSession(d.id);
       case "/sessions/rename":
-        this.renameSession(String(d.id ?? ""), String(d.title ?? ""));
+        this.renameSession(d.id, String(d.title ?? ""));
         return {};
       case "/workspaces/add": {
         const ws = this.checkDir(d.path);
@@ -923,11 +1288,8 @@ export class WebHub {
         this.changed();
         return d.start ? { path: ws, id: this.openSession(ws) } : { path: ws };
       }
-      case "/workspaces/remove": {
-        const err = this.removeWorkspace(String(d.path ?? ""));
-        if (err) throw new Error(err);
-        return {};
-      }
+      case "/workspaces/remove":
+        return this.removeWorkspace(this.folderArg(d.path));
       case "/term/open": {
         const r = this.openTerminal(sid);
         if (!r) throw new Error("no such session");

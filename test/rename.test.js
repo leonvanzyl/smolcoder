@@ -6,9 +6,10 @@ const assert = require("node:assert/strict");
 const { CLIENT_JS } = require("../dist/web/client");
 const { PAGE_HTML } = require("../dist/web/page");
 
-test("rename: a visible pencil, not a hidden double-click into the browser's prompt()", () => {
+test("rename: a menu entry, F2 and double-click, not the browser's prompt()", () => {
   assert.doesNotMatch(CLIENT_JS, /prompt\("Rename session"/, "the native prompt is gone");
-  assert.match(CLIENT_JS, /setAttribute\("aria-label", "Rename session"\)/);
+  // The pencil became the session menu's Rename (right-click or the ⋯ button), plus F2.
+  assert.match(CLIENT_JS, /label: "Rename", aria: "Rename session", key: "F2"/);
   assert.match(CLIENT_JS, /row\.ondblclick = \(\) => startRename\(/, "double-click still works, into the same field");
 });
 
