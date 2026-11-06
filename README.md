@@ -40,26 +40,37 @@ Type what you want done and press enter. The agent reads files, edits them and r
 
 | Key | What it does |
 |---|---|
-| `/` | Opens the command menu |
+| `/` | Opens the command menu; type to filter it |
+| `ctrl+p` | Command palette: every command and setting |
+| `@` | Mention a file: pick a path from the project |
 | `shift+tab` | Cycles the permission mode: read-only, edit, bypass |
-| `esc` | Cancels the running turn, or clears the input |
+| `F2` | Switches to the next recently used model |
+| `ctrl+r` | Searches your earlier prompts (`↑` steps through them) |
+| `ctrl+j` or `alt+enter` | New line in the input |
+| `esc` | Cancels the running turn. `esc` twice clears the input; `↑` brings it back |
+| `ctrl+o` | Shows or hides the model's full reasoning |
 | `ctrl+c` twice | Quits |
 
-The line under the input shows the mode, the model, the reasoning effort, how full the context window is, and any background tasks.
+The line under the input shows the mode, the model, the reasoning effort, how full the context window is, and any background tasks. While the agent works, a footer shows what it is doing and for how long. Edits are shown as small diffs.
 
 ### Commands
 
 | Command | What it does |
 |---|---|
-| `/models` | Switch model, or add models from other machines |
-| `/mode` | Set the permission mode (`ro`, `edit`, `bypass`) |
-| `/effort` | Set reasoning effort (`off`, `low`, `medium`, `high`, `default`) |
+| `/models` | Switch model, star favorites (`ctrl+f`), or add models from other machines. `/models next` cycles recent models |
+| `/mode` | Set the permission mode (`ro`, `edit`, `bypass`), e.g. `/mode edit` |
+| `/effort` | Set reasoning effort (`off`, `low`, `medium`, `high`, `default`). Remembered per model |
+| `/sessions` | Resume an earlier session in this folder |
+| `/undo` | Undo the last turn: restores the files it changed and removes it from the conversation |
+| `/commands` | List your custom commands; `/commands new` creates one |
 | `/plan` | Show the agent's checklist |
 | `/context` | Show context window usage |
 | `/compact` | Compact the conversation now |
 | `/tasks`, `/logs <id>`, `/stop <id>` | Inspect and stop background tasks such as dev servers |
 | `/clear` | Start a fresh conversation |
 | `/help`, `/exit` | Help and quit |
+
+**Custom commands** are saved prompts. `/commands new` asks for a name and the text; `$ARGUMENTS` (or `$1`, `$2`, …) is replaced by what you type after the command. They live in `.smolcoder/commands/` for one project or `~/.smolcoder/commands/` for all of them, and run as `/name`.
 
 ### Permission modes
 
@@ -139,10 +150,13 @@ smolcoder sends your code and prompts to the server you choose, and runs the too
 
 `smol --web` opens a browser UI and prints a private link. The server only listens on your machine, and the link carries a random key.
 
-- **Workspaces and sessions.** The sidebar lists your project folders, each with its own sessions. Run several at once and switch between them while they work.
+- **Projects and sessions.** The sidebar lists your project folders, each with its own sessions. Run several at once and switch between them while they work. Each session shows whether it is working, needs you, failed or is done, and marks the ones you have not seen yet.
+- **Organise them.** Right-click a session (or use `⋯`) to rename, pin, archive or delete it, with undo. Search finds sessions by title or by what was said in them. **New session on a branch…** starts a session in its own git worktree.
+- **Keyboard.** `ctrl+k` opens a palette of commands, sessions and actions. `alt+n` starts a session, and `alt+↑/↓` or `alt+1–9` switch between them (`ctrl+alt` on a Mac).
 - **Sessions survive restarts.** Past sessions stay in the sidebar and resume with a click. Transcripts live under `~/.smolcoder/sessions/`.
 - **Paste screenshots and files.** Paste an image with `ctrl+v` or right-click and choose Paste, drop files onto the chat, or click the paperclip. Images go to the model when it can see them, and the chip warns you when it cannot. Text files are added to your message.
 - **Browser and terminal panels.** Preview the dev server the agent started, or open a shell in the workspace, next to the chat.
+- **While it works.** Edits show as diffs, file reads are grouped, and messages you send while it is busy wait in a queue you can edit. Desktop notifications (turn them on in the palette) tell you when a session finishes or needs you.
 - **One server for everything.** Running `smol --web` in another folder adds it to the UI that is already open.
 
 ## Why it works well with local models
@@ -167,7 +181,22 @@ The full mechanics are in [docs/how-it-works.md](docs/how-it-works.md): the cont
 
 ## Contributing
 
-Issues and pull requests are welcome at [github.com/leonvanzyl/smolcoder](https://github.com/leonvanzyl/smolcoder). Clone it, run `npm install`, then `npm test`.
+Issues and pull requests are welcome at [github.com/leonvanzyl/smolcoder](https://github.com/leonvanzyl/smolcoder). Clone it, run `npm install`, then `npm test`. To try your build as the `smol` command, run `npm link`.
+
+### Releasing
+
+Releases are published by GitHub Actions (`.github/workflows/release.yml`), not from a laptop. Once `main` has what you want to ship and its CI is green, open **Actions → Release → Run workflow**, pick `patch`, `minor` or `major` and run it. The workflow bumps `package.json`, runs the tests and a package smoke test, pushes a `Release smolcoder x.y.z` commit and its `vx.y.z` tag to `main`, publishes to npm and creates a GitHub release with notes since the last one.
+
+It uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): npm trusts that workflow file in this repo, so there is no npm token to store, and every version gets a provenance statement. If anything fails before the push, nothing was released: fix it and run the workflow again.
+
+From a laptop, a version tag does the same:
+
+```bash
+npm version patch -m "Release smolcoder %s"   # or minor / major
+git push --follow-tags                        # the v* tag starts the release workflow
+```
+
+`npm pack --dry-run` lists what would be published, and `node scripts/smoke-package.mjs` (after `npm run build`) installs the package into an empty folder and checks it, like the workflow does.
 
 ## License
 
