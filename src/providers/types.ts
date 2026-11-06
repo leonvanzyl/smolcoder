@@ -35,6 +35,10 @@ export interface Msg {
   compactNote?: boolean;
   /** Harness-owned records of earlier tools, never a user turn or assistant answer. */
   historyNote?: boolean;
+  /** Harness feedback (check results, nudges) sent as a user message. It is not
+   * a new user turn: this turn's reasoning keeps travelling and the prefix
+   * stays stable. */
+  harnessNote?: boolean;
 }
 
 export interface ToolSpec {
@@ -87,6 +91,9 @@ export interface ChatOptions {
   idleTimeoutMs?: number;
   /** Optional maintenance yields to foreground coding on the same server. */
   background?: boolean;
+  /** Characters of a tool call's arguments received so far, while they stream
+   * (UI progress only). Backends that send a call whole report it once. */
+  onToolArgs?: (name: string, chars: number) => void;
 }
 
 /** Reasoning effort. "off" disables thinking where the backend supports it
@@ -164,7 +171,8 @@ export function estimateReplayTokens(content: string, toolCalls: ToolCall[]): nu
  * is the biggest single saving on a long tool loop with a thinking model. */
 export function lastUserIndex(messages: Msg[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user" && !messages[i].compactNote && !messages[i].historyNote) return i;
+    const m = messages[i];
+    if (m.role === "user" && !m.compactNote && !m.historyNote && !m.harnessNote) return i;
   }
   return -1;
 }

@@ -1,13 +1,15 @@
 import { isMainThread, parentPort, workerData, Worker } from "worker_threads";
-import { searchFiles } from "./fs-tools";
+import { ripgrepAvailable, searchFiles } from "./fs-tools";
 
-if (!isMainThread) parentPort!.postMessage(searchFiles(workerData.root, workerData.args));
+if (!isMainThread) parentPort!.postMessage(searchFiles(workerData.root, workerData.args, { rg: workerData.rg }));
 
 /** A pathological regex can be terminated without freezing the agent/UI. */
-export function searchFilesBounded(root: string, args: Record<string, any>, signal?: AbortSignal, timeoutMs = 5000): Promise<string> {
+export function searchFilesBounded(root: string, args: Record<string, any>, signal?: AbortSignal, timeoutMs = 5000, opts: { rg?: boolean } = {}): Promise<string> {
   if (signal?.aborted) return Promise.resolve("Error: search cancelled");
+  // Probe ripgrep once in this process, not in every short-lived worker.
+  const rg = opts.rg ?? ripgrepAvailable();
   return new Promise((resolve) => {
-    const worker = new Worker(__filename, { workerData: { root, args } });
+    const worker = new Worker(__filename, { workerData: { root, args, rg } });
     let settled = false;
     const finish = (result: string) => {
       if (settled) return;

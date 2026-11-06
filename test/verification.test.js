@@ -35,6 +35,13 @@ function setup(t, chat, verification) {
   return {agent,workspace,bus,manager};
 }
 const answer = () => ({content:'Done',toolCalls:[]});
+/** Simulated eviction of a tool result's body. Harness check feedback rides
+ * on the newest tool result, which real eviction never touches, so keep it. */
+function evictBody(m) {
+  const at = m.content.search(/\n\n\[(Acceptance|Progress checks|Project checks)/);
+  m.content = '[evicted]' + (at >= 0 ? m.content.slice(at) : '');
+  m.evicted = true;
+}
 
 test('a repeated acceptance failure refreshes facts and discards stale hypotheses without another inference',async t=>{
   let calls=0,compactions=0;
@@ -158,7 +165,7 @@ test('reads evicted by the harness do not count as retained unchanged-read loops
     return {content:'',toolCalls:[{id:'r'+calls,name:'read_file',args:{path:'a.txt'}}]};
   });
   fs.writeFileSync(path.join(workspace,'a.txt'),'module a');fs.writeFileSync(path.join(workspace,'b.txt'),'module b');
-  bus.on('pre_request',()=>{for(const m of agent.messages)if(m.role==='tool'){m.content='[evicted]';m.evicted=true;}});
+  bus.on('pre_request',()=>{for(const m of agent.messages)if(m.role==='tool')evictBody(m);});
   await agent.runTurn('Investigate');assert.equal(agent.outcome,'completed');assert.equal(calls,8);
 });
 
@@ -185,7 +192,7 @@ test('sustained investigation triggers real checks even when compaction evicts e
     reads++;return {content:'',toolCalls:[{id:'r'+calls,name:'read_file',args:{path:'app.txt'}}]};
   },{command:'node verify.cjs'});
   fs.writeFileSync(path.join(workspace,'verify.cjs'),`if(!require('fs').existsSync('ready.txt'))process.exit(1)`);
-  bus.on('pre_request',()=>{for(const m of agent.messages)if(m.role==='tool'){m.content='[evicted]';m.evicted=true;}});
+  bus.on('pre_request',()=>{for(const m of agent.messages)if(m.role==='tool')evictBody(m);});
   await agent.runTurn('Build');
   assert.equal(reads,24);assert.equal(agent.outcome,'completed');assert.equal(agent.verificationResult.attempts,2);
 });
@@ -201,7 +208,7 @@ test('periodic project checks break API investigation cycles with edits without 
   },{command:'node verify.cjs'});
   fs.writeFileSync(path.join(workspace,'verify.cjs'),`if(!require('fs').existsSync('ready.txt'))process.exit(42)`);
   fs.writeFileSync(path.join(workspace,'package.json'),JSON.stringify({scripts:{test:'node verify.cjs'}}));
-  bus.on('pre_request',()=>{for(const m of agent.messages)if(m.role==='tool'){m.content='[evicted]';m.evicted=true;}});
+  bus.on('pre_request',()=>{for(const m of agent.messages)if(m.role==='tool')evictBody(m);});
   bus.on('post_progress_check',async result=>{
     progressChecks++;assert.equal(result.passed,false);
     await agent.compactNow(true,true);
@@ -224,7 +231,7 @@ test('after acceptance fails, periodic checks use that oracle and a final summar
   },{command:'node verify.cjs',maxAttempts:2});
   fs.writeFileSync(path.join(workspace,'verify.cjs'),`if(!require('fs').existsSync('ready.txt'))process.exit(1)`);
   fs.writeFileSync(path.join(workspace,'package.json'),JSON.stringify({scripts:{test:'node -e "process.exit(0)"'}}));
-  bus.on('pre_request',()=>{for(const m of agent.messages)if(m.role==='tool'){m.content='[evicted]';m.evicted=true;}});
+  bus.on('pre_request',()=>{for(const m of agent.messages)if(m.role==='tool')evictBody(m);});
   bus.on('post_progress_check',()=>progressChecks++);
   await agent.runTurn('Build');
   assert.equal(agent.outcome,'completed');assert.equal(agent.verificationResult.attempts,2);

@@ -317,6 +317,7 @@ export class LmStudioProvider implements Provider {
           if (tc.function?.name) p.name += tc.function.name;
           if (tc.function?.arguments) p.args += tc.function.arguments;
           partials.set(idx, p);
+          if (tc.function?.arguments) opts.onToolArgs?.(p.name, p.args.length);
         }
       }
       if (sawToken) {

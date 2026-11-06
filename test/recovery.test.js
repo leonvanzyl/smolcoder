@@ -153,7 +153,8 @@ test('search timeouts are cancellable and do not block the event loop', async (t
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'smol-search-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   fs.writeFileSync(path.join(dir, 'a.txt'), 'a'.repeat(40) + '!');
   let ticked = false; setTimeout(() => { ticked = true; }, 10);
-  const result = await searchFilesBounded(dir, { pattern: '(a+)+$' }, undefined, 150);
+  // The JS walk (ripgrep's regex engine has no catastrophic backtracking).
+  const result = await searchFilesBounded(dir, { pattern: '(a+)+$' }, undefined, 150, { rg: false });
   assert.match(result, /timed out/); assert.ok(ticked);
 });
 
