@@ -21,11 +21,11 @@ Use the token, never the hex. Every row has a light and a dark value; components
 | Token                          | Light     | Dark                    | Role                                                                                     |
 | ------------------------------ | --------- | ----------------------- | ---------------------------------------------------------------------------------------- |
 | `--color-bg`                   | `#fcfcfc` | `#000000`               | Page canvas, transcript, top bar                                                          |
-| `--color-sidebar`              | `#fafafa` | `#000000`               | Sidebar background (separated from the canvas by its hairline, not by fill)               |
+| `--color-sidebar`              | `#fafafa` | `#0a0a0a`               | Sidebar background: one small step off the canvas, plus its hairline                     |
 | `--color-surface`              | `#f4f4f5` | `#0a0a0a`               | Code blocks, tool result bodies, right-panel tab strip, inline code, muted wells          |
 | `--color-surface-raised`       | `#ffffff` | `#111111`               | Composer, popovers, menus, command palette, dialogs, toasts                               |
-| `--color-surface-hover`        | `#ededef` | `#131314`               | Hover fill for rows on bg or sidebar (sessions, menu items, tool rows), pressed icon button |
-| `--color-sidebar-row-active`   | `#ffffff` | `#1b1b1b`               | The current session's row. In light mode it also gets a 1px inset `--color-border` ring   |
+| `--color-surface-hover`        | `#ededef` | `#1a1a1b`               | Hover fill for rows on bg or sidebar (sessions, menu items, tool rows), pressed icon button |
+| `--color-sidebar-row-active`   | `#ffffff` | `#252527`               | The current session's row: one step above hover, so hover and current never look alike   |
 | `--color-message`              | `#ebebed` | `#1e1e1e`               | User message bubble                                                                       |
 | `--color-border`               | `#e4e4e7` | `rgba(255,255,255,0.08)`| 1px hairlines: dividers, sidebar edge, card and popover outlines (decorative)             |
 | `--color-border-strong`        | `#86868f` | `#6b6b6b`               | Outlines of controls that must be perceivable (>= 3:1): switch track, checkbox, focused-off inputs |
@@ -53,23 +53,23 @@ AA needs 4.5:1 for text under 18px (or under 14px bold), and 3:1 for large text 
 | Pair                                          | Light   | Dark    |
 | --------------------------------------------- | ------- | ------- |
 | text on bg                                    | 17.3:1  | 19.3:1  |
-| text on sidebar                               | 17.0:1  | 19.3:1  |
+| text on sidebar                               | 17.0:1  | 18.2:1  |
 | text on surface                               | 16.1:1  | 18.2:1  |
 | text on message                               | 14.9:1  | 15.3:1  |
 | text-muted on bg                              | 5.3:1   | 8.3:1   |
-| text-muted on sidebar                         | 5.2:1   | 8.3:1   |
+| text-muted on sidebar                         | 5.2:1   | 7.8:1   |
 | text-muted on surface                         | 4.9:1   | 7.9:1   |
-| text-muted on surface-hover (worst row case)  | 4.7:1   | 7.4:1   |
-| text-muted on sidebar-row-active              | 5.4:1   | 6.8:1   |
+| text-muted on surface-hover (worst row case)  | 4.7:1   | 6.9:1   |
+| text-muted on sidebar-row-active              | 5.4:1   | 6.1:1   |
 | text-muted on message                         | 4.6:1   | 6.6:1   |
 | accent on bg                                  | 6.5:1   | 8.0:1   |
 | accent on surface                             | 6.1:1   | 7.5:1   |
 | accent on accent-soft                         | 5.6:1   | 7.0:1   |
 | on-accent on accent-fill                      | 6.7:1   | 4.7:1   |
-| info on sidebar / on surface-hover            | 5.6 / 5.0:1 | 12.6 / 11.1:1 |
-| success on bg / on surface-hover              | 5.2 / 4.6:1 | 10.8 / 9.6:1 |
-| danger on bg / on surface-hover               | 6.3 / 5.5:1 | 7.3 / 6.4:1 |
-| warning on bg / on surface-hover              | 5.6 / 4.9:1 | 12.2 / 10.8:1 |
+| info on sidebar / on surface-hover            | 5.6 / 5.0:1 | 11.9 / 10.4:1 |
+| success on bg / on surface-hover              | 5.2 / 4.6:1 | 10.8 / 9.0:1 |
+| danger on bg / on surface-hover               | 6.3 / 5.5:1 | 7.3 / 6.0:1 |
+| warning on bg / on surface-hover              | 5.6 / 4.9:1 | 12.2 / 10.1:1 |
 | success on diff-add-bg                        | 4.7:1   | 9.1:1   |
 | danger on diff-remove-bg                      | 5.4:1   | 6.3:1   |
 | text on diff-add-bg / diff-remove-bg          | 15.4 / 15.0:1 | 16.1 / 16.7:1 |
@@ -123,9 +123,9 @@ Markdown headings in the transcript do not use `display`. h1 is 16px/600, h2 15p
 
 | Token         | Value | Typical use                                                         |
 | ------------- | ----- | ------------------------------------------------------------------- |
-| `--space-1`   | 4px   | Icon-to-label gap, chip inner gap, gap between sidebar rows (2px rows + 2px) |
+| `--space-1`   | 4px   | Icon-to-label gap, chip inner gap (sidebar rows sit 1px apart: see Sidebar spacing) |
 | `--space-2`   | 8px   | Sidebar inset, gap between header controls, dense row padding-y     |
-| `--space-3`   | 12px  | Row padding-x (sidebar rows use 10px: `--space-2` + 2px), card padding (compact) |
+| `--space-3`   | 12px  | Row padding-x (sidebar rows use 10px: `--space-2` + 2px), card padding (compact), gap between sidebar folders |
 | `--space-4`   | 16px  | Card padding, composer padding, transcript gutter on mobile         |
 | `--space-5`   | 20px  | Gap between unrelated blocks in chrome                              |
 | `--space-6`   | 24px  | Gap between turns (user message to the next response)               |
@@ -171,89 +171,116 @@ All components use tokens only. A "row" has a 6px radius, a "control" 8px, a "ca
 ### App shell
 
 - **Sidebar.** `--color-sidebar`, with a `border-right: 1px solid --color-border`. Its width is `--size-sidebar`, resizable (see Sidebar resize rail).
-- **Top bar.** 52px, on `--color-bg`, with a bottom hairline. It shows a breadcrumb in 14px: the project in muted text, `›`, then the session title in `--color-text` at 500.
+- **Top bar.** 52px, on `--color-bg`, with a bottom hairline; the sidebar's logo row is the same 52px, so the two line up. It shows a breadcrumb in 14px: the project in muted text, a muted `›` with 8px either side, then the session title in `--color-text` at 500 (each part truncates on its own). After the title, 12px from it, sits the **checkout chip**: a 24px pill with a 1px `--color-border` outline, a 12px branch glyph, the branch name in 12px muted mono (middle-truncated past 36 characters) and the uncommitted `+N` / `−M` in `--color-success` / `--color-danger` (mono, tabular). A worktree session shows its own branch. The chip is absent outside a git checkout.
 - **Right panel.** `--color-bg` with a left hairline and a tab strip on `--color-surface`. It is resizable via a 4px grip that shows a 2px `--color-border-strong` line on hover.
 - **Narrow screens (≤1000px).** The sidebar overlays the chat: hairline edge, no shadow, `--color-overlay` scrim behind it. Picking a session closes it.
 
+### Sidebar spacing
+
+One system for every part of the sidebar. The list is a tree: projects are 32px headers, sessions are 36px rows nested under them, and the indent is what tells them apart, together with the weight and the icon.
+
+| Measure                     | Value | Where                                                                                     |
+| --------------------------- | ----- | ----------------------------------------------------------------------------------------- |
+| List inset (`--sb-inset`)   | 8px   | Left and right of the search row, the list, the undo notice and the footer's buttons       |
+| Row padding (`--sb-pad`)    | 10px  | Left padding of every row, header and section label; also the icon-to-name gap in a folder header |
+| Title indent (`--sb-indent`)| 36px  | 10px padding + 16px icon + 10px gap. Session titles start here, exactly under their folder's name |
+| Folder header               | 32px  | `--size-hit`                                                                              |
+| Session row (`--sb-row`)    | 36px  | Every session row on every shelf, live or stored, current or not: one line, one height     |
+| Between rows                | 1px   | Rows in a folder and on a shelf                                                           |
+| Between folders (`--sb-group-gap`) | 12px | The gap above every folder but the first                                                  |
+| Section label               | 28px  | Pinned, Projects, Archived                                                                 |
+| Shelf rows                  | 36px  | The project's 16px icon sits in the indent (at 10px), so the title still starts at 36px    |
+| Header                      | 52px + 40px | The logo row (as tall as the top bar), then the 32px search row with 8px below it   |
+| Footer                      | 44px  | Name and version on the left, the shortcuts button on the right; no rule above it         |
+
+Text tiers: folder names 14px/500 `--color-text`; live and unread session titles 14px/500 `--color-text`; stored and seen session titles recede to 14px/400 `--color-text-muted` (they return to `--color-text` on hover, focus and when current); section labels, times, counts and status labels 12px; icons 16px in headers and lead positions, 12px for inline marks (pin, worktree, draft), 14px inside 24px row action buttons.
+
 ### Sidebar header
 
-The header has 8px insets and one 32px row:
+- **Logo row.** 52px, padding 0 8px 0 18px: the SMOL block logo (required branding, `--color-accent`, mono, 5px cells, about 34px tall), then a 28px "Hide sidebar" icon button (panel glyph) at the right.
+- **Search row.** One 32px row with 8px insets and 8px below it. A search field fills the space. It has no border: a 16px muted search glyph, 8px gap, and the placeholder "Search". On hover or focus it gets a `--color-surface-hover` fill; focus adds a 2px inset `--color-focus-ring`.
+- Then three 28px icon buttons, 2px apart: Filter by project, Add project (folder-plus) and New session (pen-square). Each shows its tooltip with the shortcut. An active filter shows the filter button `.on`, and a 28px bar under the search row ("Only <project> · Show all", on `--color-surface-hover`).
 
-- A search field that fills the space. It has no border: a 14px muted search glyph and placeholder "Search". On hover or focus it gets a `--color-surface-hover` fill and an inset focus ring.
-- Then three 28px icon buttons: Filter by project, Add project (folder-plus) and New session (pen-square). Each shows its tooltip with the shortcut.
-
-When the field has a query, the list is replaced by results: matching titles first, then sessions whose transcripts match. A matched session shows a 12px muted snippet with the match in `--color-text` at 500. ↑ and ↓ move through the results, Enter opens one, Esc clears the query. Empty results show a centred 12px muted "No sessions found".
+When the field has a query, the list is replaced by results: matching titles first, then sessions whose transcripts match. Results use the shelf-row geometry (project icon at 10px, title at 36px) plus a second 18px line at the title indent: the project's name in 12px muted and, for a transcript match, the snippet after a ·, with the match in `--color-text` at 500. The highlighted result is `--color-accent-soft`. ↑ and ↓ move through the results, Enter opens one, Esc clears the query. Empty results show a centred 12px muted "No sessions found".
 
 ### Project list (folders)
 
 Sessions are grouped under their project, and projects are ordered: pinned first, then by most recent activity.
 
-- **The folder header** is a 32px row (`--radius-row`, padding 0 10px). It shows a 16px project icon, the name in 14px/500 `--color-text` (truncated), and a trailing 12px chevron (−90° when collapsed, 150ms rotate). On hover it fills with `--color-surface-hover`.
+- **The folder header** is a 32px row (`--radius-row`, padding 0 6px 0 10px, gaps 10px). It shows a 16px project icon, the name in 14px/500 `--color-text` (truncated), a 12px muted pin glyph if the project is pinned, and a trailing 12px chevron in a 16px box (−90° when collapsed, 150ms rotate). On hover it fills with `--color-surface-hover`.
 - **On hover or focus** a 24px "New session in <project>" pen button appears just left of the chevron. It is always visible on touch.
-- **A collapsed folder** also shows its session count in 11px muted tabular figures, plus one 6px status dot that summarises the hidden sessions. The most urgent wins: Needs you (`--color-warning`), then Failed (`--color-danger`), then Done/unread (`--color-success`), then Working (`--color-info`, pulsing). The dot has a visually hidden label, for example ", needs you".
-- **Spacing:** 8px above each folder except the first.
-- **Project icon:** the project's favicon if the hub found one. Otherwise a 16px monogram tile (`--radius-badge`, one letter, 11px/600) whose tint comes from a hash of the path, using the status hues at 15% over the sidebar with the full hue for the letter.
-- **Right-click** (or Shift+F10 / the Menu key) opens the project menu: New session, Pin/Unpin project, Copy path, Remove from list.
+- **A collapsed folder** also shows its session count in 12px muted tabular figures, plus one 6px status dot that summarises the hidden sessions. The most urgent wins: Needs you (`--color-warning`), then Failed (`--color-danger`), then Done/unread (`--color-success`), then Working (`--color-info`, pulsing). The dot has a visually hidden label, for example ", needs you".
+- **Spacing:** 12px between folders; the folder's sessions follow 1px under its header.
+- **A folder with no sessions** shows one muted 36px "New session" row at the title indent.
+- **Project icon:** the project's favicon if the hub found one. Otherwise a 16px monogram tile (`--radius-badge`, one letter, 10px/600) whose tint comes from a hash of the path, using the status hues at 15% over the sidebar with the full hue for the letter.
+- **Right-click** (or Shift+F10 / the Menu key) opens the project menu: New session, New session on a branch, Pin/Unpin project, Show only this project, Collapse/Expand, Copy path, Remove from list.
 
 ### Session (thread) rows
 
-Rows are 2px apart and use `--radius-row`. Two variants:
+Every session is one 36px line (`--radius-row`), 1px apart, whatever its state, so the list keeps one rhythm. Inside a folder the row's padding is 0 10px 0 36px, so the title sits under the folder's name. Left to right:
 
-- **Card row.** Used for live and recent sessions, 3 lines, 72px, padding 8px 10px.
-  - Line 1 (20px): a 12px meta line in `--color-text-muted`, holding the model name or "local", a `flex: 1` spacer, and the status slot.
-  - Line 2: the title in 14px/500 `--color-text`, truncated.
-  - Line 3 (only if there is data): the git branch (a 12px branch glyph and the name, truncated in the middle) on the left. On the right, `+N` in `--color-success` and `−M` in `--color-danger` (12px, mono, tabular).
-- **Slim row.** Stored or archived sessions, 32px, one line: title 14px/400 `--color-text-muted`, relative time on the right in 12px muted. The title turns `--color-text` on hover or focus.
+1. (shelf and search rows only) the project's 16px icon at 10px, with the title still at 36px;
+2. an unsent-draft mark (12px muted pen) if there is one;
+3. the title, 14px, truncated: 500 `--color-text` for live and unread sessions; 400 `--color-text-muted` for stored and seen ones (they recede);
+4. a 12px muted pin mark if the session is pinned (outside the Pinned shelf), and a 12px muted branch mark if it runs in its own worktree (the tooltip names the branch);
+5. the status slot at the right edge, 12px.
+
+The model is in the row's tooltip, and the branch with `+N −M` is in the top bar's checkout chip: they are the same for every session of a checkout, so rows do not repeat them.
 
 States:
 
 - **Rest:** transparent background.
 - **Hover:** `--color-surface-hover`.
-- **Current session:** `--color-sidebar-row-active`. In light mode it also gets a `0 0 0 1px` inset `--color-border` ring. The title stays `--color-text`, with `aria-current="page"`.
-- **Pinned:** a 12px muted pin glyph before line 1's text. Hovering it shows an unpin glyph.
-- **Unsent draft:** a 12px muted pen glyph before the title.
+- **Current session:** `--color-sidebar-row-active` with a `0 0 0 1px` inset `--color-sidebar-row-ring` (light only). The title is `--color-text`, with `aria-current="page"`.
+- **Focus:** a 2px inset `--color-focus-ring`.
 
-Status slot (right side of line 1, 12px/500, label + 6px dot, never colour alone):
+Status slot (12px/500, label + 6px dot, never colour alone; the row keeps it short so the title has room):
 
 | State                         | Label      | Colour            | Dot              |
 | ----------------------------- | ---------- | ----------------- | ---------------- |
 | starting                      | Starting   | `--color-info`    | pulse            |
-| busy                          | Working · 1m 12s | `--color-info` | pulse; live duration in tabular figures |
+| busy                          | Working    | `--color-info`    | pulse; the slot's tooltip says how long ("Working for 1m 12s") |
 | waiting (approval or question)| Needs you  | `--color-warning` | static           |
 | error                         | Failed     | `--color-danger`  | static           |
 | idle, finished since last seen| Done       | `--color-success` | static           |
-| idle, seen / stored           | (relative time, e.g. "3m") | `--color-text-muted` | none |
+| idle, seen / stored           | (relative time: now, 5m, 3h, 2d, 3w, 4mo, 1y) | `--color-text-muted`, 400, tabular | none |
 
-Hover and focus swap the status slot for row actions: 24px icon buttons for archive (or restore) and the more menu. They are always visible on touch.
+Hover and focus swap the status slot for row actions: 24px icon buttons (14px glyphs) for archive (or restore) and the more menu. They are always visible on touch. While Alt is held, a jump hint takes the slot instead.
 
 **Interaction:**
 
 - Click or Enter opens the session; a stored session resumes.
-- Double-click or F2 renames inline. The input is 14px/500 on `--color-surface-raised` with a 1px `--color-border-strong` border and `--radius-badge` corners. Enter saves, Esc cancels, and blur saves.
-- Right-click opens the session menu: Pin/Unpin, Rename, Mark unread, Copy path, Copy session id, New session in this project, Archive, Delete. Delete is in `--color-danger`, below a separator.
+- Double-click or F2 renames inline. The input is 26px, 14px/500 on `--color-surface-raised` with a 1px `--color-border-strong` border and `--radius-badge` corners, its text kept where the title was. Enter saves, Esc cancels, and blur saves.
+- Right-click opens the session menu: Pin/Unpin, Rename, Mark unread, Copy path, Copy session id, New session in this project, New session on a branch, Close session (live only), Archive, Delete. Delete is in `--color-danger`, below a separator.
 
 There are no `alert`, `confirm` or `prompt` dialogs.
 
 ### Sidebar shelves (Pinned, Archived)
 
-**Pinned** sits above the folders. It has no header, just its rows; a 1px hairline (inset 10px) separates it from the folders.
+Section labels are 28px rows, padding 0 10px: the name in 12px/500 `--color-text-muted`, then a 1px `--color-border` rule to the right edge. Never uppercase.
 
-**Archived** sits at the bottom of the list (`margin-top: auto`). Its header is a 28px row with "Archived" in 12px/500 muted, the count in 11px tabular, and a chevron. It is collapsed by default, and the collapsed state is remembered. Open, it shows 10 slim rows, then a "Show N more" text button in 12px `--color-accent`.
+**Pinned** sits above the folders: its "Pinned" label, then its rows (shelf rows, with the project icon), then 12px, then a "Projects" label over the folders. Without pinned sessions neither label is drawn.
+
+**Archived** sits at the bottom of the list (`margin-top: auto`, 20px above it). Its header is a 28px button with "Archived" in 12px/500 muted, the count in 12px tabular and a chevron, all muted; hover fills it with `--color-surface-hover`. It is collapsed by default, and the collapsed state is remembered. Open, it shows 10 shelf rows (receded), then a "Show N more" text button in 12px `--color-accent` at the title indent.
 
 ### Undo notice
 
-Archive and delete happen immediately. A one-line notice then appears in the sidebar footer, 24px high: 11px muted text such as "Archived 'Fix login'" with an "Undo" text button in `--color-accent`. It stays 6s, Ctrl+Z also triggers it, and it fades in and out over 200ms with `role="status"`. Delete removes the session for good only once the notice expires.
+Archive and delete happen immediately. A one-line notice then appears above the sidebar footer: a 32px `--color-surface-hover` row (`--radius-row`, 8px insets, padding 0 10px) with 12px text such as "Archived 'Fix login'" and an "Undo" text button in `--color-accent`. It stays 6s, Ctrl+Z also triggers it, and it fades in and out over 200ms with `role="status"`. Delete removes the session for good only once the notice expires.
+
+### Context menus
+
+Floating (`--color-surface-raised`, 1px `--color-border`, `--radius-control`, `--shadow-popover`), 224px to 320px wide, 4px padding, items 1px apart. Items are 32px rows (`--radius-row`, padding 0 8px 0 10px) in 14px; hover and keyboard focus fill with `--color-surface-hover`. Shortcuts are 11px mono kbd keys on `--color-surface` at the right. Separators are 1px `--color-border` with 4px above and below, inset 10px. Danger items use `--color-danger`.
 
 ### Sidebar resize rail
 
-A 4px invisible hit area on the sidebar's right edge (`cursor: col-resize`). On hover it shows a 2px `--color-border-strong` line. Dragging resizes the sidebar between 208px and `viewport − 640px`, double-click resets it to 256px, and the width is saved in localStorage. Ctrl+B collapses the sidebar off-canvas. The 28px expand button then sits in the top bar.
+A 4px invisible hit area on the sidebar's right edge (`cursor: col-resize`). On hover it shows a 2px `--color-border-strong` line. Dragging resizes the sidebar between 208px and `viewport − 640px`, double-click resets it to 256px, and the width is saved in localStorage. Ctrl+B collapses the sidebar off-canvas. The 28px expand button (the same panel glyph) then sits in the top bar.
 
 ### Keyboard (sidebar)
 
 - Ctrl+B: toggle the sidebar.
 - Alt+N: new session in the current project.
 - Alt+↑ / Alt+↓: previous or next session in list order.
-- Alt+1…9: jump to the Nth visible session. While Alt is held, each row shows a 11px `--radius-badge` kbd hint on the right.
+- Alt+1…9: jump to the Nth visible session. While Alt is held, each row shows an 18px 11px-mono `--radius-badge` kbd hint in its status slot.
 - F2: rename.
 - Ctrl+K → "Add project", "Search sessions".
 
@@ -263,7 +290,8 @@ Avoid Ctrl+N, Ctrl+T, Ctrl+W and Ctrl+1…9, which the browser owns.
 
 - **No projects.** A centred column (max-width 512px, padding 48px 32px) on `--color-bg`. It holds the SMOL logo (required branding, accent colour, mono), the display title "What should we work on?", a 14px muted line "Add a project folder to start your first session.", and a primary "Add project" button. Below these is a "Recent" list of 32px rows: name on the left, path in muted mono 12px on the right. The `--radius-hero` card is optional here.
 - **No session selected.** The same column with the logo, "Pick a session to continue" and a ghost "New session" button.
-- **Sidebar with no projects.** A 12px muted hint, "No projects yet", above the header buttons.
+- **A fresh session.** Until its first user or assistant message, a session shows the SMOL logo (11px cells, `--color-accent`) centred about 12vh from the top, then "What should we work on?" in the display style, 16px below it. This is a state of the session (the log's `.fresh` class), not an empty log: notes that arrive first, such as a model warning or "loading the model…", appear centred under the question and do not hide the logo. The first user message, reply, thought or tool call ends it.
+- **Sidebar with no projects.** A 12px muted hint, "No projects yet", centred with 24px above and below.
 
 The logo must remain on first load and on an empty session.
 
@@ -334,7 +362,7 @@ A code block variant.
 
 ### Tool rows
 
-One dense line per call: `[status glyph] name   args…   duration`. The row uses `--radius-row`, is 28px high, and is set in 13px.
+One dense line per call: `[status glyph] name   args…   duration`. The row uses `--radius-row`, is 28px high with 8px side padding, and is set in 13px. The glyph sits in a 14px column 8px in from the prose edge; the reasoning summary's chevron and the busy line's pulsing dot use the same column, so every transcript glyph lines up and every label starts 30px in.
 
 - **Parts:** name in `--color-text` at 500; args in 12px mono `--color-text-muted`, truncated with an ellipsis; duration on the right in 12px muted tabular figures.
 - **Hover:** `--color-surface-hover`.
@@ -353,7 +381,7 @@ States:
 - A `<details>` in `--color-text-muted`, 12px. It never uses the accent colour.
 - **Summary:** chevron plus "Thinking…" with the pulse while streaming, then "Thought for 4s" when done.
 - **Closed by default.** While streaming, the summary shows a one-line live preview, cut off with an ellipsis.
-- **Open body:** 13px muted text, a 2px `--color-border` rule on the left, 12px padding on the left, max-height 320px with scrolling.
+- **Open body:** 13px muted text, a 2px `--color-border` rule on the left (under the chevron), 12px padding on the left, max-height 320px with scrolling.
 
 ### Plan card
 
@@ -440,8 +468,9 @@ A switch row in the settings/user menu, plus a bell icon button in the top bar.
 - Separate layers with the lightness steps (`bg`, `sidebar`, `surface`, `surface-raised`) and 1px `--color-border` hairlines.
 - Keep it dense:
   - 14px prose and row titles, 12px meta;
-  - 28px tool rows, 32px folder and slim rows, 72px card rows;
-  - 2px between sidebar rows, 24px between turns.
+  - 28px tool rows, 32px folder headers, 36px session rows (one line, every state);
+  - 1px between sidebar rows, 12px between folders, 24px between turns;
+  - session titles indented 36px, under their folder's name.
 - Save `--color-accent` / `--color-accent-fill` for links, focus, the current selection and primary actions. Use one primary button per region.
 - Give every status a dot or glyph and a visible label, as in the sidebar status slot and tool rows.
 - Show sidebar row actions on hover and on keyboard focus, and always on touch. Every row action also has a context-menu entry.
@@ -459,7 +488,8 @@ A switch row in the settings/user menu, plus a bell icon button in the top bar.
 - Don't use `alert()`, `confirm()` or `prompt()`. Use inline rename, menus and the undo notice.
 - Don't use the hero radius outside the empty-state card, use pills for ordinary buttons, or use 700 weights.
 - Don't use all-caps group headers, emoji as UI glyphs other than the ★ star, or decorative animation.
-- Don't remove the SMOL logo from the first-load and empty-session views.
+- Don't remove the SMOL logo from the first-load and empty-session views, and don't tie the fresh-session logo to an empty log: a note must not hide it.
+- Don't give one sidebar row a different height or layout from the others (no multi-line cards).
 
 ## Agent Prompt Guide
 
@@ -474,7 +504,7 @@ Quick token reference (resolve via CSS variables, not literals):
 - Motion: `--motion-fast` 150ms, `--motion-base` 200ms, `--ease-out`
 
 Example prompts:
-- "Restyle the sidebar as project folders. 32px folder rows have a 16px icon, a 14px/500 name and a chevron. Collapsed, they show an 11px count and the most urgent status dot. Session card rows are 72px: meta line with the status slot, 14px/500 title, branch and `+N −M` line. The current row is `--color-sidebar-row-active` with an inset hairline ring. Rows are 2px apart and use `--radius-row`."
+- "Restyle the sidebar as project folders. 32px folder rows have a 16px icon, a 14px/500 name and a chevron. Collapsed, they show a 12px count and the most urgent status dot. Session rows are one 36px line each, titles indented 36px to the folder name, the status or relative time at the right; stored sessions recede to 400 muted. Folders are 12px apart, rows 1px. The current row is `--color-sidebar-row-active` with an inset `--color-sidebar-row-ring`. The branch and `+N −M` go in the top bar's checkout chip."
 - "Add sidebar search: a borderless 32px field with a search glyph. Results show title matches first, then content matches with a muted snippet. ↑↓ and Enter navigate, Esc clears."
 - "Add a session context menu (Pin, Rename, Mark unread, Copy path, New session in this project, Archive, Delete). Popover chrome is `--radius-control` with a hairline and `--shadow-popover`. Rename is inline. Archive and delete show the undo notice; no confirm dialogs."
 - "Build a Ctrl+K palette: a `--color-surface-raised` card, `--radius-card`, hairline, `--shadow-popover`, `--color-overlay` scrim. Grouped 32px rows with 12px muted headers and `--color-accent-soft` selection. A 200ms fade/scale-in that is turned off under reduced motion."
@@ -506,6 +536,7 @@ Paste these blocks into the page stylesheet. Components read only `var(--…)`, 
   --color-surface-raised: #ffffff;
   --color-surface-hover: #ededef;
   --color-sidebar-row-active: #ffffff;
+  --color-sidebar-row-ring: #e4e4e7;
   --color-message: #ebebed;
   --color-border: #e4e4e7;
   --color-border-strong: #86868f;
@@ -595,11 +626,12 @@ Paste these blocks into the page stylesheet. Components read only `var(--…)`, 
 @media (prefers-color-scheme: dark) {
   :root {
     --color-bg: #000000;
-    --color-sidebar: #000000;
+    --color-sidebar: #0a0a0a;
     --color-surface: #0a0a0a;
     --color-surface-raised: #111111;
-    --color-surface-hover: #131314;
-    --color-sidebar-row-active: #1b1b1b;
+    --color-surface-hover: #1a1a1b;
+    --color-sidebar-row-active: #252527;
+    --color-sidebar-row-ring: transparent;
     --color-message: #1e1e1e;
     --color-border: rgba(255, 255, 255, 0.08);
     --color-border-strong: #6b6b6b;

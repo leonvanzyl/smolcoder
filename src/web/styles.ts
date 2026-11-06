@@ -36,6 +36,7 @@ export const STYLES = String.raw`
     --color-surface-raised: #ffffff;
     --color-surface-hover: #ededef;
     --color-sidebar-row-active: #ffffff;
+    --color-sidebar-row-ring: #e4e4e7;
     --color-message: #ebebed;
     --color-border: #e4e4e7;
     --color-border-strong: #86868f;
@@ -118,11 +119,12 @@ export const STYLES = String.raw`
   @media (prefers-color-scheme: dark) {
     :root {
       --color-bg: #000000;
-      --color-sidebar: #000000;
+      --color-sidebar: #0a0a0a;
       --color-surface: #0a0a0a;
       --color-surface-raised: #111111;
-      --color-surface-hover: #131314;
-      --color-sidebar-row-active: #1b1b1b;
+      --color-surface-hover: #1a1a1b;
+      --color-sidebar-row-active: #252527;
+      --color-sidebar-row-ring: transparent;
       --color-message: #1e1e1e;
       --color-border: rgba(255, 255, 255, 0.08);
       --color-border-strong: #6b6b6b;
@@ -250,10 +252,17 @@ export const STYLES = String.raw`
   #main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
   #top { display: flex; align-items: center; gap: var(--space-2); height: var(--size-topbar); flex: none; padding: 0 var(--space-3) 0 var(--space-4); border-bottom: var(--hairline); background: var(--color-bg); font-size: var(--text-ui); color: var(--color-text-muted); }
   #top .iconbtn { min-width: var(--size-hit); height: var(--size-hit); }
-  #crumb { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #crumb .ws { color: var(--color-text-muted); }
-  #crumb .sep { margin: 0 6px; color: var(--color-text-muted); }
-  #crumb .title { color: var(--color-text); font-weight: var(--weight-medium); }
+  #crumb { flex: 1; min-width: 0; display: flex; align-items: center; overflow: hidden; white-space: nowrap; }
+  #crumb .ws { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; color: var(--color-text-muted); }
+  #crumb .sep { flex: none; margin: 0 var(--space-2); color: var(--color-text-muted); opacity: .7; }
+  #crumb .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--color-text); font-weight: var(--weight-medium); }
+  /* The session's checkout: branch glyph, name, and uncommitted +N −M. */
+  .crumb-git { flex: 0 1 auto; min-width: 0; display: inline-flex; align-items: center; gap: 6px; height: 24px; margin-inline-start: var(--space-3); padding: 0 var(--space-2); border: var(--hairline); border-radius: var(--radius-pill); color: var(--color-text-muted); font-size: var(--text-meta); }
+  .crumb-git .sb-glyph svg { width: 12px; height: 12px; display: block; }
+  .crumb-branch { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-mono); }
+  .crumb-git .sb-diff { flex: none; display: inline-flex; gap: 4px; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  .crumb-git .add { color: var(--color-success); }
+  .crumb-git .del { color: var(--color-danger); }
   #crumb .model { color: var(--color-text-muted); margin-left: var(--space-3); }
   #logwrap { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; overflow-anchor: none; }
   #logs, #busywrap { max-width: calc(var(--size-column) + 2 * var(--space-8)); margin: 0 auto; padding: var(--space-6) var(--space-8) 0; }
@@ -274,9 +283,18 @@ export const STYLES = String.raw`
   .wsbtn:hover { background: var(--color-surface-hover); }
   .wsbtn > span:first-child { font-weight: var(--weight-medium); white-space: nowrap; }
   .wsbtn .dim { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono); font-size: var(--text-meta); color: var(--color-text-muted); }
-  /* A fresh session opens on the logo until the first message arrives. */
-  .log:empty::before { content: "${LOGO_CSS}"; display: table; margin: 14vh auto 0; color: var(--color-accent); white-space: pre; font-family: var(--font-mono); font-size: 11px; line-height: 1.15; }
-  .log:empty::after { content: "What should we work on?"; display: block; margin-top: var(--space-6); text-align: center; color: var(--color-text); font-size: var(--text-display); line-height: var(--leading-display); letter-spacing: var(--tracking-display); font-weight: var(--weight-semibold); }
+  /* A fresh session opens on the logo and the question until its first user
+     or assistant message (client.ts drops .fresh then). Notes that arrive
+     first, such as a model warning, sit centred below them: the flex order
+     puts both pseudo-elements ahead of the notes. */
+  .log.fresh { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); padding-top: clamp(32px, 12vh, 140px); }
+  .log.fresh::before { order: -2; content: "${LOGO_CSS}"; display: block; text-align: start; color: var(--color-accent); white-space: pre; font-family: var(--font-mono); font-size: 11px; line-height: 1.15; }
+  .log.fresh::after { order: -1; content: "What should we work on?"; display: block; margin: var(--space-4) 0 var(--space-4); text-align: center; color: var(--color-text); font-size: var(--text-display); line-height: var(--leading-display); letter-spacing: var(--tracking-display); font-weight: var(--weight-semibold); }
+  .log.fresh > * { align-self: stretch; }
+  .log.fresh > .line-status, .log.fresh > .line-warn, .log.fresh > .line-error { align-self: center; max-width: 100%; text-align: center; }
+  .log.fresh[hidden] { display: none; }
+  /* ...and the busy line ("loading the model…") centres under them. */
+  #logwrap:has(.log.fresh:not([hidden])) #busy { text-align: center; }
 
   /* ---- user message ---- */
   .user { width: fit-content; max-width: 80%; margin: var(--space-6) 0 var(--space-6) auto; padding: 10px var(--space-4); background: var(--color-message); color: var(--color-text); border-radius: var(--radius-card); font-size: var(--text-body); line-height: var(--leading-body); white-space: pre-wrap; }
@@ -328,9 +346,9 @@ export const STYLES = String.raw`
 
   /* ---- reasoning disclosure ---- */
   .thought { margin: var(--space-1) 0; color: var(--color-text-muted); font-size: var(--text-meta); line-height: var(--leading-meta); }
-  .thought summary { display: flex; align-items: center; gap: 6px; min-height: var(--size-row); cursor: pointer; list-style: none; border-radius: var(--radius-row); }
+  .thought summary { display: flex; align-items: center; gap: var(--space-2); min-height: var(--size-row); padding: 0 var(--space-2); cursor: pointer; list-style: none; border-radius: var(--radius-row); }
   .thought summary::-webkit-details-marker { display: none; }
-  .thought summary::before { content: "›"; flex: none; width: 12px; text-align: center; font-size: 14px; transition: transform var(--motion-fast) var(--ease-out); }
+  .thought summary::before { content: "›"; flex: none; width: 14px; text-align: center; font-size: 14px; transition: transform var(--motion-fast) var(--ease-out); }
   .thought[open] summary::before { transform: rotate(90deg); }
   .thought summary:hover { color: var(--color-text); }
   .thought-preview { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -340,7 +358,7 @@ export const STYLES = String.raw`
   .thought summary:hover .thought-expand, .thought summary:hover .thought-collapse, .thought summary:focus-visible .thought-expand, .thought summary:focus-visible .thought-collapse { opacity: 1; }
   .thought-collapse, .thought[open] .thought-expand { display: none; }
   .thought[open] .thought-collapse { display: inline; }
-  .thought-body { color: var(--color-text-muted); font-size: var(--text-compact); line-height: var(--leading-body); white-space: pre-wrap; overflow-wrap: anywhere; border-inline-start: 2px solid var(--color-border); padding: var(--space-1) 0 var(--space-1) var(--space-3); margin: var(--space-1) 0 var(--space-3) 5px; max-height: 320px; overflow-y: auto; }
+  .thought-body { color: var(--color-text-muted); font-size: var(--text-compact); line-height: var(--leading-body); white-space: pre-wrap; overflow-wrap: anywhere; border-inline-start: 2px solid var(--color-border); padding: var(--space-1) 0 var(--space-1) var(--space-3); margin: var(--space-1) 0 var(--space-3) 15px; max-height: 320px; overflow-y: auto; }
 
   /* ---- tool rows ---- */
   .tool { margin: 2px 0; font-size: var(--text-compact); line-height: var(--leading-compact); color: var(--color-text); }
@@ -401,10 +419,10 @@ export const STYLES = String.raw`
   .line-error { color: var(--color-danger); font-size: var(--text-compact); white-space: pre-wrap; user-select: text; }
   .line-warn::before { content: "! "; font-weight: var(--weight-semibold); }
   .line-error::before { content: "✗ "; }
-  #busy { color: var(--color-text-muted); font-size: var(--text-compact); display: none; }
+  #busy { color: var(--color-text-muted); font-size: var(--text-compact); display: none; padding-inline-start: var(--space-2); }
   #busy.on { display: block; }
   /* The braille spinner glyph becomes the shared pulsing status dot. */
-  #busy .spin { display: inline-block; width: 6px; height: 6px; margin: 0 6px 0 4px; vertical-align: 1px; overflow: hidden; color: transparent; border-radius: 50%; background: var(--color-info); animation: pulse 2s infinite; }
+  #busy .spin { display: inline-block; width: 6px; height: 6px; margin: 0 8px 0 4px; vertical-align: 1px; overflow: hidden; color: transparent; border-radius: 50%; background: var(--color-info); animation: pulse 2s infinite; }
   #busysecs { font-variant-numeric: tabular-nums; }
 
   /* ---- approval / question box ---- */

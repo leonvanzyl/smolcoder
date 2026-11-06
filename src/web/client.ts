@@ -158,7 +158,10 @@ function rel(ts) {
   if (d < 3600e3) return Math.floor(d / 60e3) + "m";
   if (d < 86400e3) return Math.floor(d / 3600e3) + "h";
   if (d < 7 * 86400e3) return Math.floor(d / 86400e3) + "d";
-  return new Date(ts).toLocaleDateString();
+  // Compact from here on too: a full date would crowd the title out of a row.
+  if (d < 60 * 86400e3) return Math.floor(d / (7 * 86400e3)) + "w";
+  if (d < 365 * 86400e3) return Math.floor(d / (30 * 86400e3)) + "mo";
+  return Math.floor(d / (365 * 86400e3)) + "y";
 }
 function shortPath(p) {
   if (!p) return "";
@@ -359,7 +362,7 @@ function getView(sid) {
   let v = views.get(sid);
   if (!v) {
     v = {
-      sid, logEl: el("div", "log"), state: { commands: [] }, curText: null, curThought: null, thoughtBuf: "", thoughtStart: 0,
+      sid, logEl: el("div", "log fresh"), state: { commands: [] }, curText: null, curThought: null, thoughtBuf: "", thoughtStart: 0,
       busyLabel: null, busyStart: 0, unread: false, draft: ls.get(draftKey(sid)) || "", scrollTop: null, followBottom: true, selPaused: false,
       asks: new Map(), curTool: null, planEl: null, argsRow: null, localQueue: [], histIdx: -1, files: null, args: null,
       terms: new Map(), tabs: [], activeTab: null, panelOpen: false, panelEl: el("div", "panelview"),
@@ -442,7 +445,16 @@ jumpBottom.onclick = scrollToBottom;
 // transcript height without a new message event.
 const logResize = new ResizeObserver(stick);
 logResize.observe(logwrap); logResize.observe(logsEl); logResize.observe($("busywrap"));
-function add(v, e) { v.logEl.appendChild(e); if (v === active) stick(); return e; }
+// A session opens on the SMOL logo and "What should we work on?" (the .fresh
+// state, drawn in CSS) until its first user or assistant message; notes
+// such as a model warning show below the logo without ending it.
+const ENDS_FRESH = /(^|\s)(user|md|thought|tool)(\s|$)/;
+function add(v, e) {
+  v.logEl.appendChild(e);
+  if (ENDS_FRESH.test(e.className || "")) v.logEl.classList.remove("fresh");
+  if (v === active) stick();
+  return e;
+}
 function fmtSize(n) { return n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(n < 10240 ? 1 : 0) + " KB" : (n / 1048576).toFixed(1) + " MB"; }
 // A sent message: its text, then thumbnails for images and links for files.
 function userBubble(m) {
@@ -1152,16 +1164,26 @@ function renderSidebar() {
   }
   pinned.sort((a, b) => a.s.pinnedAt - b.s.pinnedAt);
   archived.sort((a, b) => b.s.archivedAt - a.s.archivedAt);
+  // With a Pinned shelf above them, the folders get a "Projects" label too, so
+  // the two lists read as two sections; on their own they need none.
   if (pinned.length) {
     const shelf = el("div", "sb-pinned"); shelf.setAttribute("role", "group"); shelf.setAttribute("aria-label", "Pinned sessions");
+    shelf.appendChild(sectionLabel("Pinned"));
     for (const x of pinned) shelf.appendChild(sessRow(x.s, x.w, true));
     list.appendChild(shelf);
-    list.appendChild(el("div", "sb-sep"));
+    list.appendChild(sectionLabel("Projects"));
   }
   const folders = el("div", "sb-folders");
   for (const w of shown) folders.appendChild(folderEl(w));
   list.appendChild(folders);
   if (archived.length) list.appendChild(archiveShelf(archived));
+}
+// A quiet section label: 12px/500 muted text and a hairline rule to the edge.
+function sectionLabel(text) {
+  const d = el("div", "sb-section");
+  d.appendChild(el("span", "sb-section-label", text));
+  d.appendChild(el("span", "sb-rule"));
+  return d;
 }
 // A folder: icon, name, (count and the most urgent status when collapsed),
 // a "new session here" pen and the chevron; its sessions below.
@@ -1212,14 +1234,19 @@ function folderEl(w) {
   }
   return box;
 }
-// One session. Live and unread sessions are 3-line cards (meta and status,
-// title, branch and +N −M); stored and archived ones are slim rows.
+// One session: a single 36px line on every shelf, so the list keeps one
+// rhythm. Inside a folder the title is indented to line up with the folder's
+// name; on the Pinned and Archived shelves (rows from many projects) the
+// project icon sits in that indent instead. Then the title, the pin and
+// worktree marks, and the status or time slot (actions on hover). Stored and
+// seen sessions recede (400, muted); live and unread ones stand at 500. The
+// branch and +N −M of the current session live in the top bar.
 function sessRow(s, w, inPinned) {
   const v = views.get(s.id);
   const st = sStatus(s);
-  const card = !s.archivedAt && (s.live || s.unread);
   const isActive = !!(active && active.sid === s.id);
-  const row = el("div", "sess " + (s.live ? s.status : "stored") + (card ? " sb-card" : " sb-slim") + (isActive ? " active" : "") + (s.unread ? " unread" : "") + (s.archivedAt ? " archived" : ""));
+  const recede = !!s.archivedAt || (!s.live && !s.unread);
+  const row = el("div", "sess sb-row " + (s.live ? s.status : "stored") + (inPinned ? " sb-lead" : "") + (recede ? " recede" : "") + (isActive ? " active" : "") + (s.unread ? " unread" : "") + (s.archivedAt ? " archived" : ""));
   row.tabIndex = 0; row.dataset.sid = s.id;
   if (isActive) row.setAttribute("aria-current", "page");
   if (!s.archivedAt) sbOrder.push(s.id);
@@ -1228,44 +1255,20 @@ function sessRow(s, w, inPinned) {
   const titleEl = renaming && renaming.id === s.id ? renameField(s) : el("span", "stitle" + (s.title ? "" : " untitled"), s.title || "new session");
   const draft = !!((v && v.draft) || ls.get(draftKey(s.id))) && !isActive;
   const acts = rowActions(s, w, row);
-  const timeEl = el("span", "stime", rel(s.archivedAt || s.updatedAt));
-  if (card) {
-    const l1 = el("div", "sb-l1");
-    if (s.pinnedAt) l1.appendChild(glyph("pin", "sb-pinmark", "pinned"));
-    l1.appendChild(el("span", "sb-meta", (inPinned ? w.name + " · " : "") + (s.model || "local")));
-    l1.appendChild(el("span", "grow"));
-    l1.appendChild(st ? statusEl(st) : timeEl);
-    l1.appendChild(acts);
-    if (hint) l1.appendChild(hint);
-    const l2 = el("div", "sb-l2");
-    if (draft) l2.appendChild(glyph("draft", "sb-draft", "unsent draft"));
-    l2.appendChild(titleEl);
-    row.appendChild(l1); row.appendChild(l2);
-    // Sessions in the same folder share its checkout: the branch line goes on
-    // the current one only. A worktree session has its own, so it always shows.
-    const git = s.git || w.git;
-    if (s.live && git && git.branch && (s.worktree || isActive)) {
-      const l3 = el("div", "sb-l3");
-      const br = el("span", "sb-branch"); br.appendChild(glyph("branch"));
-      br.appendChild(el("span", "sb-branchname", midTrim(git.branch, 30))); br.title = (s.worktree ? "worktree branch " : "branch ") + git.branch;
-      l3.appendChild(br);
-      l3.appendChild(el("span", "grow"));
-      if (git.added || git.removed) {
-        const d = el("span", "sb-diff"); d.title = "uncommitted changes in " + (s.worktree ? "this worktree" : w.name);
-        d.appendChild(el("span", "add", "+" + git.added)); d.appendChild(el("span", "del", "−" + git.removed));
-        l3.appendChild(d);
-      }
-      row.appendChild(l3);
-    }
-  } else {
-    if (s.pinnedAt && !s.archivedAt) row.appendChild(glyph("pin", "sb-pinmark", "pinned"));
-    if (draft) row.appendChild(glyph("draft", "sb-draft", "unsent draft"));
-    row.appendChild(titleEl);
-    if (inPinned) row.appendChild(el("span", "sb-meta", w.name));
-    row.appendChild(st ? statusEl(st) : timeEl);
-    row.appendChild(acts);
-    if (hint) row.appendChild(hint);
+  if (inPinned) { const ic = projIcon(w); ic.classList.add("sb-leadicon"); ic.title = w.name; row.appendChild(ic); }
+  if (draft) row.appendChild(glyph("draft", "sb-draft", "unsent draft"));
+  row.appendChild(titleEl);
+  if (s.pinnedAt && !s.archivedAt && !inPinned) row.appendChild(glyph("pin", "sb-pinmark", "pinned"));
+  if (s.worktree) {
+    const git = s.git || {};
+    const wt = glyph("branch", "sb-wtmark", "worktree " + (git.branch || s.worktree.branch || ""));
+    wt.title = "Worktree branch " + (git.branch || s.worktree.branch || "");
+    row.appendChild(wt);
   }
+  const slot = st ? statusEl(st) : el("span", "stime", rel(s.archivedAt || s.updatedAt));
+  row.appendChild(slot);
+  row.appendChild(acts);
+  if (hint) row.appendChild(hint);
   row.title = (s.title || "new session") + " · " + w.name + (s.model ? " · " + s.model : "") + (st ? " · " + st.label : s.live ? "" : " · saved — click to resume");
   row.onclick = () => select(s.id);
   row.ondblclick = () => startRename(s.id, s.title || "");
@@ -1290,8 +1293,8 @@ function rowActions(s, w, row) {
 function archiveShelf(items) {
   const box = el("div", "sb-shelf" + (sb.archOpen ? " open" : ""));
   const hdr = el("button", "sb-shelfhdr"); hdr.type = "button"; hdr.setAttribute("aria-expanded", sb.archOpen ? "true" : "false");
-  hdr.appendChild(el("span", "", "Archived")); hdr.appendChild(el("span", "sb-count", String(items.length)));
-  hdr.appendChild(el("span", "grow")); hdr.appendChild(glyph("chev", "sb-chev"));
+  hdr.appendChild(el("span", "sb-section-label", "Archived")); hdr.appendChild(el("span", "grow"));
+  hdr.appendChild(el("span", "sb-count", String(items.length))); hdr.appendChild(glyph("chev", "sb-chev"));
   hdr.onclick = () => { sb.archOpen = !sb.archOpen; ls.set("smol.sb.archOpen", sb.archOpen ? "1" : "0"); renderSidebar(); };
   box.appendChild(hdr);
   if (sb.archOpen) {
@@ -1316,18 +1319,23 @@ function renderResults(list) {
   hits.forEach((h, i) => {
     const row = el("div", "sess sb-result" + (i === sb.resultSel ? " sel" : "") + (active && active.sid === h.id ? " active" : "") + (h.archived ? " archived" : ""));
     row.setAttribute("role", "option"); row.setAttribute("aria-selected", i === sb.resultSel ? "true" : "false"); row.dataset.sid = h.id;
-    const l1 = el("div", "sb-l2");
+    // Same geometry as a shelf row: the project icon, then the title at the
+    // shared 36px indent. Every result has a second line under the title:
+    // the project, then the matching snippet when the match is in the text.
+    const l1 = el("div", "sb-rline");
+    const hw = hub.workspaces.find((w) => wkey(w.path) === wkey(h.workspace));
+    const ic = hw ? projIcon(hw) : el("span", "sb-mono"); ic.classList.add("sb-leadicon"); l1.appendChild(ic);
     l1.appendChild(el("span", "stitle", h.title || "new session"));
-    l1.appendChild(el("span", "sb-meta", (h.wsname || "") + (h.archived ? " · archived" : "")));
     row.appendChild(l1);
+    const sn = el("div", "sb-snippet");
+    sn.appendChild(el("span", "sb-meta", (h.wsname || "") + (h.archived ? " · archived" : "")));
     if (h.where === "text" && h.snippet) {
-      const sn = el("div", "sb-snippet");
       const m = h.match || [0, 0];
-      sn.appendChild(document.createTextNode(h.snippet.slice(0, m[0])));
+      sn.appendChild(document.createTextNode(" · " + h.snippet.slice(0, m[0])));
       sn.appendChild(el("mark", "", h.snippet.slice(m[0], m[0] + m[1])));
       sn.appendChild(document.createTextNode(h.snippet.slice(m[0] + m[1])));
-      row.appendChild(sn);
     }
+    row.appendChild(sn);
     row.onmousedown = (e) => e.preventDefault(); // keep focus in the field
     row.onclick = () => openResult(h);
     box.appendChild(row);
@@ -1396,15 +1404,16 @@ function urgent(sessions) {
 function statusEl(st) {
   const box = el("span", "sb-status " + st.k);
   box.appendChild(el("span", "sb-dot " + st.k + (st.pulse ? " pulse" : "")));
-  const label = el("span", "sb-label", st.label + (st.since ? " · " + clock(Date.now() - st.since) : ""));
-  if (st.since) label.dataset.since = String(st.since);
-  box.appendChild(label);
+  // The row keeps the label short so the title has room; how long it has
+  // been working is the slot's tooltip (and the busy line in the chat).
+  box.appendChild(el("span", "sb-label", st.label));
+  if (st.since) { box.dataset.since = String(st.since); box.title = st.label + " for " + clock(Date.now() - st.since); }
   return box;
 }
 function midTrim(s, n) { s = String(s || ""); return s.length <= n ? s : s.slice(0, Math.ceil(n / 2) - 1) + "…" + s.slice(s.length - Math.floor(n / 2)); }
 // Live durations tick without rebuilding the list.
 setInterval(() => {
-  for (const n of document.querySelectorAll("#wslist [data-since]")) n.textContent = "Working · " + clock(Date.now() - Number(n.dataset.since));
+  for (const n of document.querySelectorAll("#wslist [data-since]")) n.title = "Working for " + clock(Date.now() - Number(n.dataset.since));
 }, 1000);
 
 // ---- sidebar: glyphs (Lucide-style strokes, inline, no assets) -------------
@@ -1947,6 +1956,21 @@ function renderCrumb() {
   c.appendChild(el("span", "sep", "›"));
   c.appendChild(el("span", "title", active.state.title || (info && info.title) || "new session"));
   c.title = info ? info.workspace : "";
+  // The checkout this session works in: its branch and uncommitted +N −M.
+  const w = info && hub.workspaces.find((x) => wkey(x.path) === wkey(info.workspace));
+  const git = info && (info.git || (w && w.git));
+  if (git && git.branch) {
+    const g = el("span", "crumb-git");
+    g.title = (info.worktree ? "worktree branch " : "branch ") + git.branch + (git.added || git.removed ? " · uncommitted changes" : "");
+    g.appendChild(glyph("branch", "crumb-branchglyph"));
+    g.appendChild(el("span", "crumb-branch", midTrim(git.branch, 36)));
+    if (git.added || git.removed) {
+      const d = el("span", "sb-diff");
+      d.appendChild(el("span", "add", "+" + git.added)); d.appendChild(el("span", "del", "−" + git.removed));
+      g.appendChild(d);
+    }
+    c.appendChild(g);
+  }
 }
 function renderTitle() {
   let busy = false, waiting = false;
@@ -2683,7 +2707,7 @@ document.addEventListener("keydown", (e) => {
 // visit, or a gap too long to fill) clears the views for a full replay.
 let replaying = true;
 function resetView(v) {
-  v.logEl.innerHTML = ""; v.curText = null; v.curThought = null; v.curTool = null; v.planEl = null; v.argsRow = null; v.asks.clear();
+  v.logEl.innerHTML = ""; v.logEl.classList.add("fresh"); v.curText = null; v.curThought = null; v.curTool = null; v.planEl = null; v.argsRow = null; v.asks.clear();
 }
 function resetViews() {
   replaying = true;

@@ -43,9 +43,16 @@ test('web welcome screen and sidebar header carry the logo', () => {
   assert.ok(!side.includes('smol<span'), 'the old text wordmark should be gone');
 });
 
-test('a fresh, empty web session opens on the logo', () => {
-  assert.ok(STYLES.includes('.log:empty::before'), 'empty-session rule missing');
-  const rule = STYLES.slice(STYLES.indexOf('.log:empty::before'), STYLES.indexOf('.log:empty::after'));
-  for (const r of LOGO_ROWS) assert.ok(rule.includes(r.trimEnd()), 'empty-session logo missing row: ' + r);
+test('a fresh web session opens on the logo, by state rather than by an empty log', () => {
+  assert.ok(STYLES.includes('.log.fresh::before'), 'fresh-session rule missing');
+  const rule = STYLES.slice(STYLES.indexOf('.log.fresh::before'), STYLES.indexOf('.log.fresh::after'));
+  for (const r of LOGO_ROWS) assert.ok(rule.includes(r.trimEnd()), 'fresh-session logo missing row: ' + r);
   assert.ok(rule.includes(String.fromCharCode(92) + 'A '), 'rows must be separated by CSS newlines');
+  assert.ok(STYLES.includes('What should we work on?'), 'fresh-session question missing');
+  // A note (a model warning) in the log must not hide the logo: the old
+  // .log:empty rule did, so it must not come back.
+  assert.ok(!STYLES.includes('.log:empty'), 'the logo must not depend on an empty log');
+  const { CLIENT_JS } = require('../dist/web/client');
+  assert.ok(CLIENT_JS.includes('"log fresh"'), 'every session log starts fresh');
+  assert.ok(/ENDS_FRESH = .*user\|md/.test(CLIENT_JS), 'only a user or assistant message ends the fresh state');
 });
