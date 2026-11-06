@@ -54,7 +54,8 @@ test("output that fits gets no log, and checks without saveLog never write one",
 
 test("run_command through the tool registry saves the log and keeps the exit line last", async (t) => {
   const dir = tmp(t, "smol-core-log-");
-  script(dir, "fail.cjs", "for (let i = 0; i < 2000; i++) console.error('err ' + i); process.exit(3);");
+  // exitCode, not exit(): on Linux, writes to a pipe are async and exit() would cut them short.
+  script(dir, "fail.cjs", "for (let i = 0; i < 2000; i++) console.error('err ' + i); process.exitCode = 3;");
   const ctx = { workspace: dir, plan: new Plan(), taskManager: new TaskManager(dir), filesTouched: new Set(), commandsRun: [], resultCharLimit: 3000 };
   const out = await executeTool("run_command", { command: "node fail.cjs" }, ctx);
   assert.match(out, /^Error: command exited with code 3/);
