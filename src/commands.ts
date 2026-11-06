@@ -26,6 +26,8 @@ export const BUILTIN_COMMANDS: SlashCommand[] = [
   { name: "logs", desc: "Show task output — /logs t1", group: "Tasks", aliases: ["output"], args: () => [] },
   { name: "stop", desc: "Stop a background task — /stop t1", group: "Tasks", aliases: ["kill"], args: () => [] },
   { name: "commands", desc: "List or create custom commands — /commands new", group: "General", aliases: ["custom", "templates"], args: () => COMMANDS_ARGS },
+  { name: "update", desc: "Update smolcoder to the latest version, then restart", group: "General", aliases: ["upgrade", "version", "new version"] },
+  { name: "update-check", desc: "Turn update notices on or off", group: "General", aliases: ["updates", "notices", "notifier", "settings"], args: () => updateCheckArgs() },
   { name: "help", desc: "Show commands and keys", group: "General", aliases: ["?", "keys"] },
   { name: "exit", desc: "Quit smolcoder (web: close this session)", group: "General", aliases: ["quit", "q"] },
 ];
@@ -47,7 +49,7 @@ export const KEYBOARD: { key: string; desc: string }[] = [
 
 /** Other names a command answers to when typed in full. (`aliases` are only
  * search words for the fuzzy matcher, not names.) */
-export const COMMAND_ALIASES: Record<string, string> = { model: "models", quit: "exit", q: "exit", resume: "sessions" };
+export const COMMAND_ALIASES: Record<string, string> = { model: "models", quit: "exit", q: "exit", resume: "sessions", upgrade: "update" };
 
 /** The command a typed name means: its own name or a COMMAND_ALIASES entry. */
 export function findCommand(name: string, commands: SlashCommand[]): SlashCommand | undefined {
@@ -117,6 +119,14 @@ export function taskArgs(running: string[]): SelectOption[] {
     const i = line.indexOf(":");
     return { label: i > 0 ? line.slice(0, i) : line, hint: i > 0 ? line.slice(i + 1).trim() : "" };
   });
+}
+
+/** /update-check values; `on` is the current setting unless told otherwise. */
+export function updateCheckArgs(on?: boolean): SelectOption[] {
+  return [
+    { label: "on", hint: "tell me when a new version is out (checks every 12 hours)", current: on === true },
+    { label: "off", hint: "never check by itself; /update still checks when asked", current: on === false },
+  ];
 }
 
 export const MODELS_ARGS: SelectOption[] = [{ label: "next", hint: "switch to the next recent model (F2)" }];

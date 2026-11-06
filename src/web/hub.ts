@@ -25,6 +25,21 @@ import { SESSION_ID_RE, SessionMeta, SessionStore, WorkspaceStore, workspaceKey 
 import { Terminal } from "./terminal";
 import * as side from "./sidebar-data";
 import { expandHome, groupOf, tilde } from "./sidebar-data";
+import {
+  autoCheckAllowed,
+  CHECK_INTERVAL_MS,
+  checkForUpdate,
+  detectThisInstall,
+  InstallInfo,
+  releaseUrl,
+  restartEntry,
+  runUpdate,
+  RunOptions,
+  RunResult,
+  setUpdateChecks,
+  updateChecksSetting,
+  UpdateInfo,
+} from "../update";
 
 export { browseDir, completeDir } from "./sidebar-data";
 
@@ -68,12 +83,48 @@ function serveFont(req: http.IncomingMessage, res: http.ServerResponse): void {
   res.end(req.method === "HEAD" ? undefined : fontBytes);
 }
 
+/** What the hub uses to check for and install updates (tests fake them). */
+export interface HubUpdates {
+  env?: NodeJS.ProcessEnv;
+  check?: (force: boolean) => Promise<UpdateInfo | null>;
+  detect?: () => Promise<InstallInfo>;
+  run?: (info: InstallInfo, o: RunOptions) => Promise<RunResult>;
+  /** Check by itself at start and every 12 hours (the CLI turns this on). */
+  auto?: boolean;
+}
+
+/** A session the next hub reopens after "Restart server". */
+export interface HandoffSession {
+  id: string;
+  /** Only for one that was never saved: started fresh in this folder. */
+  workspace?: string;
+}
+
+/** What "Restart server" hands to the successor: the same port and URL
+ * key, so the open page reconnects and lands on the same session. */
+export interface RestartHandoff {
+  token: string;
+  port: number;
+  /** The updated copy's dist/index.js. */
+  entry: string;
+  sessions: HandoffSession[];
+  /** The version that handed over. */
+  from: string;
+}
+
+type UpdatePhase = "idle" | "checking" | "running" | "done" | "failed" | "manual" | "restarting";
+
 export interface HubOptions {
   port: number;
   prefs: SessionPrefs;
   help: string;
   version: string;
   dataDir?: string;
+  /** The URL key to serve under (a restarted hub keeps its predecessor's). */
+  token?: string;
+  updates?: HubUpdates;
+  /** "Restart server": the host starts the successor (index.ts). */
+  onRestart?: (h: RestartHandoff) => void;
   /** Builds a live Session for a workspace (tests inject a fake). */
   factory?: SessionFactory;
   /** No stdout chatter (tests). */
@@ -249,7 +300,7 @@ function defaultFactory(help: string): SessionFactory {
 // ---- the hub ----------------------------------------------------------------
 
 export class WebHub {
-  readonly authToken = crypto.randomBytes(9).toString("base64url");
+  readonly authToken: string;
   readonly dataDir: string;
   port: number;
 
@@ -275,8 +326,23 @@ export class WebHub {
   /** Unsaved worktree sessions that just closed, while their worktree is
    * being removed (exit paths list them instead of leaking them). */
   private releasing = new Map<string, SessionMeta>();
+  /** Update notices and the updater (see update.ts). */
+  private upd: {
+    latest: string | null;
+    newer: boolean;
+    checkedAt: number;
+    phase: UpdatePhase;
+    log: string;
+    message: string;
+    install: InstallInfo | null;
+    installed: string | null;
+    notices: boolean;
+  };
+  private updTimer: NodeJS.Timeout | null = null;
 
   constructor(private opts: HubOptions) {
+    this.authToken = opts.token && /^[A-Za-z0-9_-]{8,128}$/.test(opts.token) ? opts.token : crypto.randomBytes(9).toString("base64url");
+    this.upd = { latest: null, newer: false, checkedAt: 0, phase: "idle", log: "", message: "", install: null, installed: null, notices: updateChecksSetting() };
     this.port = opts.port;
     this.dataDir = opts.dataDir ?? DATA_DIR;
     this.store = new SessionStore(this.dataDir);
@@ -298,6 +364,7 @@ export class WebHub {
         const addr = server.address();
         if (addr && typeof addr === "object") this.port = addr.port;
         writeHubRecord({ port: this.port, token: this.authToken, pid: process.pid, startedAt: Date.now() }, this.dataDir);
+        this.startUpdateChecks();
         resolve();
       });
     });
@@ -308,6 +375,7 @@ export class WebHub {
   shutdownSync(): void {
     if (this.stopped) return;
     this.stopped = true;
+    if (this.updTimer) clearInterval(this.updTimer);
     for (const live of this.live.values()) {
       if (live.saveTimer) clearTimeout(live.saveTimer);
       try {
@@ -635,6 +703,14 @@ export class WebHub {
       live.session = session;
       session.onExit = () => this.sessionEnded(live.id);
       session.onTurnDone = () => void this.autoTitle(live);
+      // /update and /update-check in any session drive the hub's updater.
+      session.updateHost = {
+        run: async () => {
+          this.send({ t: "update_open" });
+          void this.checkUpdate(true);
+        },
+        noticesChanged: (on) => this.setNotices(on, false),
+      };
       live.channel.getState = () => session.state();
       if (restore) session.restore(restore);
       live.meta.model = session.chosen.id;
@@ -765,6 +841,174 @@ export class WebHub {
     this.store.saveBodySync(live.id, { snapshot: live.session.snapshot(), events: live.channel.replay });
   }
 
+  // ---- updates ----------------------------------------------------------------
+
+  /** What the page's footer pill and update popover show. */
+  updateState(): Record<string, any> {
+    const u = this.upd;
+    const i = u.install;
+    return {
+      current: this.opts.version,
+      latest: u.latest,
+      newer: u.newer,
+      checkedAt: u.checkedAt,
+      enabled: u.notices,
+      phase: u.phase,
+      message: u.message,
+      log: u.phase === "idle" || u.phase === "checking" ? "" : u.log.slice(-8000),
+      installed: u.installed,
+      url: u.latest ? releaseUrl(u.latest) : null,
+      install: i ? { kind: i.kind, label: i.label, command: i.command?.display ?? null, manualCommand: i.manualCommand ?? null, reason: i.reason ?? null } : null,
+      canRestart: !!this.opts.onRestart,
+    };
+  }
+
+  private updates(): HubUpdates {
+    return this.opts.updates ?? {};
+  }
+
+  private startUpdateChecks(): void {
+    if (this.updates().auto !== true) return;
+    const tick = () => {
+      if (!this.upd.notices || !autoCheckAllowed(this.updates().env ?? process.env, true)) return;
+      void this.checkUpdate(false);
+    };
+    tick();
+    this.updTimer = setInterval(tick, CHECK_INTERVAL_MS);
+    this.updTimer.unref?.();
+  }
+
+  /** Ask the registry (force: past the 12-hour cache). Never throws. */
+  async checkUpdate(force: boolean): Promise<void> {
+    const u = this.upd;
+    if (u.phase === "running" || u.phase === "restarting" || u.phase === "checking") return;
+    const was = u.phase;
+    if (force) {
+      u.phase = "checking";
+      this.changed();
+    }
+    let info: UpdateInfo | null = null;
+    try {
+      const up = this.updates();
+      info = await (up.check ?? ((f: boolean) => checkForUpdate({ force: f, dataDir: this.dataDir, current: this.opts.version, env: up.env })))(force);
+    } catch {
+      info = null;
+    }
+    if (u.phase === "checking") u.phase = was === "done" || was === "manual" || was === "failed" ? was : "idle";
+    if (info) {
+      u.latest = info.latest;
+      u.newer = info.newer;
+      u.checkedAt = info.checkedAt;
+      if (force && u.phase === "failed") u.phase = "idle";
+      u.message = "";
+    } else if (force) {
+      u.message = "Could not reach the npm registry. Check the connection and try again.";
+    }
+    this.changed();
+  }
+
+  /** Install the latest version with the package manager this copy came
+   * from, streaming its output to the page. */
+  async runUpdate(): Promise<void> {
+    const u = this.upd;
+    if (u.phase === "running" || u.phase === "restarting") return;
+    const up = this.updates();
+    u.phase = "running";
+    u.log = "";
+    u.message = "";
+    this.changed();
+    if (!u.latest) {
+      u.phase = "idle";
+      await this.checkUpdate(true);
+      if (!u.latest) {
+        u.phase = "failed";
+        u.message ||= "Could not reach the npm registry. Check the connection and try again.";
+        this.changed();
+        return;
+      }
+      u.phase = "running";
+    }
+    try {
+      u.install = await (up.detect ?? (() => detectThisInstall(up.env)))();
+    } catch (err: any) {
+      u.phase = "failed";
+      u.message = `Could not tell how smolcoder was installed: ${err?.message ?? err}`;
+      this.changed();
+      return;
+    }
+    if (!u.install.command) {
+      u.phase = "manual";
+      u.message = u.install.manual ?? "";
+      this.changed();
+      return;
+    }
+    const res = await (up.run ?? runUpdate)(u.install, {
+      latest: u.latest,
+      env: up.env,
+      onOutput: (s) => {
+        u.log = (u.log + s).slice(-20_000);
+        this.changed();
+      },
+    });
+    u.phase = res.ok ? "done" : "failed";
+    u.message = res.message;
+    if (res.ok) u.installed = res.version;
+    this.log(`  ${res.ok ? "updated to " + res.version : "update failed: " + res.message.split("\n")[0]}`);
+    this.changed();
+  }
+
+  setNotices(on: boolean, save: boolean): void {
+    if (save) setUpdateChecks(on);
+    this.upd.notices = on;
+    this.changed();
+    if (on && !this.upd.checkedAt) void this.checkUpdate(false);
+  }
+
+  /** "Restart server": save every session, stop, and let the host start
+   * the successor on this port with this key. */
+  restart(): void {
+    if (!this.opts.onRestart) throw new Error("this server cannot restart itself; stop it and run smol --web again");
+    if (this.upd.phase === "restarting" || this.stopped) return;
+    this.upd.phase = "restarting";
+    this.upd.message = "";
+    // Straight out, not coalesced: the page must hear it before the stream ends.
+    this.send(this.snapshot());
+    const sessions: HandoffSession[] = [];
+    for (const live of this.live.values()) {
+      if (live.discard) continue;
+      if (live.session && live.channel.title) {
+        try {
+          this.saveSync(live);
+          sessions.push({ id: live.id });
+        } catch {
+          /* it reopens from the last save, if any */
+          if (this.metas.has(live.id)) sessions.push({ id: live.id });
+        }
+      } else if (!live.meta.worktree) sessions.push({ id: live.id, workspace: live.workspace });
+    }
+    const handoff: RestartHandoff = {
+      token: this.authToken,
+      port: this.port,
+      entry: restartEntry(this.upd.install),
+      sessions,
+      from: this.opts.version,
+    };
+    const go = this.opts.onRestart;
+    setTimeout(() => {
+      this.shutdownSync();
+      go(handoff);
+    }, 150);
+  }
+
+  /** The successor: reopen what the hub before it had open. */
+  restoreSessions(sessions: HandoffSession[]): void {
+    for (const s of sessions) {
+      if (!s || typeof s.id !== "string" || !SESSION_ID_RE.test(s.id) || this.live.has(s.id)) continue;
+      if (this.metas.has(s.id)) this.resumeSession(s.id);
+      else if (typeof s.workspace === "string" && fs.existsSync(s.workspace)) this.openSession(s.workspace, {}, s.id);
+    }
+  }
+
   // ---- terminals --------------------------------------------------------------
 
   openTerminal(sid: string): { tid: string; cwd: string } | null {
@@ -794,7 +1038,7 @@ export class WebHub {
   // ---- broadcasting -----------------------------------------------------------
 
   private send(ev: Event): void {
-    if (ev.t === "hub") {
+    if (ev.t === "hub" || ev.t === "update_open") {
       // A sidebar snapshot replaces the one before, and a resuming page gets
       // a fresh one anyway: no id, and never kept in the resume ring.
       const line = `data: ${JSON.stringify(ev)}\n\n`;
@@ -897,7 +1141,7 @@ export class WebHub {
         };
       })
       .sort((a, b) => b.last - a.last);
-    return { t: "hub", home: os.homedir(), sep: path.sep, version: this.opts.version, workspaces };
+    return { t: "hub", home: os.homedir(), sep: path.sep, version: this.opts.version, workspaces, update: this.updateState() };
   }
 
   // ---- http ---------------------------------------------------------------------
@@ -1046,6 +1290,8 @@ export class WebHub {
     const write = (ev: Event) => res.write(`data: ${JSON.stringify(ev)}\n\n`);
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${this.port}`);
     const lastId = (req.headers["last-event-id"] as string | undefined) ?? url.searchParams.get("last") ?? undefined;
+    // Reconnect quickly after a restart (the browser's default wait is 3s).
+    res.write("retry: 1000\n\n");
     const missed = this.missedSince(lastId);
     if (missed) {
       for (const line of missed) res.write(line);
@@ -1310,6 +1556,17 @@ export class WebHub {
       case "/term/close":
         this.closeTerminal(sid, String(d.tid ?? ""));
         return {};
+      case "/update/check":
+        return this.checkUpdate(true).then(() => this.updateState());
+      case "/update/run":
+        void this.runUpdate();
+        return {};
+      case "/update/restart":
+        this.restart();
+        return {};
+      case "/update/notices":
+        this.setNotices(!!d.on, true);
+        return this.updateState();
       default:
         throw new Error(`unknown endpoint ${p}`);
     }

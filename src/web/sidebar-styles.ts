@@ -174,6 +174,16 @@ export const SIDEBAR_STYLES = String.raw`
   .sidefoot-brand { color: var(--color-text, #18181b); font-weight: var(--weight-medium, 500); }
   #ver { font-variant-numeric: tabular-nums; }
 
+  /* ---- update row: just above the footer while a new version is out ---- */
+  #side .sb-update { flex: none; display: flex; align-items: center; gap: var(--space-2, 8px); height: 32px; margin: var(--space-2, 8px) var(--sb-inset) 0; padding: 0 var(--sb-pad); border: 0; border-radius: var(--radius-row, 6px); background: var(--color-accent-soft, #e6ebf8); color: var(--color-accent, #1b4ed8); font: inherit; font-size: var(--text-meta, 12px); line-height: 1; font-weight: var(--weight-medium, 500); text-align: left; cursor: pointer; transition: background-color var(--motion-fast, 150ms) var(--ease-out, ease-out); animation: sb-pop var(--motion-base, 200ms) var(--ease-out, ease-out); }
+  #side .sb-update:hover { background: color-mix(in srgb, var(--color-accent, #1b4ed8) 16%, var(--color-sidebar, #fafafa)); }
+  #side .sb-update:focus-visible { outline: 2px solid var(--color-focus-ring, #1b4ed8); outline-offset: -2px; }
+  .sb-updicon { display: inline-flex; flex: none; }
+  .sb-updicon svg { display: block; width: 14px; height: 14px; }
+  .sb-updlabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sb-updver { flex: none; font-variant-numeric: tabular-nums; font-weight: var(--weight-regular, 400); opacity: .85; }
+  #side .sb-update.done { background: color-mix(in srgb, var(--color-success, #007a55) 12%, transparent); color: var(--color-success, #007a55); }
+
   /* ---- resize rail ---- */
   .sb-rail { position: absolute; top: 0; bottom: 0; right: -3px; width: 6px; cursor: col-resize; z-index: 5; touch-action: none; }
   .sb-rail::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px; background: transparent; transition: background-color var(--motion-fast, 150ms) var(--ease-out, ease-out); }

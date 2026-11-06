@@ -8,6 +8,7 @@
 // projects and sessions side by side, started from anywhere.
 // Headless: smol -p "prompt" for people and automations.
 
+import { spawn } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -39,11 +40,20 @@ import { TaskManager } from "./tools/tasks";
 import { Tui, restoreTerminal } from "./tui/tui";
 import { UI } from "./ui";
 import { c } from "./util";
-import { askHubToOpen, pingHub, readHubRecord, WebHub } from "./web/hub";
-import { SessionStore } from "./web/store";
+import { askHubToOpen, pingHub, readHubRecord, RestartHandoff, WebHub } from "./web/hub";
+import { SESSION_ID_RE, SessionStore } from "./web/store";
+import { runUpdateFlow, watchForUpdates } from "./tui/updater";
+import { relaunch, restartArgs, restartEntry } from "./update";
 
 const VERSION = require("../package.json").version as string;
 const DEFAULT_WEB_PORT = 7433;
+
+// Set by a restart after /update for the new copy only: read once and kept
+// out of everything this process starts (tasks, terminals, tools).
+const UPDATED_FROM = process.env.SMOLCODER_UPDATED_FROM;
+const WEB_HANDOFF = process.env.SMOLCODER_WEB_HANDOFF;
+delete process.env.SMOLCODER_UPDATED_FROM;
+delete process.env.SMOLCODER_WEB_HANDOFF;
 
 interface CliArgs {
   workspace: string;
@@ -60,6 +70,8 @@ interface CliArgs {
   webPort?: number;
   help?: boolean;
   version?: boolean;
+  /** Internal (the restart after /update): reopen this saved session. */
+  resume?: string;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -102,6 +114,10 @@ function parseArgs(argv: string[]): CliArgs {
       args.verifyAttempts = Number(argv[++i]);
       if (!Number.isSafeInteger(args.verifyAttempts) || args.verifyAttempts < 1) throw new Error('--verify-attempts must be a positive whole number');
     } else if (a === "--print" || a === "-p") args.print = argv[++i];
+    else if (a === "--resume") {
+      const id = argv[++i] ?? "";
+      if (SESSION_ID_RE.test(id)) args.resume = id;
+    }
     else if (a === "--web") {
       args.web = true;
       if (argv[i + 1] && /^\d+$/.test(argv[i + 1])) args.webPort = Number(argv[++i]);
@@ -332,6 +348,10 @@ async function runInteractive(args: CliArgs): Promise<void> {
   process.on("uncaughtException", crash);
   process.on("unhandledRejection", crash);
   tui.start();
+  // Restarted by /update: say so once, and keep it out of child processes.
+  if (UPDATED_FROM && UPDATED_FROM !== VERSION) tui.notify(`Updated smolcoder ${UPDATED_FROM} → ${VERSION}`, "success", 6000);
+  // Is there a newer version? In the background, never in the way.
+  void watchForUpdates(tui);
   const cfg = loadConfig();
   tui.startSpinner("Looking for model servers");
   let chosen = await prepareModel(prefsOf(args), cfg, (label) => tui.startSpinner(label.charAt(0).toUpperCase() + label.slice(1)));
@@ -350,8 +370,10 @@ async function runInteractive(args: CliArgs): Promise<void> {
   const session = new Session(tui, { workspace: args.workspace, chosen, prefs: prefsOf(args), cfg, help: HELP });
   // Saved where the web UI keeps its sessions: /sessions (and the web
   // sidebar) list them per workspace.
+  let store: SessionStore | null = null;
   try {
-    session.persistTo(new SessionStore(DATA_DIR));
+    store = new SessionStore(DATA_DIR);
+    session.persistTo(store);
   } catch {
     /* no writable data folder: the session just is not saved */
   }
@@ -360,8 +382,32 @@ async function runInteractive(args: CliArgs): Promise<void> {
     printExitSummary(session);
     process.exit(0);
   };
+  // After /update, "Restart now" hands the terminal to the updated copy;
+  // from then on this process only waits for it.
+  let handedOver = false;
+  session.updateHost = {
+    run: () =>
+      runUpdateFlow(tui, {
+        runningTasks: () => session.taskManager.runningSummary().length,
+        restart: (install) => {
+          session.saveNow();
+          const id = session.sessionId;
+          const saved = !!id && !!store?.listMetas().some((m) => m.id === id);
+          session.taskManager.killAll();
+          tui.close();
+          handedOver = true;
+          relaunch(restartEntry(install), restartArgs(process.argv.slice(2), saved ? id : null, session.agent.mode));
+          return new Promise<void>(() => {});
+        },
+      }),
+    noticesChanged: (on) => {
+      if (on) void watchForUpdates(tui);
+      else tui.setUpdateAvailable(null);
+    },
+  };
   process.on("exit", () => session.taskManager.killAll());
   installSignalCleanup(() => {
+    if (handedOver) return; // the new copy saves and cleans up after itself
     try {
       session.saveNow();
     } catch {
@@ -377,6 +423,11 @@ async function runInteractive(args: CliArgs): Promise<void> {
 
   tui.start();
   session.announce();
+  // Restarted after /update: back to the session that was open.
+  if (args.resume && store) {
+    const meta = store.listMetas().find((m) => m.id === args.resume);
+    if (meta) session.resumeStored(meta);
+  }
   // Scan this computer and added machines once in the background, so the
   // model picker and F2 open on a full list without waiting.
   void refreshModels();
@@ -393,14 +444,28 @@ function isHomeOrRoot(p: string): boolean {
   return norm(r) === norm(os.homedir()) || path.dirname(r) === r;
 }
 
+/** The hub before this one (after "Restart server"), or null. */
+function readHandoff(): RestartHandoff | null {
+  if (!WEB_HANDOFF) return null;
+  try {
+    const h = JSON.parse(WEB_HANDOFF);
+    if (h && typeof h.token === "string" && Number.isSafeInteger(h.port) && Array.isArray(h.sessions)) return h;
+  } catch {
+    /* not ours */
+  }
+  return null;
+}
+
 async function runWeb(args: CliArgs): Promise<void> {
-  console.log(`${c.bold("smol")}${c.dim(c.bold("coder"))} ${c.dim("v" + VERSION + " · web")}`);
-  const port = args.webPort ?? DEFAULT_WEB_PORT;
+  const handoff = readHandoff();
+  console.log(`${c.bold("smol")}${c.dim(c.bold("coder"))} ${c.dim("v" + VERSION + " · web")}${handoff ? c.dim(` · restarted from v${handoff.from}`) : ""}`);
+  const port = handoff ? handoff.port : (args.webPort ?? DEFAULT_WEB_PORT);
   const workspace = args.workspace;
-  const autoStart = !!args.workspaceGiven || !isHomeOrRoot(workspace);
+  // A restart reopens the sessions that were open instead.
+  const autoStart = !handoff && (!!args.workspaceGiven || !isHomeOrRoot(workspace));
 
   // A hub is already running: hand it this folder instead of starting another.
-  const rec = readHubRecord();
+  const rec = handoff ? null : readHubRecord();
   if (rec && (args.webPort === undefined || rec.port === port) && (await pingHub(rec))) {
     const r = await askHubToOpen(rec, workspace, autoStart);
     if (r) {
@@ -412,19 +477,45 @@ async function runWeb(args: CliArgs): Promise<void> {
     }
   }
 
-  const hub = new WebHub({ port, prefs: prefsOf(args), help: HELP, version: VERSION });
-  try {
-    await hub.start();
-  } catch (err: any) {
-    if (err?.code === "EADDRINUSE") {
-      console.error(`\nPort ${port} is already in use. Pick another with: smol --web ${port + 1}`);
-      process.exit(1);
+  let handedOver = false;
+  const hub = new WebHub({
+    port,
+    prefs: prefsOf(args),
+    help: HELP,
+    version: VERSION,
+    token: handoff?.token,
+    updates: { auto: true },
+    // "Restart server" after an update: the same command line again on the
+    // same port with the same key, in this terminal; this process waits.
+    onRestart: (h) => {
+      handedOver = true;
+      console.log(`\n  restarting the web UI on the new version…\n`);
+      relaunch(h.entry, process.argv.slice(2), { env: { ...process.env, SMOLCODER_WEB_HANDOFF: JSON.stringify(h) } });
+    },
+  });
+  // The hub before this one may take a moment to let go of the port.
+  for (let tries = 0; ; tries++) {
+    try {
+      await hub.start();
+      break;
+    } catch (err: any) {
+      if (err?.code === "EADDRINUSE" && handoff && tries < 40) {
+        await new Promise((r) => setTimeout(r, 250));
+        continue;
+      }
+      if (err?.code === "EADDRINUSE") {
+        console.error(`\nPort ${port} is already in use. Pick another with: smol --web ${port + 1}`);
+        process.exit(1);
+      }
+      throw err;
     }
-    throw err;
   }
   process.on("exit", () => hub.shutdownSync());
-  installSignalCleanup(() => hub.shutdownSync());
+  installSignalCleanup(() => {
+    if (!handedOver) hub.shutdownSync();
+  });
 
+  if (handoff) hub.restoreSessions(handoff.sessions);
   if (autoStart) hub.openSession(workspace);
   console.log(
     `\n  smolcoder web UI:  ${hub.url()}\n  ${
