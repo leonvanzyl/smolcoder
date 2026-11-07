@@ -21,6 +21,7 @@ import { commandEscapesWorkspace, relPath, resolveInWorkspace } from "./sandbox"
 import * as fs from "fs";
 import * as path from "path";
 import { abortableDelay } from "./providers/transport";
+import { extractTextToolCalls } from "./providers/text-calls";
 import { truncateMiddle } from "./util";
 import { createHash } from "crypto";
 import { runCommand } from "./tools/shell";
@@ -464,6 +465,16 @@ export class Agent {
           this.ui.stopSpinner();
         }
         this.ctxMgr.calibrate(result.promptTokens, this.messages, this.tools);
+        if (!result.toolCalls.length && !result.truncated) {
+          // qwen2.5-coder and friends often write the call as JSON in the
+          // reply instead of a real tool call; without this the turn ends as
+          // a plain answer and nothing is written (issue #15).
+          const recovered = extractTextToolCalls(result.content, this.tools.map((t) => t.name));
+          if (recovered.calls.length) {
+            this.ui.status(`· the model wrote ${recovered.calls.length === 1 ? "a tool call" : `${recovered.calls.length} tool calls`} as text — running ${recovered.calls.length === 1 ? "it" : "them"}`);
+            result = { ...result, content: recovered.content, toolCalls: recovered.calls };
+          }
+        }
         this.messages.push({
           role: "assistant",
           content: result.content,
