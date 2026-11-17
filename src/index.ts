@@ -259,12 +259,15 @@ async function runHeadless(args: CliArgs): Promise<void> {
   const ctxMgr = new ContextManager(chosen.contextWindow, provider.maxOutputTokens);
   const agentsMd = loadAgentsMd(args.workspace);
   if (agentsMd) ui.status(`· AGENTS.md loaded (${agentsMd.split("\n").length} lines)`);
-  const systemPrompt = buildSystemPrompt({
+  // A builder, not a string: the agent passes it the same docs setting it
+  // builds the tools from, so the lookup_docs line and the tool agree.
+  const systemPrompt = (m: Mode, docs: boolean) => buildSystemPrompt({
     workspace: args.workspace,
-    mode,
+    mode: m,
     shellLabel: shell.label,
     agentsMd,
     chatOnly: chosen.toolsSupported === false,
+    docs,
   });
   const agent = new Agent(provider, mode, systemPrompt, toolCtx, ctxMgr, bus, ui, false, 1000,
     args.verify ? { command: args.verify, maxAttempts: args.verifyAttempts } : undefined);

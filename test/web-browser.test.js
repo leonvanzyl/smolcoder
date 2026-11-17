@@ -172,11 +172,12 @@ test("web page in a browser", { skip: chromium ? false : "Playwright not availab
         { t: "tool", sid: "s1", name: "read_file", summary: "b" }, { t: "result", sid: "s1", body: "x" },
         { t: "tool", sid: "s1", name: "search", summary: "\"foo\"" }, { t: "result", sid: "s1", body: "x" },
         { t: "tool", sid: "s1", name: "read_file", summary: "c" }, { t: "result", sid: "s1", body: "x" },
+        { t: "tool", sid: "s1", name: "lookup_docs", summary: "next.js · middleware" }, { t: "result", sid: "s1", body: "# Middleware" },
         { t: "tool", sid: "s1", name: "search", summary: "\"bar\"" },
       ]);
       await settle();
       const g = log().locator("details.tool.explore").last();
-      assert.equal(await g.locator(":scope > summary .tool-args").textContent(), "3 reads, 2 searches");
+      assert.equal(await g.locator(":scope > summary .tool-args").textContent(), "3 reads, 2 searches, 1 docs lookup");
       assert.equal(await g.evaluate((d) => d.classList.contains("running")), true, "the group pulses while a lookup runs");
       assert.equal(await g.locator(".group-body > details.thought").count(), 1, "a thought between lookups stays inside, in order");
       await emit([{ t: "result", sid: "s1", body: "x" }, { t: "turnend", sid: "s1", label: "done" }]);

@@ -260,6 +260,8 @@ export function toolTitle(name: string, args: Record<string, any>): [string, str
       return ["List", String(a.path ?? ".")];
     case "search":
       return ["Search", `"${a.pattern ?? ""}"${a.path ? ` in ${a.path}` : ""}`];
+    case "lookup_docs":
+      return ["Docs", [a.library, a.query].map((s) => String(s ?? "").trim()).filter(Boolean).join(` ${theme.g.dot} `)];
     case "write_file":
       return ["Write", String(a.path ?? "")];
     case "edit_file":
@@ -379,6 +381,10 @@ function layoutTool(b: ToolBlock, w: number, ctx: LayoutCtx): Row[] {
     const warn = b.result.slice(b.result.indexOf("Warning:")).split("\n")[0];
     rows.push([span(INDENT + 2, truncateWidth(`${t.g.warn} ${warn}`, w - INDENT - 2, t.g.ellipsis), fg(p.warning))]);
   }
+  // A docs lookup that came back with a one-line note (nothing found, rate
+  // limited, offline) shows it; real documentation stays folded like a read.
+  const note = b.name === "lookup_docs" && done && b.ok ? (b.result ?? "").trim() : "";
+  if (note && !note.includes("\n")) rows.push([span(INDENT + 2, truncateWidth(note, w - INDENT - 2, t.g.ellipsis), fg(p.muted))]);
   return rows;
 }
 

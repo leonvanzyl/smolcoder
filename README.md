@@ -70,6 +70,7 @@ The line under the input shows the mode, the model, the reasoning effort, how fu
 | `/clear` | Start a fresh conversation |
 | `/update` | Update smolcoder to the latest version, then restart (see [Updating](#updating)) |
 | `/update-check` | Turn update notices on or off |
+| `/docs` | Library docs lookup (Context7): `on`, `off`, or `key` to add an API key (see [Library docs](#library-docs)) |
 | `/help`, `/exit` | Help and quit |
 
 **Custom commands** are saved prompts. `/commands new` asks for a name and the text; `$ARGUMENTS` (or `$1`, `$2`, …) is replaced by what you type after the command. They live in `.smolcoder/commands/` for one project or `~/.smolcoder/commands/` for all of them, and run as `/name`.
@@ -99,6 +100,15 @@ smol -p "build the app" --verify "npm test"   # headless with an acceptance comm
 ```
 
 With `--verify`, the command has to pass before the run counts as done. Failures go back to the agent to repair, six attempts by default. `--verify-attempts 12` allows more. It needs a model that can use tools; with a chat-only model the run stops straight away.
+
+### Library docs
+
+When the agent is unsure of an API, it can look up current documentation for a library, framework or API with its `lookup_docs` tool, which asks [Context7](https://context7.com). Only the query text and the library names go to context7.com (plus your API key, if you add one); the model writes the query, so nothing else from your project is sent. It works without a key, with an anonymous limit of 200 lookups a month (reset on the 1st, UTC).
+
+- While it is on, one sentence in the system prompt asks the agent to check a library's current API with it before using one, and not to retry a lookup that fails.
+- `/docs off` removes the tool and that sentence, which gives their ~180 tokens of context back. `/docs on` brings them back.
+- `/docs key` adds a free API key from [context7.com/dashboard](https://context7.com/dashboard) for higher limits. You type it into a hidden field; smolcoder tries it with one lookup and saves it in `~/.smolcoder.json`, readable only by you. Leave the field empty to remove the key. Without a saved key, `CONTEXT7_API_KEY` from the environment is used.
+- When the limit is used up or the key is rejected, smolcoder tells you once and the agent carries on without the docs.
 
 ### Updating
 
@@ -174,7 +184,7 @@ smolcoder sends your code and prompts to the server you choose, and runs the too
 
 Local models are free and private, but they give you less to work with. The context window is small, generation is slower, and long instructions get lost. smolcoder is built around those limits.
 
-- **It stays out of the model's way.** A short system prompt and eight simple tools (four in read-only mode) leave most of the window for your code.
+- **It stays out of the model's way.** A short system prompt and nine simple tools (five in read-only mode) leave most of the window for your code.
 - **It watches the real window.** It asks the server how much context is actually loaded, shows a meter, and keeps room for the reply. A model that advertises a 128k window is often loaded with 4k, and smolcoder budgets for the 4k.
 - **It tidies up before the window fills.** Old file reads and command output go first. Only then does it ask the model for a short handover. Your request and the checklist are never summarized away.
 - **It keeps the plan outside the conversation.** The to-do list and the notes for the current step live in smolcoder itself, so they survive any summary.

@@ -126,6 +126,8 @@ function describeTool(name: string, args: Record<string, any>): string {
       return "Searching " + clip(String(a.pattern ?? ""), 32);
     case "list_files":
       return "Listing " + String(a.path ?? ".");
+    case "lookup_docs":
+      return a.library ? `Looking up ${clip(String(a.library), 32)} docs` : "Looking up docs";
     case "plan":
       return "Updating the plan";
     case "verification":

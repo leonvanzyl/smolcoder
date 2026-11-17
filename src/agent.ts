@@ -25,6 +25,9 @@ import { truncateMiddle } from "./util";
 import { createHash } from "crypto";
 import { runCommand } from "./tools/shell";
 import { failureSignature, projectVerification } from "./verification";
+import { docsToolSetting } from "./config";
+import { docsWarning } from "./tools/docs";
+import type { PromptBuilder } from "./prompt";
 
 /** Supplied by the caller, never generated or changed by a model tool. */
 export interface Verification {
@@ -70,11 +73,21 @@ export class Agent {
   private canRefreshVerification = false;
   /** One entry per user turn, newest last: what /undo puts back. */
   private undoStack: TurnSnapshot[] = [];
+  /** Context7 limit/key warnings already shown to the user this session. */
+  private docsWarned = new Set<string>();
+  /** The docs-lookup setting the current tools (and, with a builder, the
+   * system prompt) were built from. */
+  private docsOn = false;
+  /** Present when the owner passed a builder rather than a fixed prompt. */
+  private promptFor?: PromptBuilder;
 
   constructor(
     public provider: Provider,
     public mode: Mode,
-    private systemPrompt: string,
+    /** A fixed prompt, or a builder the agent re-runs with every tool rebuild
+     * (mode, provider, docs setting), so the prompt's lookup_docs line and
+     * the tool list always agree. */
+    systemPrompt: string | PromptBuilder,
     private toolCtx: ToolContext,
     private ctxMgr: ContextManager,
     private bus: EventBus,
@@ -86,8 +99,10 @@ export class Agent {
   ) {
     this.verification = callerVerification;
     if (callerVerification && (!callerVerification.command.trim() || (callerVerification.maxAttempts !== undefined && (!Number.isSafeInteger(callerVerification.maxAttempts) || callerVerification.maxAttempts < 1)))) throw new Error("Verification needs a command and a positive attempt limit.");
-    this.messages = [{ role: "system", content: systemPrompt }];
-    this.tools = this.toolsFor(mode);
+    if (typeof systemPrompt === "function") this.promptFor = systemPrompt;
+    this.messages = [{ role: "system", content: "" }];
+    this.tools = [];
+    this.rebuild(typeof systemPrompt === "string" ? systemPrompt : undefined);
     this.ctxMgr.setReplayThinking(provider.replaysThinking !== false);
     // Harness hooks that run project code (the TypeScript check) follow
     // run_command's rules, minus the question: what would ask is skipped.
@@ -95,31 +110,44 @@ export class Agent {
       commandEscapesWorkspace(command, this.toolCtx.workspace) === null || isAutoApproved(command, this.alwaysAllowed);
   }
 
-  /** A model that cannot call tools gets none: nothing to send, nothing to
-   * budget for, and any call it invents is rejected as unavailable. */
-  private toolsFor(mode: Mode): ToolSpec[] {
-    return this.chatOnly ? [] : buildToolSpecs(mode);
+  /** Build the tools for the current mode and provider from one reading of
+   * the docs setting, and the system prompt from the same reading: the given
+   * one, else the builder's, else the current one stays. A model that cannot
+   * call tools gets none: nothing to send, nothing to budget for, and any
+   * call it invents is rejected as unavailable. */
+  private rebuild(systemPrompt?: string): void {
+    this.docsOn = docsToolSetting();
+    this.tools = this.chatOnly ? [] : buildToolSpecs(this.mode, { docs: this.docsOn });
+    const content = systemPrompt ?? this.promptFor?.(this.mode, this.docsOn);
+    if (content !== undefined) this.messages[0] = { role: "system", content };
+  }
+
+  /** A tool setting changed (/docs on|off): send the new set, and the prompt
+   * that describes it, from now on. */
+  refreshTools(): void {
+    this.ctxMgr.cancelBackground(true);
+    this.ctxMgr.resetAnchor();
+    this.rebuild();
   }
 
   get chatOnly(): boolean {
     return this.provider.toolsSupported === false;
   }
 
-  setMode(mode: Mode, systemPrompt: string): void {
+  /** Without `systemPrompt`, an agent with a prompt builder rebuilds its own. */
+  setMode(mode: Mode, systemPrompt?: string): void {
     this.ctxMgr.cancelBackground(true);
     this.ctxMgr.resetAnchor();
     this.mode = mode;
-    this.tools = this.toolsFor(mode);
-    this.messages[0] = { role: "system", content: systemPrompt };
+    this.rebuild(systemPrompt);
   }
 
-  /** `systemPrompt` replaces the current one: a model without tools needs
-   * different instructions than one with them. */
+  /** `systemPrompt` (or the builder's) replaces the current one: a model
+   * without tools needs different instructions than one with them. */
   setProvider(provider: Provider, systemPrompt?: string): void {
     this.ctxMgr.cancelBackground(true);
     this.provider = provider;
-    this.tools = this.toolsFor(this.mode);
-    if (systemPrompt !== undefined) this.messages[0] = { role: "system", content: systemPrompt };
+    this.rebuild(systemPrompt);
     this.ctxMgr.setReplayThinking(provider.replaysThinking !== false);
   }
 
@@ -374,6 +402,10 @@ export class Agent {
     this.ctxMgr.cancelBackground(true);
     this.outcome = "running";
     this.ctxMgr.resetAnchor(); // prior-turn reasoning no longer travels on the wire
+    // Another session sharing the config may have turned /docs on or off: the
+    // tools and the prompt follow it together. Unchanged, both stay as they
+    // are, so the backend's cached prompt prefix still matches.
+    if (docsToolSetting() !== this.docsOn) this.rebuild();
     this.lastError = null;
     this.verificationResult = null;
     this.verification = this.callerVerification;
@@ -659,6 +691,12 @@ export class Agent {
           } else {
             const diff = lastDiff(this.toolCtx);
             this.ui.toolResult(output, { ok: !output.startsWith("Error"), durationMs, ...(diff ? { diff } : {}) });
+          }
+          // A used-up Context7 limit or a rejected key is the user's to fix: say so once.
+          const docsProblem = call.name === "lookup_docs" ? docsWarning(output) : null;
+          if (docsProblem && !this.docsWarned.has(docsProblem)) {
+            this.docsWarned.add(docsProblem);
+            this.ui.warn(docsProblem);
           }
           this.messages.push({
             role: "tool",

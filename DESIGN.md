@@ -374,7 +374,7 @@ States:
 - **Success:** `✓` in `--color-success`.
 - **Failed:** `✗` in `--color-danger`. The row opens by itself, and the name stays `--color-text`.
 - **Expanded result:** a body on `--color-surface` with `--radius-control` corners, mono 13px, max-height 280px with scrolling, indented 20px. Error bodies add a 2px `--color-danger` rule on the left.
-- **Grouped row ("Explored · 3 reads"):** consecutive read, search and list calls collapse into one row. It shows a muted "Explored" label, `·`, a count summary ("3 reads, 2 searches") and a chevron. Expanding it lists the child tool rows, indented 16px. If any child is running, the group shows the pulse; if any child failed, the group shows `✗`.
+- **Grouped row ("Explored · 3 reads"):** consecutive read, search, list and docs-lookup calls collapse into one row. It shows a muted "Explored" label, `·`, a count summary ("3 reads, 2 searches, 1 docs lookup") and a chevron. Expanding it lists the child tool rows, indented 16px. If any child is running, the group shows the pulse; if any child failed, the group shows `✗`.
 
 ### Reasoning disclosure ("thought for Ns")
 
