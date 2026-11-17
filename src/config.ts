@@ -40,6 +40,10 @@ export interface Config {
   effortByModel?: Record<string, Effort | null>;
   /** false: never look for a new smolcoder version by itself (/update-check). */
   updateCheck?: boolean;
+  /** false: the agent has no lookup_docs tool (/docs off). On by default. */
+  docsTool?: boolean;
+  /** Context7 API key for lookup_docs (/docs key); without one, lookups are anonymous. */
+  context7Key?: string;
 }
 
 /** One model on one server: the same id can be served by several machines. */
@@ -100,6 +104,9 @@ export function loadConfig(): Config {
       )
     ) as Record<string, Effort | null>;
     if (typeof cfg.updateCheck !== "boolean") delete cfg.updateCheck;
+    if (typeof cfg.docsTool !== "boolean") delete cfg.docsTool;
+    if (typeof cfg.context7Key === "string" && cfg.context7Key.trim()) cfg.context7Key = cfg.context7Key.trim();
+    else delete cfg.context7Key;
     return cfg;
   } catch {
     return {};
@@ -138,6 +145,22 @@ export function setKeys(bases: string[], key?: string): void {
     else delete keys[base];
   }
   updateConfig({ keys });
+}
+
+/** Whether the agent gets the lookup_docs tool (on unless /docs off). */
+export function docsToolSetting(): boolean {
+  return loadConfig().docsTool !== false;
+}
+
+/** The Context7 key lookup_docs sends: the saved one, else CONTEXT7_API_KEY,
+ * else none (anonymous). */
+export function context7Key(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return loadConfig().context7Key || env.CONTEXT7_API_KEY?.trim() || undefined;
+}
+
+/** Save a Context7 key, or forget the saved one when `key` is empty. */
+export function setContext7Key(key?: string): void {
+  updateConfig({ context7Key: key || undefined });
 }
 
 /** Put a model at the front of the recent list (kept to RECENT_LIMIT). */

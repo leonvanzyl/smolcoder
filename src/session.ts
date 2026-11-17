@@ -12,6 +12,8 @@ import {
   COMMAND_ALIASES,
   COMMANDS_ARGS,
   commandHelp,
+  docsArgs,
+  DocsKeyState,
   EFFORT_LEVELS,
   effortArgs,
   findCommand,
@@ -23,12 +25,15 @@ import {
 } from "./commands";
 import {
   Config,
+  context7Key,
   DATA_DIR,
+  docsToolSetting,
   loadConfig,
   ModelRef,
   recordRecentModel,
   sameModel,
   saveModelEffort,
+  setContext7Key,
   toggleFavoriteModel,
   updateConfig,
 } from "./config";
@@ -59,6 +64,7 @@ import { Effort, Msg, Provider } from "./providers/types";
 import { Mode, MODE_LABELS, ToolContext } from "./tools/index";
 import { pickShell } from "./tools/shell";
 import { TaskManager } from "./tools/tasks";
+import { ANON_MONTHLY_LIMIT, keyTail, verifyContext7Key } from "./tools/docs";
 import { renderPlan, SelectOption, SessionUI, SlashCommand } from "./ui";
 import { c, truncateEnd } from "./util";
 import { setUpdateChecks, updateChecksSetting } from "./update";
@@ -70,6 +76,14 @@ export interface UpdateHost {
   run(): Promise<void>;
   /** /update-check on|off was chosen (already saved to the config). */
   noticesChanged?(on: boolean): void;
+}
+
+/** The Context7 key /docs shows (only its last four characters), or null. */
+function docsKeyState(): DocsKeyState | null {
+  const saved = loadConfig().context7Key;
+  if (saved) return { tail: keyTail(saved), fromEnv: false };
+  const env = context7Key();
+  return env ? { tail: keyTail(env), fromEnv: true } : null;
 }
 
 /** Per-session preferences from the command line. `effort: null` means an
@@ -549,14 +563,16 @@ export class Session {
     this.agentsMd = loadAgentsMd(workspace);
     // The step cap is a runaway-loop backstop, not a work limit — esc/ctrl+c
     // is the user's real kill switch, so set it far above any legitimate task.
-    this.agent = new Agent(provider, mode0, this.sysPrompt(mode0), this.toolCtx, this.ctxMgr, this.bus, ui, true, 1000);
+    // The agent builds its prompt itself, from the same reading of the docs
+    // setting as its tools, whenever the mode, the model or the setting changes.
+    this.agent = new Agent(provider, mode0, (mode, docs) => this.sysPrompt(mode, docs), this.toolCtx, this.ctxMgr, this.bus, ui, true, 1000);
 
     this.reloadCommands();
     ui.hintLeft = workspace.replace(os.homedir(), "~");
     ui.getStatus = () => this.statusLine();
     ui.onModeCycle = () => {
       const next = MODE_ORDER[(MODE_ORDER.indexOf(this.agent.mode) + 1) % MODE_ORDER.length];
-      this.agent.setMode(next, this.sysPrompt(next));
+      this.agent.setMode(next);
       this.persist();
     };
     ui.onCancel = () => this.agent.cancel();
@@ -567,13 +583,14 @@ export class Session {
     recordRecentModel(modelRef(chosen));
   }
 
-  private sysPrompt(mode: Mode): string {
+  private sysPrompt(mode: Mode, docs: boolean): string {
     return buildSystemPrompt({
       workspace: this.workspace,
       mode,
       shellLabel: this.shell.label,
       agentsMd: this.agentsMd,
       chatOnly: this.chosen.toolsSupported === false,
+      docs,
     });
   }
 
@@ -601,6 +618,8 @@ export class Session {
           return { ...cmd, args: () => COMMANDS_ARGS };
         case "update-check":
           return { ...cmd, args: () => updateCheckArgs(updateChecksSetting()) };
+        case "docs":
+          return { ...cmd, args: () => docsArgs(docsToolSetting(), docsKeyState()) };
         default:
           return cmd;
       }
@@ -959,6 +978,9 @@ export class Session {
         ui.status(on ? "· update notices on: smolcoder looks for a new version every 12 hours" : "· update notices off: /update still checks when you ask");
         break;
       }
+      case "docs":
+        await this.docsCommand(arg);
+        break;
       default:
         ui.warn(`Unknown command /${slash.name} — try /help`);
     }
@@ -979,6 +1001,75 @@ export class Session {
     this.taskManager.killAll();
     this.ui.close();
     this.onExit?.();
+  }
+
+  // ---- /docs ------------------------------------------------------------------
+
+  /** /docs on|off|key; bare /docs opens its picker. */
+  private async docsCommand(arg?: string): Promise<void> {
+    const { ui } = this;
+    let choice = arg?.toLowerCase();
+    if (!choice) {
+      const options = docsArgs(docsToolSetting(), docsKeyState());
+      const idx = await ui.select("Docs lookup (Context7)", options);
+      if (idx === null) return;
+      choice = options[idx].label;
+    }
+    if (choice === "on" || choice === "off") {
+      updateConfig({ docsTool: choice === "on" });
+      this.agent.refreshTools();
+      ui.status(choice === "on"
+        ? "· docs lookup on: the agent can fetch current docs from context7.com"
+        : "· docs lookup off: the lookup_docs tool is removed from the agent's context");
+      ui.refresh();
+    } else if (choice === "key") {
+      await this.docsKey();
+    } else {
+      ui.warn("Use /docs on, /docs off or /docs key");
+    }
+  }
+
+  /** Ask for a Context7 key (masked), check it, then save it; empty removes it. */
+  private async docsKey(): Promise<void> {
+    const { ui } = this;
+    const saved = loadConfig().context7Key;
+    const raw = await ui.prompt(
+      "Context7 API key",
+      saved ? `saved (${keyTail(saved)}) · enter a new one, or leave empty to remove it` : "a free key from context7.com/dashboard · leave empty for anonymous lookups",
+      { secret: true }
+    );
+    if (raw === null) return;
+    const key = raw.trim();
+    const anon = `lookups are anonymous (${ANON_MONTHLY_LIMIT} a month)`;
+    if (!key) {
+      if (!saved) {
+        ui.status(`· no Context7 key saved — ${context7Key() ? "using CONTEXT7_API_KEY" : anon}`);
+        return;
+      }
+      setContext7Key();
+      ui.status(`· Context7 key removed — ${context7Key() ? "using CONTEXT7_API_KEY from the environment" : anon}`);
+      return;
+    }
+    if (!/^[!-~]+$/.test(key)) {
+      ui.warn("That does not look like an API key (spaces or unusual characters) — not saved.");
+      return;
+    }
+    ui.startSpinner("checking the key");
+    const check = await verifyContext7Key(key).finally(() => ui.stopSpinner());
+    if (check === "rejected") {
+      ui.warn(`· Context7 rejected this key — not saved${saved ? " (the saved one is unchanged)" : ""}`);
+      return;
+    }
+    setContext7Key(key);
+    const tail = keyTail(key);
+    ui.status(
+      check === "ok"
+        ? `· Context7 key saved and working (${tail})`
+        : check === "limited"
+          ? `· Context7 key saved (${tail}) — Context7 says its rate limit is reached right now`
+          : `· Context7 key saved (${tail}) — could not check it: context7.com did not answer`
+    );
+    if (!docsToolSetting()) ui.status("· docs lookup is off — /docs on lets the agent use it");
   }
 
   // ---- /undo ------------------------------------------------------------------
@@ -1197,7 +1288,7 @@ export class Session {
     if (remembered !== undefined) this.effort = remembered;
     const p = makeProvider(next);
     p.setEffort(this.effort);
-    agent.setProvider(p, this.sysPrompt(agent.mode));
+    agent.setProvider(p);
     this.ctxMgr.setWindow(next.contextWindow, p.maxOutputTokens);
     this.persist();
     ui.println(sessionLine(next, agent.mode));
@@ -1227,7 +1318,7 @@ export class Session {
       if (idx === null) return;
       next = MODE_ORDER[idx];
     }
-    agent.setMode(next, this.sysPrompt(next));
+    agent.setMode(next);
     this.persist();
   }
 

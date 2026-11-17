@@ -156,6 +156,16 @@ test("tools: timing and the diff travel in the result event only; the result tex
   assert.equal(third.diff, undefined);
 });
 
+test("tools: a docs lookup row reads library · query, and joins the Explored group", () => {
+  const { ch, sent } = makeChannel();
+  ch.toolCall("lookup_docs", { query: "how to add\n middleware", library: "next.js" });
+  ch.toolCall("lookup_docs", { query: "q".repeat(120) });
+  const rows = sent.filter((e) => e.t === "tool");
+  assert.equal(rows[0].summary, "next.js · how to add middleware");
+  assert.equal(rows[1].summary, "q".repeat(79) + "…", "a long query is cut");
+  assert.match(CLIENT_JS, /lookup_docs: \["docs lookup", "docs lookups"\]/);
+});
+
 test("tools: argument progress is throttled, sends the latest count, and is never replayed", async () => {
   const { ch, sent } = makeChannel();
   for (let i = 1; i <= 50; i++) ch.toolArgsProgress("write_file", i * 100);

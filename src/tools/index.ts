@@ -1,7 +1,8 @@
-// Tool registry. Eight tools with flat parameters — no
-// nested objects or arrays: small models mangle them), an example call inside
-// every description (small models imitate better than they infer), and the
-// mode decides which schemas are sent. The agent rechecks mode at execution.
+// Tool registry. Nine tools with flat parameters (no nested objects or
+// arrays: small models mangle them), an example call inside every description
+// (small models imitate better than they infer), and the mode decides which
+// schemas are sent. The agent rechecks mode at execution. lookup_docs is the
+// one setting-dependent tool: /docs off leaves it out everywhere.
 
 import { Plan } from "../plan";
 import { ToolSpec } from "../providers/types";
@@ -12,6 +13,8 @@ import { TaskManager } from "./tasks";
 import { resolveInWorkspace, SandboxError } from "../sandbox";
 import { truncateMiddle } from "../util";
 import { searchFilesBounded } from "./search-worker";
+import { lookupDocs } from "./docs";
+import { context7Key } from "../config";
 
 export type Mode = "ro" | "edit" | "bypass";
 
@@ -23,7 +26,12 @@ export const MODE_LABELS: Record<Mode, string> = {
 
 const TOOL_RESULT_CAP = 10000; // chars — final safety net over per-tool caps
 
-export function buildToolSpecs(mode: Mode): ToolSpec[] {
+export interface ToolSpecOptions {
+  /** Include lookup_docs (the /docs setting). Default: true. */
+  docs?: boolean;
+}
+
+export function buildToolSpecs(mode: Mode, opts: ToolSpecOptions = {}): ToolSpec[] {
   const read: ToolSpec[] = [
     {
       name: "read_file",
@@ -79,6 +87,21 @@ export function buildToolSpecs(mode: Mode): ToolSpec[] {
       },
     },
   ];
+  if (opts.docs !== false) {
+    read.push({
+      name: "lookup_docs",
+      description:
+        'Fetch current documentation for a library, framework or API (Context7). Example: {"query": "how to add middleware in next.js 15", "library": "next.js"}. Use it when unsure of an API instead of guessing.',
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "What to look up" },
+          library: { type: "string", description: "Library name (optional)" },
+        },
+        required: ["query"],
+      },
+    });
+  }
 
   const write: ToolSpec[] = [
     {
@@ -182,6 +205,13 @@ export async function executeTool(
         break;
       case "search":
         result = await searchFilesBounded(ctx.workspace, args, signal);
+        break;
+      case "lookup_docs":
+        result = await lookupDocs(args, {
+          signal,
+          maxChars: ctx.resultCharLimit ? ctx.resultCharLimit - 256 : undefined,
+          apiKey: context7Key(),
+        });
         break;
       case "plan": {
         const action = args.action ?? (typeof args.steps === "string" ? "set" : undefined);

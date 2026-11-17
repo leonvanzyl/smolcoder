@@ -295,6 +295,12 @@ export function summarizeArgs(name: string, args: Record<string, any>): string {
         return String(args.path ?? ".");
       case "search":
         return `"${args.pattern}"${args.path ? ` in ${args.path}` : ""}`;
+      case "lookup_docs": {
+        const q = String(args.query ?? "").replace(/\s+/g, " ").trim();
+        const query = q.length > 80 ? q.slice(0, 79) + "…" : q;
+        const lib = String(args.library ?? "").trim();
+        return lib ? `${lib} · ${query}` : query;
+      }
       case "run_command":
         return String(args.command ?? "");
       case "task":

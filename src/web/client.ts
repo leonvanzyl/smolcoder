@@ -649,7 +649,7 @@ function renderPlan(v, p) {
 
 // ---- tool rows ------------------------------------------------------------
 // Read-only lookups that follow one another fold into one "Explored" row.
-const EXPLORE = { read_file: ["read", "reads"], search: ["search", "searches"], list_files: ["listing", "listings"] };
+const EXPLORE = { read_file: ["read", "reads"], search: ["search", "searches"], list_files: ["listing", "listings"], lookup_docs: ["docs lookup", "docs lookups"] };
 function exploreGroup(v) {
   const d = el("details", "tool explore");
   const summary = el("summary");

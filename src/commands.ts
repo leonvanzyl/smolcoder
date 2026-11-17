@@ -7,6 +7,7 @@ import { MODE_LABELS, Mode } from "./tools/index";
 import { Effort } from "./providers/types";
 import { SelectOption, SlashCommand } from "./ui";
 import { c } from "./util";
+import { ANON_MONTHLY_LIMIT } from "./tools/docs";
 
 /** Display order of the groups in /help and the palettes. "Custom" holds the
  * user's own commands from .smolcoder/commands/. */
@@ -28,6 +29,7 @@ export const BUILTIN_COMMANDS: SlashCommand[] = [
   { name: "commands", desc: "List or create custom commands — /commands new", group: "General", aliases: ["custom", "templates"], args: () => COMMANDS_ARGS },
   { name: "update", desc: "Update smolcoder to the latest version, then restart", group: "General", aliases: ["upgrade", "version", "new version"] },
   { name: "update-check", desc: "Turn update notices on or off", group: "General", aliases: ["updates", "notices", "notifier", "settings"], args: () => updateCheckArgs() },
+  { name: "docs", desc: "Docs lookup (Context7): on/off · API key", group: "General", aliases: ["context7", "documentation", "lookup_docs", "api key", "settings"], args: () => docsArgs() },
   { name: "help", desc: "Show commands and keys", group: "General", aliases: ["?", "keys"] },
   { name: "exit", desc: "Quit smolcoder (web: close this session)", group: "General", aliases: ["quit", "q"] },
 ];
@@ -126,6 +128,31 @@ export function updateCheckArgs(on?: boolean): SelectOption[] {
   return [
     { label: "on", hint: "tell me when a new version is out (checks every 12 hours)", current: on === true },
     { label: "off", hint: "never check by itself; /update still checks when asked", current: on === false },
+  ];
+}
+
+/** What /docs knows about the Context7 key: its last four characters and
+ * where it comes from, or null when lookups are anonymous. */
+export interface DocsKeyState {
+  tail: string;
+  fromEnv: boolean;
+}
+
+/** /docs values: on and off (the current one marked) and key, whose hint
+ * says whether a key is in use. */
+export function docsArgs(on?: boolean, key?: DocsKeyState | null): SelectOption[] {
+  const keyHint =
+    key === undefined
+      ? "add or remove a Context7 API key for higher limits"
+      : key === null
+        ? `no key: anonymous, ${ANON_MONTHLY_LIMIT} lookups a month — add a free key for more`
+        : key.fromEnv
+          ? `using CONTEXT7_API_KEY (${key.tail}) — save a key here to use another`
+          : `key saved (${key.tail}) — change or remove`;
+  return [
+    { label: "on", hint: "let the agent look up current library docs on context7.com", current: on === true },
+    { label: "off", hint: "remove the tool and save its context", current: on === false },
+    { label: "key", hint: keyHint },
   ];
 }
 

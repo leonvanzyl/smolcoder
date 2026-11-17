@@ -547,6 +547,26 @@ test("transcript: user panel, reasoning, markdown, tool rows with a diff, comman
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("transcript: a docs lookup shows library and query; a one-line note shows under it, docs stay folded", async () => {
+  const t = makeTui({ cols: 100, rows: 30, props: { getStatus: () => STATUS } });
+  const tui = t.tui;
+  const p = tui.readInput();
+  t.keys("look it up\r");
+  await p;
+  tui.toolCall("lookup_docs", { query: "how to add  middleware", library: "next.js" });
+  t.flush();
+  assert.match(t.screen(), /Looking up next\.js docs/, "the footer names the library");
+  tui.toolResult("# Middleware\n\nCreate middleware.ts in the project root.", { ok: true, durationMs: 1200 });
+  tui.toolCall("lookup_docs", { query: "zod v4 refine" });
+  tui.toolResult("No documentation found for this query.", { ok: true, durationMs: 300 });
+  t.flush();
+  assert.match(t.screen(), /§ Docs next\.js · how to add middleware\s+✓ 1\.2s/);
+  assert.ok(!t.has("Create middleware.ts"), "documentation stays folded like a read");
+  assert.match(t.screen(), /§ Docs zod v4 refine\s+✓ 300ms/);
+  assert.ok(t.has("No documentation found for this query."), "a one-line note is shown");
+  t.close();
+});
+
 test("scrolling: pgup leaves the bottom, new output shows a new-messages pill, end returns", async () => {
   const t = makeTui({ cols: 80, rows: 20, props: { getStatus: () => STATUS } });
   const tui = t.tui;
